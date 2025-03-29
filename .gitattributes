@@ -1,0 +1,4 @@
+**/* !text !filter !merge !diff
+abi/* !text !filter !merge !diff
+public/data/* !text !filter !merge !diff
+*.json !text !filter !merge !diff
