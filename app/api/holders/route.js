@@ -1,299 +1,298 @@
-// app/api/holders/route.js
-import { createPublicClient, http } from 'viem';
-import { mainnet } from 'wagmi/chains';
 import { NextResponse } from 'next/server';
+import { Alchemy, Network } from 'alchemy-sdk';
+import { createPublicClient, http, parseAbi } from 'viem';
+import { mainnet } from 'viem/chains';
+import { contractAddresses, deploymentBlocks, contractTiers } from '../../contract-config';
 
-const NFT_CONTRACTS = {
-  'element280': '0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9',
-  'staxNFT': '0x74270Ca3a274B4dbf26be319A55188690CACE6E1',
+// Alchemy setup
+const settings = {
+  apiKey: process.env.ALCHEMY_API_KEY,
+  network: Network.ETH_MAINNET,
 };
+const alchemy = new Alchemy(settings);
 
-const TRANSFER_ABI = {
-  name: 'Transfer',
-  type: 'event',
-  inputs: [
-    { name: 'from', type: 'address', indexed: true },
-    { name: 'to', type: 'address', indexed: true },
-    { name: 'tokenId', type: 'uint256', indexed: true },
-  ],
-};
-const GET_NFT_TIER_ABI = {
-  name: 'getNftTier',
-  type: 'function',
-  stateMutability: 'view',
-  inputs: [{ name: 'tokenId', type: 'uint256' }],
-  outputs: [{ type: 'uint8' }],
-};
-
-const ALCHEMY_URL = `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_KEY}`;
-const CONTRACT_DEPLOY_BLOCKS = {
-  'element280': 20945304n,
-  'staxNFT': 21452667n,
-};
-
-const TIER_MULTIPLIERS = {
-  'element280': { 1: 10, 2: 12, 3: 100, 4: 120, 5: 1000, 6: 1200 },
-  'staxNFT': {
-    1: 1, 2: 1.2, 3: 1.4, 4: 2,
-    5: 10, 6: 12, 7: 14, 8: 20,
-    9: 100, 10: 120, 11: 140, 12: 200,
-  },
-};
-
-let cache = {
-  holders: { element280: [], staxNFT: [] },
-  tokenTiers: { element280: new Map(), staxNFT: new Map() },
-  lastBlock: { element280: CONTRACT_DEPLOY_BLOCKS.element280, staxNFT: CONTRACT_DEPLOY_BLOCKS.staxNFT },
-  lastUpdated: 0,
-  isFetching: false,
-};
-const CACHE_DURATION = 15 * 60 * 1000;
-
+// Viem client
 const client = createPublicClient({
   chain: mainnet,
-  transport: http(ALCHEMY_URL),
+  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`),
 });
 
-async function getLogs(contractKey, fromBlock, toBlock) {
-  return await client.getLogs({
-    address: NFT_CONTRACTS[contractKey],
-    event: TRANSFER_ABI,
-    fromBlock,
-    toBlock,
-  });
-}
+// ABI for all contracts
+const nftAbi = parseAbi([
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function getNftTier(uint256 tokenId) view returns (uint8)",
+]);
 
-async function fetchLogsInParallel(contractKey, start, end, chunkSize = 2000n) {
-  const chunks = [];
-  for (let i = start; i <= end; i += chunkSize) {
-    const to = i + chunkSize - 1n > end ? end : i + chunkSize - 1n;
-    chunks.push(getLogs(contractKey, i, to));
-    await new Promise((resolve) => setTimeout(resolve, 200));
+// In-memory cache
+let cache = {};
+let tokenCache = new Map();
+
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const contract = searchParams.get('contract');
+  const contractAddress = searchParams.get('address');
+  const wallet = searchParams.get('address');
+  const startBlock = contract === 'element280' ? undefined : (contract && deploymentBlocks[contract]);
+
+  if (!process.env.ALCHEMY_API_KEY) {
+    return NextResponse.json({ error: 'Server configuration error: Missing Alchemy API key' }, { status: 500 });
   }
-  return (await Promise.all(chunks)).flat();
-}
 
-async function batchGetTiers(contractKey, tokenIds) {
-  const calls = tokenIds.map((tokenId) => ({
-    address: NFT_CONTRACTS[contractKey],
-    abi: [GET_NFT_TIER_ABI],
-    functionName: 'getNftTier',
-    args: [tokenId],
-  }));
+  if (!alchemy.nft) {
+    return NextResponse.json({ error: 'Server error: Alchemy NFT service unavailable' }, { status: 500 });
+  }
+
+  if (contract && !contractAddresses[contract]) {
+    return NextResponse.json({ error: 'Invalid contract specified' }, { status: 400 });
+  }
+
   try {
-    const results = await client.multicall({ contracts: calls });
-    return results.map((result) => result.result ?? 0);
+    if (wallet && !contract) {
+      const holders = {
+        element280: await getHolderData(contractAddresses.element280, wallet, undefined, contractTiers.element280),
+        staxNFT: await getHolderData(contractAddresses.staxNFT, wallet, deploymentBlocks.staxNFT, contractTiers.staxNFT),
+        element369: await getHolderData(contractAddresses.element369, wallet, deploymentBlocks.element369, contractTiers.element369),
+      };
+      return NextResponse.json({ holders: [holders.element280, holders.staxNFT, holders.element369].filter(h => h) });
+    } else if (contract) {
+      const tiers = contractTiers[contract];
+      const effectiveAddress = contractAddress || contractAddresses[contract];
+      
+      const cacheKey = `${effectiveAddress}-${startBlock || 'latest'}`;
+      if (cache[cacheKey]) {
+        console.log(`[DEBUG] Cache hit for ${cacheKey}`);
+        return NextResponse.json({ holders: cache[cacheKey] });
+      }
+
+      const holders = await getAllHolders(effectiveAddress, startBlock, tiers, contract);
+      cache[cacheKey] = holders;
+      return NextResponse.json({ holders });
+    }
+    return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
   } catch (error) {
-    console.error(`Multicall failed for ${contractKey}:`, error);
-    return tokenIds.map(() => 0);
+    console.error(`API error for ${contract || 'wallet search'}:`, error.message);
+    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }
 
-async function fetchElementHolders(lastBlock) {
-  const latestBlock = await client.getBlockNumber();
-  if (lastBlock >= latestBlock) return cache.holders.element280;
-
-  const logs = await fetchLogsInParallel('element280', lastBlock + 1n, latestBlock);
-  const ownershipMap = new Map(cache.holders.element280.map((h) => [h.wallet, { ...h }]));
-  const newTokenIds = new Set();
-
-  for (const log of logs) {
-    const { from, to, tokenId } = log.args;
-    const tokenIdNum = Number(tokenId);
-
-    if (!cache.tokenTiers.element280.has(tokenIdNum)) newTokenIds.add(tokenIdNum);
-
-    if (to !== '0x0000000000000000000000000000000000000000') {
-      const current = ownershipMap.get(to) || { total: 0, tiers: {} };
-      current.total += 1;
-      ownershipMap.set(to, current);
-    }
-    if (from !== '0x0000000000000000000000000000000000000000') {
-      const current = ownershipMap.get(from) || { total: 0, tiers: {} };
-      current.total -= 1;
-      if (current.total <= 0) ownershipMap.delete(from);
-      else ownershipMap.set(from, current);
-    }
+async function batchMulticall(calls, batchSize = 100) {
+  const results = [];
+  for (let i = 0; i < calls.length; i += batchSize) {
+    const batch = calls.slice(i, i + batchSize);
+    const batchResults = await client.multicall({ contracts: batch });
+    results.push(...batchResults);
   }
-
-  if (newTokenIds.size > 0) {
-    const tokenIds = Array.from(newTokenIds);
-    const tiers = await batchGetTiers('element280', tokenIds);
-    tokenIds.forEach((id, idx) => cache.tokenTiers.element280.set(id, tiers[idx]));
-  }
-
-  for (const log of logs) {
-    const { from, to, tokenId } = log.args;
-    const tokenIdNum = Number(tokenId);
-    const tier = cache.tokenTiers.element280.get(tokenIdNum) ?? 0;
-
-    if (to !== '0x0000000000000000000000000000000000000000') {
-      const current = ownershipMap.get(to) || { total: 0, tiers: {} };
-      current.tiers[tier] = (current.tiers[tier] || 0) + 1;
-    }
-    if (from !== '0x0000000000000000000000000000000000000000' && ownershipMap.has(from)) {
-      const current = ownershipMap.get(from);
-      current.tiers[tier] = (current.tiers[tier] || 0) - 1;
-      if (current.tiers[tier] <= 0) delete current.tiers[tier];
-    }
-  }
-
-  return processHolders(ownershipMap, 'element280');
+  return results;
 }
 
-async function fetchStaxHolders() {
-  const totalSupply = Number(await client.readContract({
-    address: NFT_CONTRACTS.staxNFT,
-    abi: [{ name: 'totalSupply', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] }],
-    functionName: 'totalSupply',
-  }));
+async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
+  const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
+    block: startBlock,
+    withTokenBalances: true,
+  });
 
-  const maxTokenId = Math.max(totalSupply, 2000);
-  const tokenIds = Array.from({ length: maxTokenId }, (_, i) => i + 1);
-  const ownershipMap = new Map();
+  const burnAddress = '0x0000000000000000000000000000000000000000';
+  const filteredOwners = ownersResponse.owners.filter(
+    owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
+  );
+  console.log(`[DEBUG] Contract ${contractAddress} - Total owners: ${ownersResponse.owners.length}, Live owners: ${filteredOwners.length}`);
 
-  const ownerCalls = tokenIds.map((tokenId) => ({
-    address: NFT_CONTRACTS.staxNFT,
-    abi: [{ name: 'ownerOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'address' }] }],
+  // Aggregate tokens
+  const tokenOwnerMap = new Map();
+  let totalTokens = 0;
+  filteredOwners.forEach(owner => {
+    const wallet = owner.ownerAddress.toLowerCase();
+    owner.tokenBalances.forEach(tb => {
+      const tokenId = BigInt(tb.tokenId);
+      tokenOwnerMap.set(tokenId, wallet);
+      totalTokens++;
+    });
+  });
+
+  const allTokenIds = Array.from(tokenOwnerMap.keys());
+  console.log(`[DEBUG] Contract ${contractAddress} - Total tokens checked: ${totalTokens}`);
+
+  // Validate ownership with caching
+  const ownerOfCalls = allTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
     functionName: 'ownerOf',
     args: [tokenId],
   }));
-  const tierCalls = tokenIds.map((tokenId) => ({
-    address: NFT_CONTRACTS.staxNFT,
-    abi: [GET_NFT_TIER_ABI],
+
+  const ownerOfResults = await batchMulticall(ownerOfCalls);
+  const validTokenIds = [];
+  allTokenIds.forEach((tokenId, i) => {
+    const owner = ownerOfResults[i].status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const cacheKey = `${contractAddress}-${tokenId}-owner`;
+    if (owner && owner !== burnAddress) {
+      validTokenIds.push(tokenId);
+      tokenCache.set(cacheKey, owner);
+    } else {
+      console.log(`[DEBUG] Token ${tokenId} invalid - owner: ${owner || 'reverted'}`);
+      tokenCache.set(cacheKey, null);
+    }
+  });
+
+  const totalRedeemed = totalTokens - validTokenIds.length;
+  console.log(`[DEBUG] Contract ${contractAddress} - Valid tokens: ${validTokenIds.length}`);
+
+  if (validTokenIds.length === 0) {
+    console.log(`[DEBUG] No valid tokens found for contract ${contractAddress}`);
+    return [];
+  }
+
+  // Fetch tiers with caching
+  const tierCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
     functionName: 'getNftTier',
     args: [tokenId],
   }));
-  const burnCalls = tokenIds.map((tokenId) => ({
-    address: NFT_CONTRACTS.staxNFT,
-    abi: [{ name: 'getBurnCycle', type: 'function', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ type: 'uint64' }] }],
-    functionName: 'getBurnCycle',
+
+  const tierResults = await batchMulticall(tierCalls);
+  const maxTier = Math.max(...Object.keys(tiers).map(Number));
+  const holdersMap = new Map();
+  let totalNftsHeld = 0;
+
+  tierResults.forEach((result, i) => {
+    if (result.status === 'success') {
+      const tokenId = validTokenIds[i];
+      const wallet = tokenOwnerMap.get(tokenId);
+      const tier = Number(result.result);
+      const cacheKey = `${contractAddress}-${tokenId}-tier`;
+      tokenCache.set(cacheKey, tier);
+
+      if (tier >= 1 && tier <= maxTier) {
+        if (!holdersMap.has(wallet)) {
+          holdersMap.set(wallet, {
+            wallet,
+            total: 0,
+            multiplierSum: 0,
+            tiers: Array(maxTier + 1).fill(0),
+          });
+        }
+
+        const holder = holdersMap.get(wallet);
+        holder.total += 1;
+        holder.multiplierSum += tiers[tier]?.multiplier || 0;
+        holder.tiers[tier] += 1;
+        totalNftsHeld += 1;
+      } else {
+        console.log(`[DEBUG] Invalid tier ${tier} for token ${tokenId} on ${contractAddress}`);
+      }
+    } else {
+      console.log(`[DEBUG] Failed to fetch tier for token ${validTokenIds[i]} on ${contractAddress}`);
+    }
+  });
+
+  const holders = Array.from(holdersMap.values());
+  const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+  holders.forEach(holder => {
+    holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+    holder.rank = 0;
+    // Adjust display multiplier for Element 280
+    holder.displayMultiplierSum = contractName === 'element280' ? holder.multiplierSum / 10 : holder.multiplierSum;
+  });
+
+  console.log(`[DEBUG] Contract ${contractAddress} - Total live NFTs held: ${totalNftsHeld}`);
+  console.log(`[DEBUG] Contract ${contractAddress} - Total redeemed NFTs: ${totalRedeemed}`);
+  console.log(`[DEBUG] Contract ${contractAddress} - Total MultiplierSum: ${totalMultiplierSum}`);
+
+  // Sort by multiplierSum, then total
+  const sortFn = (a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total;
+  holders.sort(sortFn);
+  holders.forEach((holder, index) => (holder.rank = index + 1));
+
+  console.log(`[DEBUG] Contract ${contractAddress} - Top 10:`, holders.slice(0, 10).map(h => ({
+    wallet: h.wallet.slice(0, 6) + '...',
+    rank: h.rank,
+    total: h.total,
+    multiplierSum: h.multiplierSum,
+    displayMultiplierSum: h.displayMultiplierSum,
+    percentage: h.percentage.toFixed(2),
+  })));
+
+  return holders;
+}
+
+async function getHolderData(contractAddress, wallet, startBlock, tiers) {
+  const nfts = await alchemy.nft.getNftsForOwner(wallet, {
+    contractAddresses: [contractAddress],
+    block: startBlock,
+  });
+
+  if (nfts.totalCount === 0) return null;
+
+  const walletLower = wallet.toLowerCase();
+  const tokenIds = nfts.ownedNfts.map(nft => BigInt(nft.tokenId));
+  console.log(`[DEBUG] Wallet ${walletLower} on ${contractAddress} - Initial tokens from Alchemy: ${tokenIds.length}`);
+
+  const ownerOfCalls = tokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
+    functionName: 'ownerOf',
     args: [tokenId],
   }));
 
-  const [owners, tiers, burns] = await Promise.all([
-    client.multicall({ contracts: ownerCalls }),
-    client.multicall({ contracts: tierCalls }),
-    client.multicall({ contracts: burnCalls }),
-  ]);
+  const ownerOfResults = await batchMulticall(ownerOfCalls);
+  const validTokenIds = tokenIds.filter((tokenId, i) => {
+    const owner = ownerOfResults[i].status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const cacheKey = `${contractAddress}-${tokenId}-owner`;
+    tokenCache.set(cacheKey, owner);
+    return owner === walletLower;
+  });
 
-  for (let i = 0; i < maxTokenId; i++) {
-    const owner = owners[i].result;
-    const tier = Number(tiers[i].result ?? 0);
-    const burnCycle = Number(burns[i].result ?? 0);
-    const ownerLower = owner ? owner.toLowerCase() : null;
-    if (ownerLower && ownerLower !== '0x0000000000000000000000000000000000000000' && burnCycle === 0) {
-      const current = ownershipMap.get(ownerLower) || { total: 0, tiers: {} };
-      current.total += 1;
-      current.tiers[tier] = (current.tiers[tier] || 0) + 1;
-      ownershipMap.set(ownerLower, current);
-    }
+  if (validTokenIds.length === 0) {
+    console.log(`[DEBUG] Wallet ${walletLower} on ${contractAddress} - No valid tokens after ownerOf check`);
+    return null;
   }
 
-  return processHolders(ownershipMap, 'staxNFT');
-}
-
-function processHolders(ownershipMap, contractKey) {
-  const holders = Array.from(ownershipMap.entries())
-    .filter(([, data]) => data.total > 0)
-    .map(([wallet, data]) => {
-      const multiplierSum = Object.entries(data.tiers).reduce((sum, [tier, count]) => {
-        return sum + (TIER_MULTIPLIERS[contractKey][tier] || 0) * count;
-      }, 0);
-      return { wallet, total: data.total, tiers: data.tiers, multiplierSum };
-    })
-    .sort((a, b) => b.multiplierSum - a.multiplierSum);
-
-  const totalMultiplierSum = holders.reduce((sum, holder) => sum + holder.multiplierSum, 0);
-  return holders.map((holder, index) => ({
-    ...holder,
-    rank: index + 1,
-    percentage: totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0,
+  const tierCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
+    functionName: 'getNftTier',
+    args: [tokenId],
   }));
-}
 
-async function fetchHolders(contractKey, lastBlock) {
-  if (contractKey === 'element280') {
-    return fetchElementHolders(lastBlock);
-  } else if (contractKey === 'staxNFT') {
-    const holders = await fetchStaxHolders();
-    cache.holders.staxNFT = holders;
-    return holders;
-  }
-  throw new Error('Invalid contract key');
-}
+  const tierResults = await batchMulticall(tierCalls);
+  const maxTier = Math.max(...Object.keys(tiers).map(Number));
+  const tiersArray = Array(maxTier + 1).fill(0);
+  let total = 0;
+  let multiplierSum = 0;
 
-export async function GET(request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const address = searchParams.get('address')?.toLowerCase();
-    const contract = searchParams.get('contract') || 'element280';
-
-    if (!NFT_CONTRACTS[contract]) {
-      return NextResponse.json({ error: 'Invalid contract specified' }, { status: 400 });
-    }
-
-    const now = Date.now();
-    if (cache.holders[contract].length > 0 && now - cache.lastUpdated < CACHE_DURATION && !cache.isFetching) {
-      if (address) {
-        const staxHolder = cache.holders.staxNFT.find((h) => h.wallet.toLowerCase() === address);
-        const elementHolder = cache.holders.element280.find((h) => h.wallet.toLowerCase() === address);
-        return NextResponse.json({
-          holders: {
-            staxNFT: staxHolder || null,
-            element280: elementHolder || null,
-          },
-          cached: true,
-          timestamp: cache.lastUpdated,
-        });
+  tierResults.forEach((result, i) => {
+    if (result.status === 'success') {
+      const tier = Number(result.result);
+      const tokenId = validTokenIds[i];
+      const cacheKey = `${contractAddress}-${tokenId}-tier`;
+      tokenCache.set(cacheKey, tier);
+      if (tier >= 1 && tier <= maxTier) {
+        tiersArray[tier] += 1;
+        total += 1;
+        multiplierSum += tiers[tier]?.multiplier || 0;
+      } else {
+        console.log(`[DEBUG] Invalid tier ${tier} for token ${tokenId} on ${contractAddress} (wallet ${walletLower})`);
       }
-      return NextResponse.json({ holders: cache.holders[contract], contract, cached: true, timestamp: cache.lastUpdated });
     }
+  });
 
-    if (cache.isFetching) {
-      while (cache.isFetching) await new Promise((resolve) => setTimeout(resolve, 100));
-      if (address) {
-        const staxHolder = cache.holders.staxNFT.find((h) => h.wallet.toLowerCase() === address);
-        const elementHolder = cache.holders.element280.find((h) => h.wallet.toLowerCase() === address);
-        return NextResponse.json({
-          holders: {
-            staxNFT: staxHolder || null,
-            element280: elementHolder || null,
-          },
-          cached: true,
-          timestamp: cache.lastUpdated,
-        });
-      }
-      return NextResponse.json({ holders: cache.holders[contract], contract, cached: true, timestamp: cache.lastUpdated });
-    }
+  const tiersData = { tiers: tiersArray, total, multiplierSum };
+  const contractName = Object.keys(contractAddresses).find(key => contractAddresses[key] === contractAddress);
+  const allHolders = await getAllHolders(contractAddress, startBlock, tiers, contractName);
+  const totalMultiplierSum = allHolders.reduce((sum, h) => sum + h.multiplierSum, 0);
+  const percentage = totalMultiplierSum > 0 ? (tiersData.multiplierSum / totalMultiplierSum) * 100 : 0;
 
-    cache.isFetching = true;
-    const [staxHolders, elementHolders] = await Promise.all([
-      fetchHolders('staxNFT', cache.lastBlock.staxNFT),
-      fetchHolders('element280', cache.lastBlock.element280),
-    ]);
-    cache.holders.staxNFT = staxHolders;
-    cache.holders.element280 = elementHolders;
-    cache.lastBlock.element280 = await client.getBlockNumber();
-    cache.lastUpdated = Date.now();
-    cache.isFetching = false;
-
-    if (address) {
-      const staxHolder = staxHolders.find((h) => h.wallet.toLowerCase() === address);
-      const elementHolder = elementHolders.find((h) => h.wallet.toLowerCase() === address);
-      return NextResponse.json({
-        holders: {
-          staxNFT: staxHolder || null,
-          element280: elementHolder || null,
-        },
-        cached: false,
-        timestamp: cache.lastUpdated,
-      });
-    }
-    return NextResponse.json({ holders: cache.holders[contract], contract, cached: false, timestamp: cache.lastUpdated });
-  } catch (error) {
-    console.error('API Error:', error);
-    cache.isFetching = false;
-    return NextResponse.json({ error: 'Failed to fetch holders' }, { status: 500 });
-  }
+  const holder = allHolders.find(h => h.wallet === walletLower);
+  const displayMultiplierSum = contractName === 'element280' ? multiplierSum / 10 : multiplierSum;
+  console.log(`[DEBUG] Wallet ${walletLower} on ${contractAddress} - Final: Total=${total}, Multiplier=${multiplierSum}, DisplayMultiplier=${displayMultiplierSum}, Tiers=${JSON.stringify(tiersArray)}`);
+  return {
+    wallet: walletLower,
+    rank: holder ? holder.rank : allHolders.length + 1,
+    total: tiersData.total,
+    multiplierSum: tiersData.multiplierSum,
+    displayMultiplierSum,
+    percentage,
+    tiers: tiersData.tiers,
+  };
 }

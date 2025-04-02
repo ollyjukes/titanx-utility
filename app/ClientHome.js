@@ -1,50 +1,113 @@
-// app/ClientHome.js
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { contractAddresses, contractTiers } from './contract-config';
 
 export default function ClientHomeContent() {
-  const [holders, setHolders] = useState({ element280: [], staxNFT: [] });
+  const [holders, setHolders] = useState({ element280: [], staxNFT: [], element369: [] });
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [searchAddress, setSearchAddress] = useState('');
   const [searchResult, setSearchResult] = useState(null);
-  const [selectedContract, setSelectedContract] = useState('element280');
+  const [activeTab, setActiveTab] = useState('element280');
+  const tableBodyRef = useRef(null);
+  const [loadProgress, setLoadProgress] = useState(0);
+  const highlightedRowRef = useRef(null);
+
+  console.log('ClientHome.js loaded with contract addresses:', contractAddresses);
 
   const fetchAllHolders = async (contract) => {
-    setLoading(true);
-    setStatus(`Fetching holders for ${contract === 'element280' ? 'Element 280' : 'StaxNFT'}...`);
     try {
-      const response = await fetch(`/api/holders?contract=${contract}`);
+      const url = `/api/holders?contract=${contract}&address=${contractAddresses[contract]}`;
+      console.log(`Fetching from: ${url}`);
+      const response = await fetch(url);
       const data = await response.json();
+      console.log(`Table Response for ${contract}:`, data);
       if (data.error) throw new Error(data.error);
-      setHolders((prev) => ({ ...prev, [contract]: data.holders }));
-      setStatus(`✅ Done — ${data.holders.length} holders found for ${contract === 'element280' ? 'Element 280' : 'StaxNFT'}. ${data.cached ? '(From cache)' : ''}`);
+      return data.holders;
     } catch (error) {
       console.error(`Fetch error for ${contract}:`, error);
-      setStatus(`❌ Error fetching holders for ${contract === 'element280' ? 'Element 280' : 'StaxNFT'}`);
-    } finally {
-      setLoading(false);
+      setStatus(`❌ Error fetching holders for ${contract === 'element280' ? 'Element 280' : contract === 'staxNFT' ? 'StaxNFT' : 'Element 369'}`);
+      return [];
     }
   };
 
-  const searchHolder = async () => {
+  const loadAllData = async () => {
+    setLoading(true);
+    setStatus('Fetching all holders data...');
+    setLoadProgress(0);
+
+    const contracts = ['element280', 'staxNFT', 'element369'];
+    const totalSteps = contracts.length * 100;
+    let currentStep = 0;
+
+    const results = await Promise.all(
+      contracts.map(async (contract) => {
+        const holdersData = await fetchAllHolders(contract);
+        currentStep += 100;
+        setLoadProgress((currentStep / totalSteps) * 100);
+        return [contract, holdersData];
+      })
+    );
+
+    const newHolders = Object.fromEntries(results);
+    setHolders(newHolders);
+    setStatus(`✅ Done — Loaded data: Element 280 (${newHolders.element280.length}), StaxNFT (${newHolders.staxNFT.length}), Element 369 (${newHolders.element369.length})`);
+    setLoading(false);
+    setLoadProgress(100);
+  };
+
+  const handleSearch = async () => {
     if (!searchAddress || searchAddress.length !== 42 || !searchAddress.startsWith('0x')) {
+      setStatus('Please enter a valid Ethereum address');
       setSearchResult(null);
-      setStatus('Please enter a valid Ethereum address (0x + 40 characters)');
       return;
     }
     setLoading(true);
-    setStatus('Searching...');
+    setStatus('Searching for wallet...');
     try {
-      const response = await fetch(`/api/holders?address=${searchAddress.toLowerCase()}`);
+      const response = await fetch(`/api/holders?address=${searchAddress}`);
       const data = await response.json();
-      console.log('Search response:', data);
+      console.log('Wallet Search Response:', data);
       if (data.error) throw new Error(data.error);
-      setSearchResult(data.holders ? { staxNFT: data.holders.staxNFT, element280: data.holders.element280 } : null);
-      setStatus(data.holders && (data.holders.staxNFT || data.holders.element280) ? '✅ Found holder' : '❌ Address not found in either collection');
+
+      const searchData = data.holders.reduce((acc, holder) => {
+        const contractMap = {
+          7: 'element280',
+          3: 'element369',
+          13: 'staxNFT',
+        };
+        const contract = contractMap[holder.tiers.length] || 'unknown';
+        acc[contract] = holder;
+        return acc;
+      }, {});
+      console.log('Transformed Search Data:', searchData);
+
+      setSearchResult(searchData);
+
+      // Highlight and scroll to the row in the main table
+      const matchedHolder = holders[activeTab].find(
+        (h) => h.wallet.toLowerCase() === searchAddress.toLowerCase()
+      );
+      if (matchedHolder && tableBodyRef.current) {
+        const rows = tableBodyRef.current.getElementsByTagName('tr');
+        for (let row of rows) {
+          const walletCell = row.cells[1].querySelector('a');
+          if (walletCell && walletCell.href.includes(searchAddress.toLowerCase())) {
+            if (highlightedRowRef.current) {
+              highlightedRowRef.current.classList.remove('highlight-row');
+            }
+            row.classList.add('highlight-row');
+            highlightedRowRef.current = row;
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            break;
+          }
+        }
+      }
+
+      setStatus(`✅ Found data for ${searchAddress}`);
     } catch (error) {
       console.error('Search error:', error);
-      setStatus('❌ Error searching address');
+      setStatus(`❌ Error searching for ${searchAddress}: ${error.message}`);
       setSearchResult(null);
     } finally {
       setLoading(false);
@@ -52,288 +115,140 @@ export default function ClientHomeContent() {
   };
 
   useEffect(() => {
-    fetchAllHolders('element280');
-    fetchAllHolders('staxNFT');
-  }, []);
+    loadAllData();
+  }, []); // Load all data once on mount
 
-  const renderTable = (holdersData, title, isStax = false) => (
-    <div className="mt-6">
-      <h2 className="text-2xl font-semibold text-center mb-4 text-white">{title}: {holdersData.length}</h2>
-      {loading ? (
-        <p className="text-center text-gray-400 mt-4">Loading...</p>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-black">
-          <table className="min-w-full table-auto border-collapse bg-black/30 text-white border border-black" style={{ border: '1px solid black' }}>
-            <thead className="bg-gray-800 text-purple-300 sticky top-0 z-10">
-              <tr>
-                <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rank</th>
-                <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Wallet</th>
-                <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Total NFTs</th>
-                <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Multiplier Sum (%)</th>
-                {isStax ? (
-                  <>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary LFG</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary Super</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare LFG</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare Super</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common LFG</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common Super</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {holdersData.map((holder) => (
-                <tr key={holder.wallet} className="border border-black hover:bg-gray-700/30 transition-colors" style={{ border: '1px solid black' }}>
-                  <td className="px-6 py-4 font-semibold text-yellow-400 border border-black" style={{ border: '1px solid black' }}>{holder.rank}</td>
-                  <td className="px-6 py-4 font-mono border border-black" style={{ border: '1px solid black' }}>
-                    <a
-                      href={`https://etherscan.io/address/${holder.wallet}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline text-blue-400 hover:text-blue-300"
-                    >
-                      {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
-                    </a>
-                  </td>
-                  <td className="px-6 py-4 font-semibold text-fuchsia-400 border border-black" style={{ border: '1px solid black' }}>{holder.total}</td>
-                  <td className="px-6 py-4 font-semibold text-cyan-400 border border-black" style={{ border: '1px solid black' }}>
-                    {holder.multiplierSum} ({holder.percentage.toFixed(2)}%)
-                  </td>
-                  {isStax ? (
-                    <>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[12] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[11] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[10] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[9] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[8] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[7] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[6] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[5] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[4] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[3] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[2] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[1] || 0}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[6] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[5] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[4] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[3] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[2] || 0}</td>
-                      <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{holder.tiers[1] || 0}</td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+  const renderTable = (holdersData, contract) => {
+    if (!holdersData || holdersData.length === 0) {
+      return <p className="text-center text-gray-500">No holders found.</p>;
+    }
 
-  const renderSearchResults = () => {
-    if (!searchResult) return null;
-    const { staxNFT, element280 } = searchResult;
+    const tiers = contractTiers[contract];
+    if (!tiers) {
+      console.error(`No tiers defined for contract: ${contract}`);
+      return <p className="text-center text-red-500">Error: Contract tiers not found.</p>;
+    }
+    const maxTier = Math.max(...Object.keys(tiers).map(Number));
+    const sortedHolders = [...holdersData].sort((a, b) => a.rank - b.rank);
 
     return (
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold text-white text-center mb-4">Search Results</h3>
-        {staxNFT ? (
-          <div className="mb-6">
-            <h4 className="text-md font-semibold text-white text-center mb-2">StaxNFT</h4>
-            <div className="overflow-x-auto rounded-xl border border-black">
-              <table className="min-w-full table-auto border-collapse bg-gray-700 text-white border border-black" style={{ border: '1px solid black' }}>
-                <thead className="bg-gray-800 text-purple-300">
-                  <tr>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rank</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Wallet</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Total NFTs</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Multiplier Sum (%)</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary LFG</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary Super</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare LFG</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare Super</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common LFG</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common Super</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border border-black hover:bg-gray-600/30 transition-colors" style={{ border: '1px solid black' }}>
-                    <td className="px-6 py-4 font-semibold text-yellow-400 border border-black" style={{ border: '1px solid black' }}>{staxNFT.rank}</td>
-                    <td className="px-6 py-4 font-mono border border-black" style={{ border: '1px solid black' }}>
-                      <a
-                        href={`https://etherscan.io/address/${staxNFT.wallet}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline text-blue-400 hover:text-blue-300"
-                      >
-                        {staxNFT.wallet.slice(0, 6)}...{staxNFT.wallet.slice(-4)}
-                      </a>
-                    </td>
-                    <td className="px-6 py-4 font-semibold text-fuchsia-400 border border-black" style={{ border: '1px solid black' }}>{staxNFT.total}</td>
-                    <td className="px-6 py-4 font-semibold text-cyan-400 border border-black" style={{ border: '1px solid black' }}>
-                      {staxNFT.multiplierSum} ({staxNFT.percentage.toFixed(2)}%)
-                    </td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[12] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[11] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[10] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[9] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[8] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[7] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[6] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[5] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[4] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[3] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[2] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{staxNFT.tiers[1] || 0}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <p className="text-center text-gray-400 mb-6">No StaxNFTs found for this address.</p>
-        )}
-        {element280 ? (
-          <div className="mb-6">
-            <h4 className="text-md font-semibold text-white text-center mb-2">Element 280</h4>
-            <div className="overflow-x-auto rounded-xl border border-black">
-              <table className="min-w-full table-auto border-collapse bg-gray-700 text-white border border-black" style={{ border: '1px solid black' }}>
-                <thead className="bg-gray-800 text-purple-300">
-                  <tr>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rank</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Wallet</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Total NFTs</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Multiplier Sum (%)</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Legendary</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Rare</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common Amped</th>
-                    <th className="px-6 py-4 text-left font-semibold border border-black" style={{ border: '1px solid black' }}>Common</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border border-black hover:bg-gray-600/30 transition-colors" style={{ border: '1px solid black' }}>
-                    <td className="px-6 py-4 font-semibold text-yellow-400 border border-black" style={{ border: '1px solid black' }}>{element280.rank}</td>
-                    <td className="px-6 py-4 font-mono border border-black" style={{ border: '1px solid black' }}>
-                      <a
-                        href={`https://etherscan.io/address/${element280.wallet}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline text-blue-400 hover:text-blue-300"
-                      >
-                        {element280.wallet.slice(0, 6)}...{element280.wallet.slice(-4)}
-                      </a>
-                    </td>
-                    <td className="px-6 py-4 font-semibold text-fuchsia-400 border border-black" style={{ border: '1px solid black' }}>{element280.total}</td>
-                    <td className="px-6 py-4 font-semibold text-cyan-400 border border-black" style={{ border: '1px solid black' }}>
-                      {element280.multiplierSum} ({element280.percentage.toFixed(2)}%)
-                    </td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{element280.tiers[6] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{element280.tiers[5] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{element280.tiers[4] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{element280.tiers[3] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{element280.tiers[2] || 0}</td>
-                    <td className="px-6 py-4 border border-black" style={{ border: '1px solid black' }}>{element280.tiers[1] || 0}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <p className="text-center text-gray-400 mb-6">No Element 280 NFTs found for this address.</p>
-        )}
+      <div className="overflow-x-auto min-h-[400px] w-full">
+        <table className="w-full bg-white shadow-md rounded-lg table-fixed">
+          <thead>
+            <tr className="bg-blue-600 text-white">
+              <th className="py-3 px-6 text-left font-semibold w-[80px]">Rank</th>
+              <th className="py-3 px-6 text-left font-semibold w-[200px]">Wallet</th>
+              <th className="py-3 px-6 text-left font-semibold w-[120px]">Total NFTs</th>
+              <th className="py-3 px-6 text-left font-semibold w-[120px]">Reward %</th>
+              {Array.from({ length: maxTier }, (_, i) => maxTier - i).map((tier) => (
+                <th key={tier} className="py-3 px-6 text-left font-semibold w-[100px]">
+                  {tiers[tier].name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody ref={tableBodyRef}>
+            {sortedHolders.map((holder, index) => (
+              <tr key={holder.wallet} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                <td className="py-3 px-6 border-b border-gray-200">{holder.rank}</td>
+                <td className="py-3 px-6 border-b border-gray-200">
+                  <a
+                    href={`https://etherscan.io/address/${holder.wallet}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
+                  </a>
+                </td>
+                <td className="py-3 px-6 border-b border-gray-200">{holder.total}</td>
+                <td className="py-3 px-6 border-b border-gray-200">{holder.percentage.toFixed(2)}%</td>
+                {holder.tiers.slice(1, maxTier + 1).reverse().map((count, i) => (
+                  <td key={maxTier - i} className="py-3 px-6 border-b border-gray-200">
+                    {count}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   };
 
   return (
-    <div className="w-full max-w-7xl bg-gradient-to-br from-gray-900 to-gray-800 rounded-3xl shadow-2xl p-6 sm:p-8 md:p-10 border border-purple-800 animate-fade-in">
-      <div className="text-center mb-4 sm:mb-6 md:mb-8">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold bg-gradient-to-r from-fuchsia-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-xl flex justify-center items-center gap-2">
-          NFT Holders
-        </h1>
-        <p className="text-gray-400 mt-2 sm:mt-3 text-base sm:text-lg">
-          Full historical list of NFT holders by tier — powered by Ethereum & Alchemy
-        </p>
+    <div className="p-6 max-w-7xl mx-auto bg-gray-100 rounded-lg shadow-lg min-h-screen w-full">
+      <h1 className="text-3xl font-bold text-gray-800 mb-6 text-center">NFT Holders Dashboard</h1>
+
+      <div className="mb-6 flex gap-4 border-b border-gray-300">
+        {['element280', 'staxNFT', 'element369'].map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            disabled={loading}
+            className={`py-2 px-4 font-medium text-gray-700 border-b-2 transition-colors ${
+              activeTab === tab ? 'border-blue-600 text-blue-600' : 'border-transparent hover:text-blue-500'
+            } ${loading ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+          >
+            {tab === 'element280' ? 'Element 280' : tab === 'staxNFT' ? 'Stax NFT' : 'Element 369'}
+          </button>
+        ))}
       </div>
 
-      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6">
-        <div className="flex gap-4 w-full sm:w-auto">
-          <input
-            type="text"
-            value={searchAddress}
-            onChange={(e) => setSearchAddress(e.target.value)}
-            placeholder="Enter wallet address (0x...)"
-            className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-xl border border-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500"
-          />
-          <button
-            onClick={searchHolder}
-            disabled={loading}
-            className="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition-all disabled:opacity-50"
-          >
-            {loading ? 'Searching...' : 'Search'}
-          </button>
-          <button
-            onClick={() => fetchAllHolders(selectedContract)}
-            disabled={loading}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-all disabled:opacity-50"
-          >
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
+      <div className="mb-6 flex gap-4">
+        <input
+          type="text"
+          value={searchAddress}
+          onChange={(e) => setSearchAddress(e.target.value)}
+          placeholder="Enter wallet address (0x...)"
+          className="p-2 w-80 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-200 disabled:cursor-not-allowed"
+          disabled={loading}
+        />
+        <button
+          onClick={handleSearch}
+          disabled={loading}
+          className="p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+        >
+          Search
+        </button>
+      </div>
+
+      {loading && (
+        <div className="mb-6">
+          <progress value={loadProgress} max="100" className="w-full h-2 rounded-full bg-gray-200" />
+          <p className={`mt-2 text-sm ${status.includes('Error') ? 'text-red-600' : 'text-green-600'}`}>
+            {status}
+          </p>
         </div>
-      </div>
+      )}
 
-      <div className="flex justify-center gap-4 mb-6">
-        <button
-          onClick={() => setSelectedContract('element280')}
-          className={`px-4 py-2 rounded-xl font-semibold ${selectedContract === 'element280' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'} hover:bg-purple-500 transition-all`}
-        >
-          Element 280
-        </button>
-        <button
-          onClick={() => setSelectedContract('staxNFT')}
-          className={`px-4 py-2 rounded-xl font-semibold ${selectedContract === 'staxNFT' ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-300'} hover:bg-purple-500 transition-all`}
-        >
-          StaxNFT
-        </button>
-      </div>
+      {!loading && status && (
+        <p className={`mb-6 text-sm ${status.includes('Error') ? 'text-red-600' : 'text-green-600'}`}>
+          {status}
+        </p>
+      )}
 
-      <div className="text-center text-sm mb-6 text-gray-400 italic">
-        {status}
-      </div>
+      <h2 className="text-2xl font-semibold text-gray-700 mb-4">
+        Holders for {activeTab === 'element280' ? 'Element 280' : activeTab === 'staxNFT' ? 'Stax NFT' : 'Element 369'}
+      </h2>
+      {renderTable(holders[activeTab], activeTab)}
 
-      {renderSearchResults()}
-
-      {renderTable(
-        holders[selectedContract],
-        selectedContract === 'element280' ? 'Element 280 Holders' : 'StaxNFT Holders',
-        selectedContract === 'staxNFT'
+      {searchResult && Object.keys(searchResult).length > 0 && (
+        <div className="mt-10">
+          <h2 className="text-2xl font-semibold text-gray-700 mb-4">
+            Search Results for {searchAddress.slice(0, 6)}...{searchAddress.slice(-4)}
+          </h2>
+          {Object.entries(searchResult).map(([contract, data]) => (
+            data && contract !== 'unknown' && (
+              <div key={contract} className="mb-6">
+                <h3 className="text-xl font-medium text-gray-600 mb-2">
+                  {contract === 'element280' ? 'Element 280' : contract === 'staxNFT' ? 'Stax NFT' : 'Element 369'}
+                </h3>
+                {renderTable([data], contract)}
+              </div>
+            )
+          ))}
+        </div>
       )}
     </div>
   );
