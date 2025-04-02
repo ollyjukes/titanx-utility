@@ -1,9 +1,8 @@
-/* app/globals.css */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Optional: Add custom styles */
 .animate-fade-in {
   animation: fadeIn 0.5s ease-in;
 }
@@ -13,4 +12,7 @@
   to { opacity: 1; }
 }
 
-/* Optional: Add custom styles */
+.highlight-row {
+  background-color: #fef3c7; /* Light yellow highlight */
+  transition: background-color 0.3s ease;
+}
