@@ -13,22 +13,47 @@ export default function ClientHome() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const fetchAllHolders = useCallback(async (contract) => {
-    const allHolders = [];
+    const holdersMap = new Map(); // Aggregate unique wallets
     let page = 0;
     let totalPages = 1;
 
     try {
       do {
-        const url = `/api/holders?contract=${contract}&address=${contractAddresses[contract]}&page=${page}&pageSize=500`; // Changed to 500
+        const url = `/api/holders?contract=${contract}&address=${contractAddresses[contract]}&page=${page}&pageSize=500`;
         console.log(`[CLIENT_DEBUG] Fetching: ${url}`);
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
         if (data.error) throw new Error(data.error);
-        allHolders.push(...data.holders);
+
+        // Merge holders from this page
+        data.holders.forEach((holder) => {
+          if (holdersMap.has(holder.wallet)) {
+            const existing = holdersMap.get(holder.wallet);
+            existing.total += holder.total;
+            existing.multiplierSum += holder.multiplierSum;
+            holder.tiers.forEach((count, i) => (existing.tiers[i] += count));
+          } else {
+            holdersMap.set(holder.wallet, { ...holder });
+          }
+        });
+
+        console.log(`[CLIENT_DEBUG] ${contract} page ${page}: ${data.holders.length} holders, total unique holders: ${holdersMap.size}`);
         totalPages = data.totalPages;
         page++;
       } while (page < totalPages);
+
+      const allHolders = Array.from(holdersMap.values());
+      // Recompute ranks and percentages
+      const totalMultiplierSum = allHolders.reduce((sum, h) => sum + h.multiplierSum, 0);
+      allHolders.forEach((holder) => {
+        holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+        holder.displayMultiplierSum = contract === "element280" ? holder.multiplierSum / 10 : holder.multiplierSum;
+      });
+      allHolders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+      allHolders.forEach((holder, index) => (holder.rank = index + 1));
+
+      console.log(`[CLIENT_DEBUG] ${contract} final holders: ${allHolders.length}`);
       return allHolders;
     } catch (error) {
       setStatus(`❌ Error fetching holders for ${contract === "element280" ? "Element 280" : contract === "staxNFT" ? "StaxNFT" : "Element 369"}: ${error.message}`);
