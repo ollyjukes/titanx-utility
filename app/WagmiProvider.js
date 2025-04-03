@@ -1,3 +1,6 @@
+// file app/WagmiProvider.js
+
+
 'use client';
 import { WagmiProvider as WagmiProviderCore, createConfig } from 'wagmi';
 import { mainnet } from 'wagmi/chains';

@@ -1,4 +1,4 @@
-
+/* app/layout.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -12,7 +12,9 @@
   to { opacity: 1; }
 }
 
-.highlight-row {
-  background-color: #fef3c7; /* Light yellow highlight */
+.highlight-row-bold {
+  background-color: #fef08a; /* Bold yellow */
+  font-weight: 600;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   transition: background-color 0.3s ease;
 }

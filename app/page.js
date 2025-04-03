@@ -1,3 +1,5 @@
+// file app/page.js
+
 import ClientWrapper from './ClientWrapper';
 
 console.log('Page: Server-side execution');
