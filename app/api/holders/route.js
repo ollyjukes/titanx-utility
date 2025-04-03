@@ -35,8 +35,10 @@ export async function GET(request) {
   const contractAddress = searchParams.get('address');
   const wallet = searchParams.get('address');
   const startBlock = contract === 'element280' ? undefined : (contract && deploymentBlocks[contract]);
+  const page = parseInt(searchParams.get('page') || '0', 10);
+  const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10); // Default 1000 tokens per page
 
-  log(`Request: contract=${contract}, address=${contractAddress || wallet}, startBlock=${startBlock || 'latest'}`);
+  log(`Request: contract=${contract}, address=${contractAddress || wallet}, startBlock=${startBlock || 'latest'}, page=${page}, pageSize=${pageSize}`);
   if (!process.env.ALCHEMY_API_KEY) {
     log("Missing ALCHEMY_API_KEY");
     return NextResponse.json({ error: 'Server configuration error: Missing Alchemy API key' }, { status: 500 });
@@ -66,17 +68,17 @@ export async function GET(request) {
       const tiers = contractTiers[contract];
       const effectiveAddress = contractAddress || contractAddresses[contract];
       
-      const cacheKey = `${effectiveAddress}-${startBlock || 'latest'}`;
+      const cacheKey = `${effectiveAddress}-${startBlock || 'latest'}-${page}-${pageSize}`;
       if (cache[cacheKey]) {
-        log(`Cache hit for ${cacheKey}, holders count: ${cache[cacheKey].length}`);
-        return NextResponse.json({ holders: cache[cacheKey] });
+        log(`Cache hit for ${cacheKey}, holders count: ${cache[cacheKey].holders.length}`);
+        return NextResponse.json(cache[cacheKey]);
       }
 
       log(`Fetching holders for ${contract} at ${effectiveAddress}`);
-      const holders = await getAllHolders(effectiveAddress, startBlock, tiers, contract);
-      cache[cacheKey] = holders;
-      log(`Contract ${contract} holders count: ${holders.length}`);
-      return NextResponse.json({ holders });
+      const result = await getAllHolders(effectiveAddress, startBlock, tiers, contract, page, pageSize);
+      cache[cacheKey] = result;
+      log(`Contract ${contract} holders count: ${result.holders.length}, totalTokens: ${result.totalTokens}`);
+      return NextResponse.json(result);
     }
     log("Missing parameters");
     return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
@@ -104,8 +106,8 @@ async function batchMulticall(calls, batchSize = 50) {
   return results;
 }
 
-async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
-  log(`getAllHolders start: ${contractName} at ${contractAddress}, block: ${startBlock || 'latest'}`);
+async function getAllHolders(contractAddress, startBlock, tiers, contractName, page = 0, pageSize = 1000) {
+  log(`getAllHolders start: ${contractName} at ${contractAddress}, block: ${startBlock || 'latest'}, page=${page}, pageSize=${pageSize}`);
   const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
     block: startBlock,
     withTokenBalances: true,
@@ -131,7 +133,12 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
   log(`${contractName} - Total tokens checked: ${totalTokens}`);
 
   const allTokenIds = Array.from(tokenOwnerMap.keys());
-  const ownerOfCalls = allTokenIds.map(tokenId => ({
+  const start = page * pageSize;
+  const end = Math.min(start + pageSize, allTokenIds.length);
+  const paginatedTokenIds = allTokenIds.slice(start, end);
+  log(`${contractName} - Paginated token IDs: ${paginatedTokenIds.length} (start=${start}, end=${end})`);
+
+  const ownerOfCalls = paginatedTokenIds.map(tokenId => ({
     address: contractAddress,
     abi: nftAbi,
     functionName: 'ownerOf',
@@ -140,7 +147,7 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
 
   const ownerOfResults = await batchMulticall(ownerOfCalls);
   const validTokenIds = [];
-  allTokenIds.forEach((tokenId, i) => {
+  paginatedTokenIds.forEach((tokenId, i) => {
     const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
     const cacheKey = `${contractAddress}-${tokenId}-owner`;
     if (owner && owner !== burnAddress) {
@@ -152,10 +159,10 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
   });
   log(`${contractName} - Valid token IDs after ownerOf: ${validTokenIds.length}`);
 
-  const totalRedeemed = totalTokens - validTokenIds.length;
+  const totalRedeemed = totalTokens - allTokenIds.length; // Total across all pages
   if (validTokenIds.length === 0) {
-    log(`${contractName} - No valid tokens found`);
-    return [];
+    log(`${contractName} - No valid tokens found in this page`);
+    return { holders: [], totalTokens, page, pageSize, totalPages: Math.ceil(allTokenIds.length / pageSize) };
   }
 
   const tierCalls = validTokenIds.map(tokenId => ({
@@ -221,7 +228,13 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
   holders.forEach((holder, index) => (holder.rank = index + 1));
 
   log(`${contractName} - Final holders count: ${holders.length}`);
-  return holders;
+  return {
+    holders,
+    totalTokens,
+    page,
+    pageSize,
+    totalPages: Math.ceil(allTokenIds.length / pageSize),
+  };
 }
 
 async function getHolderData(contractAddress, wallet, startBlock, tiers) {
@@ -290,16 +303,16 @@ async function getHolderData(contractAddress, wallet, startBlock, tiers) {
 
   const tiersData = { tiers: tiersArray, total, multiplierSum };
   const contractName = Object.keys(contractAddresses).find(key => contractAddresses[key] === contractAddress);
-  const allHolders = await getAllHolders(contractAddress, startBlock, tiers, contractName);
-  const totalMultiplierSum = allHolders.reduce((sum, h) => sum + h.multiplierSum, 0);
+  const allHolders = await getAllHolders(contractAddress, startBlock, tiers, contractName, 0, 1000); // Limit for wallet search
+  const totalMultiplierSum = allHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
   const percentage = totalMultiplierSum > 0 ? (tiersData.multiplierSum / totalMultiplierSum) * 100 : 0;
 
-  const holder = allHolders.find(h => h.wallet === walletLower);
+  const holder = allHolders.holders.find(h => h.wallet === walletLower);
   const displayMultiplierSum = contractName === 'element280' ? multiplierSum / 10 : multiplierSum;
   log(`${contractAddress} - Final data for ${wallet}: total=${total}, multiplierSum=${multiplierSum}`);
   return {
     wallet: walletLower,
-    rank: holder ? holder.rank : allHolders.length + 1,
+    rank: holder ? holder.rank : allHolders.holders.length + 1,
     total: tiersData.total,
     multiplierSum: tiersData.multiplierSum,
     displayMultiplierSum,
