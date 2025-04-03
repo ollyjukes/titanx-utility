@@ -5,26 +5,22 @@ import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
 import { contractAddresses, deploymentBlocks, contractTiers } from '../../nft-contracts';
 
-// Alchemy setup
 const settings = {
   apiKey: process.env.ALCHEMY_API_KEY,
   network: Network.ETH_MAINNET,
 };
 const alchemy = new Alchemy(settings);
 
-// Viem client
 const client = createPublicClient({
   chain: mainnet,
   transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`),
 });
 
-// ABI for all contracts
 const nftAbi = parseAbi([
   "function ownerOf(uint256 tokenId) view returns (address)",
   "function getNftTier(uint256 tokenId) view returns (uint8)",
 ]);
 
-// In-memory cache
 let cache = {};
 let tokenCache = new Map();
 
@@ -85,13 +81,20 @@ export async function GET(request) {
   }
 }
 
-async function batchMulticall(calls, batchSize = 100) {
+async function batchMulticall(calls, batchSize = 50) { // Reduced from 100
   console.log(`[PROD_DEBUG] batchMulticall: Processing ${calls.length} calls in batches of ${batchSize}`);
   const results = [];
   for (let i = 0; i < calls.length; i += batchSize) {
     const batch = calls.slice(i, i + batchSize);
-    const batchResults = await client.multicall({ contracts: batch });
-    results.push(...batchResults);
+    try {
+      const batchResults = await client.multicall({ contracts: batch });
+      results.push(...batchResults);
+      console.log(`[PROD_DEBUG] batchMulticall: Batch ${i}-${i + batchSize - 1} completed with ${batchResults.length} results`);
+    } catch (error) {
+      console.error(`[PROD_ERROR] batchMulticall failed for batch ${i}-${i + batchSize - 1}: ${error.message}`);
+      // Fallback: Return failure results for this batch
+      results.push(...batch.map(() => ({ status: 'failure', result: null })));
+    }
   }
   console.log(`[PROD_DEBUG] batchMulticall: Completed with ${results.length} results`);
   return results;
