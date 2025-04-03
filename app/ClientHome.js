@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { contractAddresses, contractTiers } from "./nft-contracts";
 
-export default function ClientHomeContent() {
+export default function ClientHome() {
   const [holders, setHolders] = useState({ element280: [], staxNFT: [], element369: [] });
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("Fetching all holders data...");
@@ -13,13 +13,22 @@ export default function ClientHomeContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const fetchAllHolders = useCallback(async (contract) => {
+    const allHolders = [];
+    let page = 0;
+    let totalPages = 1;
+
     try {
-      const url = `/api/holders?contract=${contract}&address=${contractAddresses[contract]}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      return data.holders;
+      do {
+        const url = `/api/holders?contract=${contract}&address=${contractAddresses[contract]}&page=${page}&pageSize=1000`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        if (data.error) throw new Error(data.error);
+        allHolders.push(...data.holders);
+        totalPages = data.totalPages;
+        page++;
+      } while (page < totalPages);
+      return allHolders;
     } catch (error) {
       setStatus(`❌ Error fetching holders for ${contract === "element280" ? "Element 280" : contract === "staxNFT" ? "StaxNFT" : "Element 369"}: ${error.message}`);
       return [];
