@@ -1,4 +1,4 @@
-// app/nft-contracts.js
+// app/nft-contracts.js - by olly jukes
 
 // NFT contract configurations derived from Solidity implementations
 export const nftContracts = {
