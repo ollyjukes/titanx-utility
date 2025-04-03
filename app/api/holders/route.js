@@ -24,10 +24,9 @@ const nftAbi = parseAbi([
 let cache = {};
 let tokenCache = new Map();
 
-// Force log output
 function log(message) {
   console.log(`[PROD_DEBUG] ${message}`);
-  process.stdout.write(`[PROD_DEBUG] ${message}\n`); // Immediate flush
+  process.stdout.write(`[PROD_DEBUG] ${message}\n`);
 }
 
 export async function GET(request) {
@@ -87,12 +86,11 @@ export async function GET(request) {
   }
 }
 
-async function batchMulticall(calls, batchSize = 50, maxCalls = 1000) {
-  log(`batchMulticall: Processing ${calls.length} calls, capped at ${maxCalls}, in batches of ${batchSize}`);
-  const cappedCalls = calls.slice(0, maxCalls); // Limit to 1000 for testing
+async function batchMulticall(calls, batchSize = 50) {
+  log(`batchMulticall: Processing ${calls.length} calls in batches of ${batchSize}`);
   const results = [];
-  for (let i = 0; i < cappedCalls.length; i += batchSize) {
-    const batch = cappedCalls.slice(i, i + batchSize);
+  for (let i = 0; i < calls.length; i += batchSize) {
+    const batch = calls.slice(i, i + batchSize);
     try {
       const batchResults = await client.multicall({ contracts: batch });
       results.push(...batchResults);
@@ -143,7 +141,7 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
   const ownerOfResults = await batchMulticall(ownerOfCalls);
   const validTokenIds = [];
   allTokenIds.forEach((tokenId, i) => {
-    const owner = ownerOfResults[i].status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
     const cacheKey = `${contractAddress}-${tokenId}-owner`;
     if (owner && owner !== burnAddress) {
       validTokenIds.push(tokenId);
@@ -167,12 +165,18 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
     args: [tokenId],
   }));
 
+  log(`${contractName} - Starting tier multicall for ${tierCalls.length} tokens`);
   const tierResults = await batchMulticall(tierCalls);
+  log(`${contractName} - Tier results length: ${tierResults.length}`);
   const maxTier = Math.max(...Object.keys(tiers).map(Number));
   const holdersMap = new Map();
   let totalNftsHeld = 0;
 
   tierResults.forEach((result, i) => {
+    if (!result) {
+      log(`${contractName} - Undefined tier result at index ${i}, tokenId: ${validTokenIds[i]}`);
+      return;
+    }
     if (result.status === 'success') {
       const tokenId = validTokenIds[i];
       const wallet = tokenOwnerMap.get(tokenId);
@@ -195,7 +199,11 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
         holder.multiplierSum += tiers[tier]?.multiplier || 0;
         holder.tiers[tier] += 1;
         totalNftsHeld += 1;
+      } else {
+        log(`${contractName} - Invalid tier ${tier} for token ${tokenId}`);
       }
+    } else {
+      log(`${contractName} - Failed tier fetch at index ${i}, tokenId: ${validTokenIds[i]}`);
     }
   });
   log(`${contractName} - Total NFTs held after tier check: ${totalNftsHeld}`);
@@ -237,7 +245,7 @@ async function getHolderData(contractAddress, wallet, startBlock, tiers) {
 
   const ownerOfResults = await batchMulticall(ownerOfCalls);
   const validTokenIds = tokenIds.filter((tokenId, i) => {
-    const owner = ownerOfResults[i].status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
     const cacheKey = `${contractAddress}-${tokenId}-owner`;
     tokenCache.set(cacheKey, owner);
     return owner === walletLower;
@@ -262,6 +270,10 @@ async function getHolderData(contractAddress, wallet, startBlock, tiers) {
   let multiplierSum = 0;
 
   tierResults.forEach((result, i) => {
+    if (!result) {
+      log(`${contractAddress} - Undefined tier result for wallet ${wallet} at index ${i}, tokenId: ${validTokenIds[i]}`);
+      return;
+    }
     if (result.status === 'success') {
       const tier = Number(result.result);
       const tokenId = validTokenIds[i];
