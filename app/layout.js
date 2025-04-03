@@ -1,3 +1,5 @@
+// file app/layout.js
+
 import './layout.css';
 
 import { Inter } from 'next/font/google';
