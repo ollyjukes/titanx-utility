@@ -19,8 +19,8 @@ export default function ClientHome() {
 
     try {
       do {
-        const url = `/api/holders?contract=${contract}&address=${contractAddresses[contract]}&page=${page}&pageSize=1000`;
-        console.log(`[CLIENT_DEBUG] Fetching: ${url}`); // Debug client-side request
+        const url = `/api/holders?contract=${contract}&address=${contractAddresses[contract]}&page=${page}&pageSize=500`; // Changed to 500
+        console.log(`[CLIENT_DEBUG] Fetching: ${url}`);
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
@@ -223,7 +223,7 @@ export default function ClientHome() {
                   className="animate-spin h-6 w-6 sm:h-8 sm:w-8 text-blue-600"
                   xmlns="http://www.w3.org/2000/svg"
                   fill="none"
-                  viewBox="0 24 24"
+                  viewBox="0 0 24 24"
                 >
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path
