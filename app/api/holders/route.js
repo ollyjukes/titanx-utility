@@ -28,14 +28,6 @@ const nftAbi = parseAbi([
 let cache = {};
 let tokenCache = new Map();
 
-// Debug logging control
-const isDebug = process.env.NODE_ENV === "development"; // Only log in development
-function debugLog(...args) {
-  if (isDebug) {
-    console.log(...args);
-  }
-}
-
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const contract = searchParams.get('contract');
@@ -43,25 +35,31 @@ export async function GET(request) {
   const wallet = searchParams.get('address');
   const startBlock = contract === 'element280' ? undefined : (contract && deploymentBlocks[contract]);
 
+  console.log(`[PROD_DEBUG] Request: contract=${contract}, address=${contractAddress || wallet}, startBlock=${startBlock || 'latest'}`);
   if (!process.env.ALCHEMY_API_KEY) {
+    console.log("[PROD_DEBUG] Missing ALCHEMY_API_KEY");
     return NextResponse.json({ error: 'Server configuration error: Missing Alchemy API key' }, { status: 500 });
   }
 
   if (!alchemy.nft) {
+    console.log("[PROD_DEBUG] Alchemy NFT service unavailable");
     return NextResponse.json({ error: 'Server error: Alchemy NFT service unavailable' }, { status: 500 });
   }
 
   if (contract && !contractAddresses[contract]) {
+    console.log(`[PROD_DEBUG] Invalid contract specified: ${contract}`);
     return NextResponse.json({ error: 'Invalid contract specified' }, { status: 400 });
   }
 
   try {
     if (wallet && !contract) {
+      console.log(`[PROD_DEBUG] Wallet search initiated for ${wallet}`);
       const holders = {
         element280: await getHolderData(contractAddresses.element280, wallet, undefined, contractTiers.element280),
         staxNFT: await getHolderData(contractAddresses.staxNFT, wallet, deploymentBlocks.staxNFT, contractTiers.staxNFT),
         element369: await getHolderData(contractAddresses.element369, wallet, deploymentBlocks.element369, contractTiers.element369),
       };
+      console.log(`[PROD_DEBUG] Wallet search result: element280=${!!holders.element280}, staxNFT=${!!holders.staxNFT}, element369=${!!holders.element369}`);
       return NextResponse.json({ holders: [holders.element280, holders.staxNFT, holders.element369].filter(h => h) });
     } else if (contract) {
       const tiers = contractTiers[contract];
@@ -69,44 +67,50 @@ export async function GET(request) {
       
       const cacheKey = `${effectiveAddress}-${startBlock || 'latest'}`;
       if (cache[cacheKey]) {
-        debugLog(`[DEBUG] Cache hit for ${cacheKey}`);
+        console.log(`[PROD_DEBUG] Cache hit for ${cacheKey}, holders count: ${cache[cacheKey].length}`);
         return NextResponse.json({ holders: cache[cacheKey] });
       }
 
+      console.log(`[PROD_DEBUG] Fetching holders for ${contract} at ${effectiveAddress}`);
       const holders = await getAllHolders(effectiveAddress, startBlock, tiers, contract);
       cache[cacheKey] = holders;
+      console.log(`[PROD_DEBUG] Contract ${contract} holders count: ${holders.length}`);
       return NextResponse.json({ holders });
     }
+    console.log("[PROD_DEBUG] Missing parameters");
     return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
   } catch (error) {
-    console.error(`API error for ${contract || 'wallet search'}:`, error.message); // Keep error logs for debugging
+    console.error(`[PROD_ERROR] API error for ${contract || 'wallet search'}: ${error.message}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }
 
 async function batchMulticall(calls, batchSize = 100) {
+  console.log(`[PROD_DEBUG] batchMulticall: Processing ${calls.length} calls in batches of ${batchSize}`);
   const results = [];
   for (let i = 0; i < calls.length; i += batchSize) {
     const batch = calls.slice(i, i + batchSize);
     const batchResults = await client.multicall({ contracts: batch });
     results.push(...batchResults);
   }
+  console.log(`[PROD_DEBUG] batchMulticall: Completed with ${results.length} results`);
   return results;
 }
 
 async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
+  console.log(`[PROD_DEBUG] getAllHolders start: ${contractName} at ${contractAddress}, block: ${startBlock || 'latest'}`);
   const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
     block: startBlock,
     withTokenBalances: true,
   });
+  console.log(`[PROD_DEBUG] ${contractName} - Raw owners count: ${ownersResponse.owners.length}`);
 
   const burnAddress = '0x0000000000000000000000000000000000000000';
   const filteredOwners = ownersResponse.owners.filter(
     owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
   );
-  debugLog(`[DEBUG] Contract ${contractAddress} - Total owners: ${ownersResponse.owners.length}, Live owners: ${filteredOwners.length}`);
+  console.log(`[PROD_DEBUG] ${contractName} - Filtered live owners count: ${filteredOwners.length}`);
 
-  // Aggregate tokens
   const tokenOwnerMap = new Map();
   let totalTokens = 0;
   filteredOwners.forEach(owner => {
@@ -117,11 +121,9 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
       totalTokens++;
     });
   });
+  console.log(`[PROD_DEBUG] ${contractName} - Total tokens checked: ${totalTokens}`);
 
   const allTokenIds = Array.from(tokenOwnerMap.keys());
-  debugLog(`[DEBUG] Contract ${contractAddress} - Total tokens checked: ${totalTokens}`);
-
-  // Validate ownership with caching
   const ownerOfCalls = allTokenIds.map(tokenId => ({
     address: contractAddress,
     abi: nftAbi,
@@ -138,20 +140,17 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
       validTokenIds.push(tokenId);
       tokenCache.set(cacheKey, owner);
     } else {
-      debugLog(`[DEBUG] Token ${tokenId} invalid - owner: ${owner || 'reverted'}`);
       tokenCache.set(cacheKey, null);
     }
   });
+  console.log(`[PROD_DEBUG] ${contractName} - Valid token IDs after ownerOf: ${validTokenIds.length}`);
 
   const totalRedeemed = totalTokens - validTokenIds.length;
-  debugLog(`[DEBUG] Contract ${contractAddress} - Valid tokens: ${validTokenIds.length}`);
-
   if (validTokenIds.length === 0) {
-    debugLog(`[DEBUG] No valid tokens found for contract ${contractAddress}`);
+    console.log(`[PROD_DEBUG] ${contractName} - No valid tokens found`);
     return [];
   }
 
-  // Fetch tiers with caching
   const tierCalls = validTokenIds.map(tokenId => ({
     address: contractAddress,
     abi: nftAbi,
@@ -187,13 +186,10 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
         holder.multiplierSum += tiers[tier]?.multiplier || 0;
         holder.tiers[tier] += 1;
         totalNftsHeld += 1;
-      } else {
-        debugLog(`[DEBUG] Invalid tier ${tier} for token ${tokenId} on ${contractAddress}`);
       }
-    } else {
-      debugLog(`[DEBUG] Failed to fetch tier for token ${validTokenIds[i]} on ${contractAddress}`);
     }
   });
+  console.log(`[PROD_DEBUG] ${contractName} - Total NFTs held after tier check: ${totalNftsHeld}`);
 
   const holders = Array.from(holdersMap.values());
   const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
@@ -203,39 +199,26 @@ async function getAllHolders(contractAddress, startBlock, tiers, contractName) {
     holder.displayMultiplierSum = contractName === 'element280' ? holder.multiplierSum / 10 : holder.multiplierSum;
   });
 
-  debugLog(`[DEBUG] Contract ${contractAddress} - Total live NFTs held: ${totalNftsHeld}`);
-  debugLog(`[DEBUG] Contract ${contractAddress} - Total redeemed NFTs: ${totalRedeemed}`);
-  debugLog(`[DEBUG] Contract ${contractAddress} - Total MultiplierSum: ${totalMultiplierSum}`);
-
-  // Sort by multiplierSum, then total
   const sortFn = (a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total;
   holders.sort(sortFn);
   holders.forEach((holder, index) => (holder.rank = index + 1));
 
-  debugLog(`[DEBUG] Contract ${contractAddress} - Top 10:`, holders.slice(0, 10).map(h => ({
-    wallet: h.wallet.slice(0, 6) + '...',
-    rank: h.rank,
-    total: h.total,
-    multiplierSum: h.multiplierSum,
-    displayMultiplierSum: h.displayMultiplierSum,
-    percentage: h.percentage.toFixed(2),
-  })));
-
+  console.log(`[PROD_DEBUG] ${contractName} - Final holders count: ${holders.length}`);
   return holders;
 }
 
 async function getHolderData(contractAddress, wallet, startBlock, tiers) {
+  console.log(`[PROD_DEBUG] getHolderData start: wallet=${wallet}, contract=${contractAddress}, block=${startBlock || 'latest'}`);
   const nfts = await alchemy.nft.getNftsForOwner(wallet, {
     contractAddresses: [contractAddress],
     block: startBlock,
   });
+  console.log(`[PROD_DEBUG] ${contractAddress} - Initial NFTs for ${wallet}: ${nfts.totalCount}`);
 
   if (nfts.totalCount === 0) return null;
 
   const walletLower = wallet.toLowerCase();
   const tokenIds = nfts.ownedNfts.map(nft => BigInt(nft.tokenId));
-  debugLog(`[DEBUG] Wallet ${walletLower} on ${contractAddress} - Initial tokens from Alchemy: ${tokenIds.length}`);
-
   const ownerOfCalls = tokenIds.map(tokenId => ({
     address: contractAddress,
     abi: nftAbi,
@@ -250,9 +233,9 @@ async function getHolderData(contractAddress, wallet, startBlock, tiers) {
     tokenCache.set(cacheKey, owner);
     return owner === walletLower;
   });
+  console.log(`[PROD_DEBUG] ${contractAddress} - Valid token IDs for ${wallet}: ${validTokenIds.length}`);
 
   if (validTokenIds.length === 0) {
-    debugLog(`[DEBUG] Wallet ${walletLower} on ${contractAddress} - No valid tokens after ownerOf check`);
     return null;
   }
 
@@ -279,11 +262,10 @@ async function getHolderData(contractAddress, wallet, startBlock, tiers) {
         tiersArray[tier] += 1;
         total += 1;
         multiplierSum += tiers[tier]?.multiplier || 0;
-      } else {
-        debugLog(`[DEBUG] Invalid tier ${tier} for token ${tokenId} on ${contractAddress} (wallet ${walletLower})`);
       }
     }
   });
+  console.log(`[PROD_DEBUG] ${contractAddress} - Total NFTs for ${wallet} after tier check: ${total}`);
 
   const tiersData = { tiers: tiersArray, total, multiplierSum };
   const contractName = Object.keys(contractAddresses).find(key => contractAddresses[key] === contractAddress);
@@ -293,7 +275,7 @@ async function getHolderData(contractAddress, wallet, startBlock, tiers) {
 
   const holder = allHolders.find(h => h.wallet === walletLower);
   const displayMultiplierSum = contractName === 'element280' ? multiplierSum / 10 : multiplierSum;
-  debugLog(`[DEBUG] Wallet ${walletLower} on ${contractAddress} - Final: Total=${total}, Multiplier=${multiplierSum}, DisplayMultiplier=${displayMultiplierSum}, Tiers=${JSON.stringify(tiersArray)}`);
+  console.log(`[PROD_DEBUG] ${contractAddress} - Final data for ${wallet}: total=${total}, multiplierSum=${multiplierSum}`);
   return {
     wallet: walletLower,
     rank: holder ? holder.rank : allHolders.length + 1,
