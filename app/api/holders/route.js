@@ -26,7 +26,6 @@ let tokenCache = new Map();
 
 function log(message) {
   console.log(`[PROD_DEBUG] ${message}`);
-  process.stdout.write(`[PROD_DEBUG] ${message}\n`);
 }
 
 export async function GET(request) {
@@ -36,7 +35,7 @@ export async function GET(request) {
   const wallet = searchParams.get('address');
   const startBlock = contract === 'element280' ? undefined : (contract && deploymentBlocks[contract]);
   const page = parseInt(searchParams.get('page') || '0', 10);
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10); // Default 1000 tokens per page
+  const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
 
   log(`Request: contract=${contract}, address=${contractAddress || wallet}, startBlock=${startBlock || 'latest'}, page=${page}, pageSize=${pageSize}`);
   if (!process.env.ALCHEMY_API_KEY) {
