@@ -6,14 +6,14 @@ import { mainnet } from 'viem/chains';
 import { contractAddresses, deploymentBlocks, contractTiers } from '../../nft-contracts';
 
 const settings = {
-  apiKey: process.env.ALCHEMY_API_KEY,
+  apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
   network: Network.ETH_MAINNET,
 };
 const alchemy = new Alchemy(settings);
 
 const client = createPublicClient({
   chain: mainnet,
-  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`),
+  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`),
 });
 
 const nftAbi = parseAbi([
@@ -38,8 +38,8 @@ export async function GET(request) {
   const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
 
   log(`Request: contract=${contract}, address=${contractAddress || wallet}, startBlock=${startBlock || 'latest'}, page=${page}, pageSize=${pageSize}`);
-  if (!process.env.ALCHEMY_API_KEY) {
-    log("Missing ALCHEMY_API_KEY");
+  if (!process.env.NEXT_PUBLIC_ALCHEMY_API_KEY) {
+    log("Missing NEXT_PUBLIC_ALCHEMY_API_KEY");
     return NextResponse.json({ error: 'Server configuration error: Missing Alchemy API key' }, { status: 500 });
   }
 
