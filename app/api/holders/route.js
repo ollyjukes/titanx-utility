@@ -30,7 +30,7 @@ function log(message) {
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  log("Dummy log for v0.0.5"); // Added dummy change
+  log("Dummy log for v0.0.5"); //   Added dummy change
   const contract = searchParams.get('contract');
   const contractAddress = searchParams.get('address');
   const wallet = searchParams.get('address');
