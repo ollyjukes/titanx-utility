@@ -23,12 +23,14 @@ function Navbar() {
 
   const navItems = [
     { name: 'Home', href: '/' },
-    { name: 'NFT', href: '/nft' },
     { name: 'Auctions', href: '/auctions' },
-    { name: 'About', href: '/about' },
-    { name: 'Contact', href: '/contact' },
+    { name: 'Mining', href: '/mining' },
+    { name: 'NFT', href: '/nft' },
+    { name: 'Moon Math', href: '/moonmath' },
     { name: 'TitanX Hub', href: 'https://titanxhub.com', external: true },
     { name: 'TitanX Info', href: 'https://titanxinfo.com', external: true },
+    { name: 'About', href: '/about' },
+
   ];
 
   return (
