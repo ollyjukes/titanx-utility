@@ -1,12 +1,8 @@
 // app/nft/page.js
-import NFTHoldersDashboard from "@/components/NFTHoldersDashboard"; // Corrected path
-
-export default function NFTPage() {
-  const initialHoldersData = {
-    element280: [],
-    staxNFT: [],
-    element369: [],
-  };
-
-  return <NFTHoldersDashboard holdersData={initialHoldersData} />;
+export default function NFTOverview() {
+  return (
+    <div className="text-center text-white">
+      <p className="text-lg">Select a collection above to view details.</p>
+    </div>
+  );
 }
