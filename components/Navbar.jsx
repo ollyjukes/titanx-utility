@@ -52,9 +52,6 @@ function Navbar() {
         },
       ],
     },
-    { name: 'Moon Math', href: '/moonmath' },
-    { name: 'TitanX Hub', href: 'https://titanxhub.com', external: true },
-    { name: 'TitanX Info', href: 'https://titanxinfo.com', external: true },
     { name: 'About', href: '/about' },
   ];
 
