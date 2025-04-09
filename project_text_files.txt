@@ -22,7 +22,8 @@ File: ./app/layout.js
 // app/layout.js
 import './layout.css';
 import { Inter } from 'next/font/google';
-import Navbar from '../components/Navbar'; // Adjust path if needed
+import Navbar from '../components/Navbar';
+import ClientProvider from './ClientProvider';
 
 const inter = Inter({ subsets: ['latin'] });
 
@@ -33,8 +34,10 @@ export default function RootLayout({ children }) {
         <title>TitanXUtils</title>
       </head>
       <body className={`${inter.className} bg-gray-900 text-white`}>
-        <Navbar />
-        <main className="pt-16">{children}</main>
+        <ClientProvider>
+          <Navbar />
+          <main className="pt-16">{children}</main>
+        </ClientProvider>
       </body>
     </html>
   );
@@ -99,12 +102,24 @@ export default function Home() {
 File: ./app/nft/layout.js
 // app/nft/layout.js
 'use client';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import { motion } from 'framer-motion';
 import Link from 'next/link';
+import SearchResultsModal from '@/components/SearchResultsModal';
+import { contractDetails } from '@/app/nft-contracts';
+import { useNFTStore } from '@/app/store';
 
 export default function NFTLayout({ children }) {
   const [selectedChain, setSelectedChain] = useState(null);
-  const [showE280Message, setShowE280Message] = useState(false); // Track E280 click
+  const [showE280Message, setShowE280Message] = useState(false);
+  const [searchAddress, setSearchAddress] = useState('');
+  const [searchResults, setSearchResults] = useState({});
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const hasRun = useRef(false);
+
+  const { getCache, setCache } = useNFTStore();
 
   const chains = [
     { name: 'ETH', id: 'eth' },
@@ -112,33 +127,211 @@ export default function NFTLayout({ children }) {
   ];
 
   const ethNFTs = [
-    { name: 'Element280', href: '/nft/ETH/Element280' },
-    { name: 'Element369', href: '/nft/ETH/Element369' },
-    { name: 'Stax', href: '/nft/ETH/Stax' },
-    { name: 'Ascendant', href: '/nft/ETH/Ascendant' },
+    { name: 'Element280', href: '/nft/ETH/Element280', apiKey: 'element280' },
+    { name: 'Element369', href: '/nft/ETH/Element369', apiKey: 'element369' },
+    { name: 'Stax', href: '/nft/ETH/Stax', apiKey: 'staxNFT' },
+    { name: 'Ascendant', href: '/nft/ETH/Ascendant', apiKey: 'ascendantNFT' },
   ];
 
   const baseNFTs = [
-    { name: 'E280', href: null }, // No href, we'll handle it with a message
+    { name: 'E280', href: null, apiKey: 'e280' },
   ];
 
-  const handleChainClick = (chainId) => {
+  const allNFTs = Object.keys(contractDetails).map((key) => ({
+    name: contractDetails[key].name,
+    apiKey: key,
+    href: key === 'e280' ? null : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${contractDetails[key].name.replace(/\s+/g, '')}`,
+  }));
+
+  const fetchCollectionData = async (contractKey) => {
+    console.log(`[NFTLayout] Fetching data for ${contractKey}`);
+    const cachedData = getCache(contractKey);
+    if (cachedData) {
+      console.log(`[NFTLayout] Using cached data for ${contractKey}: ${cachedData.holders.length} holders`);
+      return cachedData;
+    }
+
+    if (contractKey === 'e280') {
+      console.log(`[NFTLayout] Skipping fetch for ${contractKey} - not deployed`);
+      const result = { holders: [], totalTokens: 0, message: 'E280 data not available yet' };
+      setCache(contractKey, result);
+      return result;
+    }
+
+    const { apiEndpoint, pageSize = 1000 } = contractDetails[contractKey];
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalLockedAscendant = 0;
+    let totalShares = 0;
+    let toDistributeDay8 = 0;
+    let toDistributeDay28 = 0;
+    let toDistributeDay90 = 0;
+    let pendingRewards = 0;
+    let page = 0;
+    let totalPages = Infinity;
+
+    try {
+      while (page < totalPages) {
+        console.log(`[NFTLayout] Fetching ${contractKey} page ${page}`);
+        const res = await fetch(`${apiEndpoint}?page=${page}&pageSize=${pageSize}`, {
+          signal: AbortSignal.timeout(30000),
+        });
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Fetch failed for ${contractKey} page ${page}: ${res.status} - ${errorText}`);
+        }
+        const json = await res.json();
+        console.log(`[NFTLayout] ${contractKey} page ${page} fetched: holders=${json.holders.length}`);
+        allHolders = allHolders.concat(json.holders || []);
+        totalTokens = json.totalTokens || totalTokens;
+        totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
+        totalShares = json.totalShares || totalShares;
+        toDistributeDay8 = json.toDistributeDay8 || toDistributeDay8;
+        toDistributeDay28 = json.toDistributeDay28 || toDistributeDay28;
+        toDistributeDay90 = json.toDistributeDay90 || toDistributeDay90;
+        pendingRewards = json.pendingRewards || pendingRewards;
+        totalPages = json.totalPages || 1;
+        page++;
+        if (!json.holders || json.holders.length === 0) break;
+      }
+
+      const uniqueHoldersMap = new Map();
+      allHolders.forEach(holder => {
+        if (holder && holder.wallet) uniqueHoldersMap.set(holder.wallet, holder);
+      });
+      let uniqueHolders = Array.from(uniqueHoldersMap.values());
+      console.log(`[NFTLayout] Total Unique ${contractKey} Holders: ${uniqueHolders.length}`);
+
+      const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
+      uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
+      uniqueHolders.forEach((holder, index) => {
+        holder.rank = index + 1;
+        holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+      });
+
+      const result = {
+        holders: uniqueHolders,
+        totalTokens,
+        totalLockedAscendant,
+        totalShares,
+        toDistributeDay8,
+        toDistributeDay28,
+        toDistributeDay90,
+        pendingRewards,
+        totalMultiplierSum,
+      };
+      setCache(contractKey, result);
+      console.log(`[NFTLayout] Cached ${contractKey} with ${uniqueHolders.length} holders`);
+      return result;
+    } catch (err) {
+      console.error(`[NFTLayout] Error fetching ${contractKey}: ${err.message}`);
+      const errorResult = { holders: [], totalTokens: 0, error: err.message };
+      setCache(contractKey, errorResult);
+      return errorResult;
+    }
+  };
+
+  const handleSearch = async () => {
+    console.log('[NFTLayout] handleSearch called with address:', searchAddress);
+    if (!searchAddress || !/^0x[a-fA-F0-9]{40}$/.test(searchAddress)) {
+      setError('Please enter a valid Ethereum address (e.g., 0x...)');
+      setSearchResults({});
+      return;
+    }
+
+    setSearchLoading(true);
+    setError(null);
+    setSearchResults({});
+
+    try {
+      console.log('[NFTLayout] Fetching all collection data before search');
+      const fetchPromises = allNFTs.map(nft => 
+        fetchCollectionData(nft.apiKey)
+          .then(data => ({ apiKey: nft.apiKey, data }))
+          .catch(err => {
+            console.error(`[NFTLayout] Fetch failed for ${nft.apiKey}: ${err.message}`);
+            return { apiKey: nft.apiKey, data: { holders: [], totalTokens: 0, error: err.message } };
+          })
+      );
+      const results = await Promise.all(fetchPromises);
+      console.log('[NFTLayout] All collections fetched and cached');
+
+      const searchResults = {};
+      const lowerSearchAddress = searchAddress.toLowerCase();
+      results.forEach(({ apiKey, data }) => {
+        if (data.error) {
+          searchResults[apiKey] = { error: data.error };
+        } else if (data.message) {
+          searchResults[apiKey] = { message: data.message };
+        } else {
+          const holder = data.holders.find(h => h && h.wallet && h.wallet.toLowerCase() === lowerSearchAddress);
+          if (holder) {
+            // Include totalShares for Ascendant to calculate Shares %
+            searchResults[apiKey] = {
+              ...holder,
+              totalShares: apiKey === 'ascendantNFT' ? data.totalShares : undefined,
+            };
+          } else {
+            searchResults[apiKey] = null;
+          }
+          console.log(`[NFTLayout] ${apiKey} search result:`, holder ? JSON.stringify(searchResults[apiKey]) : 'not found');
+        }
+      });
+
+      setSearchResults(searchResults);
+      setIsModalOpen(true);
+    } catch (err) {
+      console.error('[NFTLayout] Search error:', err);
+      setError(`Search failed: ${err.message}`);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleChainSelect = (chainId) => {
+    setShowE280Message(false);
     setSelectedChain(chainId === selectedChain ? null : chainId);
-    setShowE280Message(false); // Reset E280 message when changing chains
   };
 
   const handleE280Click = () => {
-    setShowE280Message(true); // Show message instead of navigating
+    if (selectedChain === 'base') {
+      setShowE280Message(true);
+    }
   };
 
   return (
     <div className="flex-1 p-6 flex flex-col items-center">
       <h1 className="text-4xl font-bold mb-8">TitanX NFT Protocols</h1>
+
+      <div className="w-full max-w-2xl mb-6">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={searchAddress}
+            onChange={(e) => setSearchAddress(e.target.value)}
+            placeholder="Search by wallet address (e.g., 0x...)"
+            className="p-2 w-full bg-gray-700 text-white rounded-md border border-gray-600 focus:outline-none focus:ring-2 focus:ring-orange-500"
+          />
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleSearch}
+            disabled={searchLoading}
+            className={`px-4 py-2 bg-orange-500 text-white rounded-md font-semibold hover:bg-orange-600 transition-colors ${searchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {searchLoading ? 'Searching...' : 'Search'}
+          </motion.button>
+        </div>
+        {error && <p className="text-red-500 mt-2">{error}</p>}
+      </div>
+
       <div className="flex space-x-4 mb-6">
         {chains.map((chain) => (
-          <button
+          <motion.button
             key={chain.id}
-            onClick={() => handleChainClick(chain.id)}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => handleChainSelect(chain.id)}
             className={`px-6 py-2 rounded-md font-semibold transition-colors ${
               selectedChain === chain.id
                 ? 'bg-orange-500 text-white'
@@ -146,16 +339,22 @@ export default function NFTLayout({ children }) {
             }`}
           >
             {chain.name}
-          </button>
+          </motion.button>
         ))}
       </div>
+
       {selectedChain === 'eth' && (
         <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl">
           {ethNFTs.map((nft) => (
             <Link key={nft.name} href={nft.href} className="flex-1">
-              <button className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowE280Message(false)}
+                className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
+              >
                 {nft.name}
-              </button>
+              </motion.button>
             </Link>
           ))}
         </div>
@@ -165,27 +364,44 @@ export default function NFTLayout({ children }) {
           {baseNFTs.map((nft) => (
             nft.href ? (
               <Link key={nft.name} href={nft.href} className="flex-1">
-                <button className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowE280Message(false)}
+                  className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
+                >
                   {nft.name}
-                </button>
+                </motion.button>
               </Link>
             ) : (
-              <button
+              <motion.button
                 key={nft.name}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={handleE280Click}
                 className="flex-1 w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
               >
                 {nft.name}
-              </button>
+              </motion.button>
             )
           ))}
         </div>
       )}
-      {showE280Message && (
+      {showE280Message && selectedChain === 'base' && (
         <div className="mt-6 text-center text-white">
           <p className="text-lg">Contract not yet deployed. Coming soon...</p>
         </div>
       )}
+
+      {isModalOpen && (
+        <SearchResultsModal
+          searchResult={searchResults}
+          searchAddress={searchAddress}
+          closeModal={() => setIsModalOpen(false)}
+          handleBackgroundClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}
+        />
+      )}
+
       <div className="w-full max-w-6xl">{children}</div>
     </div>
   );
@@ -239,6 +455,42 @@ import NFTPage from '@/components/NFTPage';
 export default function E280Page() {
   return <NFTPage contractKey="e280" />;
 }-e 
+---
+File: ./app/store.js
+// app/store.js
+'use client';
+import { create } from 'zustand';
+
+const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
+
+export const useNFTStore = create((set, get) => ({
+  cache: {}, // { contractKey: { data: {...}, timestamp: number } }
+  setCache: (contractKey, data) => {
+    console.log(`[NFTStore] Setting cache for ${contractKey}: ${data.holders.length} holders`);
+    set((state) => ({
+      cache: {
+        ...state.cache,
+        [contractKey]: { data, timestamp: Date.now() },
+      },
+    }));
+  },
+  getCache: (contractKey) => {
+    const cachedEntry = get().cache[contractKey];
+    if (!cachedEntry) return null;
+    const now = Date.now();
+    if (now - cachedEntry.timestamp > CACHE_TTL) {
+      console.log(`[NFTStore] Cache expired for ${contractKey}`);
+      set((state) => {
+        const newCache = { ...state.cache };
+        delete newCache[contractKey];
+        return { cache: newCache };
+      });
+      return null;
+    }
+    console.log(`[NFTStore] Returning cached data for ${contractKey}: ${cachedEntry.data.holders.length} holders`);
+    return cachedEntry.data;
+  },
+}));-e 
 ---
 File: ./app/about/page.js
 // app/about/page.js
@@ -1478,6 +1730,14 @@ export const nftContracts = {
     description:
       "Ascendant NFTs are minted with ASCENDANT tokens and offer staking rewards from DragonX pools over 8, 28, and 90-day periods. Features fusion mechanics to combine same-tier NFTs into higher tiers.",
   },
+  e280: {
+    name: "E280",
+    symbol: "E280",
+    address: null, // Not deployed yet
+    deploymentBlock: null,
+    tiers: {}, // Define if applicable
+    description: "E280 NFTs on BASE chain. Contract not yet deployed.",
+  },
 };
 
 export const contractAddresses = {
@@ -1485,6 +1745,7 @@ export const contractAddresses = {
   element369: nftContracts.element369.address,
   staxNFT: nftContracts.staxNFT.address,
   ascendantNFT: nftContracts.ascendantNFT.address,
+  e280: nftContracts.e280.address,
 };
 
 export const deploymentBlocks = {
@@ -1492,6 +1753,7 @@ export const deploymentBlocks = {
   element369: nftContracts.element369.deploymentBlock,
   staxNFT: nftContracts.staxNFT.deploymentBlock,
   ascendantNFT: nftContracts.ascendantNFT.deploymentBlock,
+  e280: nftContracts.e280.deploymentBlock,
 };
 
 export const contractTiers = {
@@ -1499,33 +1761,39 @@ export const contractTiers = {
   element369: nftContracts.element369.tiers,
   staxNFT: nftContracts.staxNFT.tiers,
   ascendantNFT: nftContracts.ascendantNFT.tiers,
+  e280: nftContracts.e280.tiers,
 };
 
-// Add contractDetails for NFTPage compatibility
 export const contractDetails = {
   element280: {
     name: nftContracts.element280.name,
-    totalTokens: 8209, // From your logs
-    pageSize: 1000,   // From your API
-    apiEndpoint: '/api/holders/Element280'
+    totalTokens: 8209, // Update with actual value if needed
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Element280',
   },
   element369: {
     name: nftContracts.element369.name,
-    totalTokens: 0,   // Placeholder - update with actual value
-    pageSize: 1000,   // Adjust as needed
-    apiEndpoint: '/api/holders/Element369'
+    totalTokens: 0, // Update with actual value
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Element369',
   },
   staxNFT: {
     name: nftContracts.staxNFT.name,
-    totalTokens: 0,   // Placeholder - update with actual value
-    pageSize: 1000,   // Adjust as needed
-    apiEndpoint: '/api/holders/Stax'
+    totalTokens: 0, // Update with actual value
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Stax',
   },
   ascendantNFT: {
     name: nftContracts.ascendantNFT.name,
-    totalTokens: 0,   // Placeholder - update with actual value
-    pageSize: 1000,   // Adjust as needed
-    apiEndpoint: '/api/holders/Ascendant'
+    totalTokens: 0, // Update with actual value
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Ascendant',
+  },
+  e280: {
+    name: nftContracts.e280.name,
+    totalTokens: 0,
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/E280',
   },
 };
 
@@ -1533,13 +1801,31 @@ export function getContractDetails(contractName) {
   return nftContracts[contractName] || null;
 }-e 
 ---
-File: ./postcss.config.mjs
-const config = {
-  plugins: ["@tailwindcss/postcss"],
-};
+File: ./app/ClientProvider.js
+// app/ClientProvider.js
+'use client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-export default config;
--e 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30 * 60 * 1000, // 30 minutes
+      cacheTime: 60 * 60 * 1000, // 1 hour
+    },
+  },
+});
+
+export default function ClientProvider({ children }) {
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+}-e 
+---
+File: ./postcss.config.mjs
+// This file is used to configure PostCSS, a tool for transforming CSS with JavaScript.
+
+const config = {
+  plugins: ["tailwindcss"],
+};
+export default config;-e 
 ---
 File: ./next.config.mjs
 /** @type {import('next').NextConfig} */
@@ -1588,11 +1874,19 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 -e 
 ---
 File: ./components/HolderTable.js
-// app/components/HolderTable.js
+// components/HolderTable.js
+import { memo } from 'react'; // Add memo import
+import { motion } from 'framer-motion';
 import { contractTiers } from "@/app/nft-contracts";
 
-export default function HolderTable({ holders, contract, loading, totalShares }) {
-  const safeHolders = Array.isArray(holders) ? holders : [];
+const rowVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+};
+
+function HolderTable({ holders, contract, loading, totalShares }) {
+  // Filter out null/undefined holders and those without a wallet property
+  const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
   const isAscendant = contract === 'ascendantNFT';
 
   if (!safeHolders.length) {
@@ -1618,7 +1912,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                     <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
                     <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
                     {Object.keys(contractTiers[contract] || {})
-                      .sort((a, b) => b - a) // Reverse order: highest tier first
+                      .sort((a, b) => b - a)
                       .map(tier => (
                         <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
                           {contractTiers[contract][tier].name}
@@ -1630,7 +1924,13 @@ export default function HolderTable({ holders, contract, loading, totalShares })
             </thead>
             <tbody className="text-gray-300 text-xs md:text-sm">
               {Array(5).fill().map((_, i) => (
-                <tr key={i} className="animate-pulse">
+                <motion.tr
+                  key={i}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: i * 0.1, duration: 0.5 }}
+                  className="animate-pulse"
+                >
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
@@ -1640,7 +1940,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md}px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                     </>
                   ) : (
                     <>
@@ -1651,7 +1951,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                       ))}
                     </>
                   )}
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
@@ -1687,7 +1987,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
                 {Object.keys(tiers)
-                  .sort((a, b) => b - a) // Reverse order: highest tier first
+                  .sort((a, b) => b - a)
                   .map(tier => (
                     <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
                       {tiers[tier].name}
@@ -1699,9 +1999,14 @@ export default function HolderTable({ holders, contract, loading, totalShares })
         </thead>
         <tbody className="text-gray-300 text-xs md:text-sm">
           {safeHolders.map((holder, index) => (
-            <tr
+            <motion.tr
               key={holder.wallet}
-              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"} hover:bg-blue-700`}
+              variants={rowVariants}
+              initial="hidden"
+              animate="visible"
+              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              transition={{ delay: index * 0.05 }}
+              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"}`}
             >
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank}</td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
@@ -1730,7 +2035,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.percentage.toFixed(2)}%</td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.displayMultiplierSum.toFixed(2)}</td>
                   {Object.keys(tiers)
-                    .sort((a, b) => b - a) // Reverse order: highest tier first
+                    .sort((a, b) => b - a)
                     .map(tier => (
                       <td key={tier} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
                         {holder.tiers?.[tier] || 0}
@@ -1738,21 +2043,28 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                     ))}
                 </>
               )}
-            </tr>
+            </motion.tr>
           ))}
         </tbody>
       </table>
     </div>
   );
-}-e 
+}
+
+// Export as memoized component to reduce unnecessary re-renders
+export default memo(HolderTable);-e 
 ---
 File: ./components/LoadingIndicator.js
 // app/components/LoadingIndicator.js
+import { motion } from 'framer-motion';
+
 export default function LoadingIndicator({ status }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 animate-fade-in w-full flex-1">
-      <svg
-        className="animate-spin h-6 w-6 sm:h-8 sm:w-8 text-blue-400"
+      <motion.svg
+        className="h-6 w-6 sm:h-8 sm:w-8 text-blue-400"
+        animate={{ scale: [1, 1.2, 1], rotate: 360 }}
+        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
         viewBox="0 0 24 24"
@@ -1763,7 +2075,7 @@ export default function LoadingIndicator({ status }) {
           fill="currentColor"
           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
         />
-      </svg>
+      </motion.svg>
       <p className="text-sm sm:text-base text-gray-300">{status}</p>
     </div>
   );
@@ -1906,15 +2218,13 @@ export default function useNFTHolders(dataCache) {
 }-e 
 ---
 File: ./components/NFTPage.js
-// app/components/NFTPage.js
+// components/NFTPage.js
 'use client';
 import { useState, useEffect } from 'react';
 import HolderTable from '@/components/HolderTable';
-import LoadingIndicator from '@/components/LoadingIndicator'; // Import the component
+import LoadingIndicator from '@/components/LoadingIndicator';
 import { contractDetails } from '@/app/nft-contracts';
-
-const cache = {};
-const CACHE_TTL = 30 * 60 * 1000;
+import { useNFTStore } from '@/app/store';
 
 export default function NFTPage({ contractKey }) {
   const [data, setData] = useState(null);
@@ -1922,6 +2232,7 @@ export default function NFTPage({ contractKey }) {
   const [error, setError] = useState(null);
 
   const { name, apiEndpoint } = contractDetails[contractKey] || {};
+  const { getCache, setCache } = useNFTStore();
 
   useEffect(() => {
     async function fetchAllHolders() {
@@ -1931,11 +2242,9 @@ export default function NFTPage({ contractKey }) {
         return;
       }
 
-      const cachedEntry = cache[contractKey];
-      const now = Date.now();
-      if (cachedEntry && (now - cachedEntry.timestamp) < CACHE_TTL) {
-        console.log(`[NFTPage] Using cached data for ${contractKey}`);
-        setData(cachedEntry.data);
+      const cachedData = getCache(contractKey);
+      if (cachedData) {
+        setData(cachedData);
         setLoading(false);
         return;
       }
@@ -1962,57 +2271,56 @@ export default function NFTPage({ contractKey }) {
 
           while (attempts < maxAttempts && !success) {
             try {
-              console.log(`[NFTPage] Fetching ${contractKey} page ${page}: ${apiEndpoint}?page=${page}&pageSize=${pageSize}`);
+              console.log(`[NFTPage] Fetching ${contractKey} page ${page}`);
               const res = await fetch(`${apiEndpoint}?page=${page}&pageSize=${pageSize}`, {
                 signal: AbortSignal.timeout(30000),
               });
-              console.log(`[NFTPage] Fetch status for ${contractKey} page ${page}: ${res.status}`);
-
               if (!res.ok) {
                 const errorText = await res.text();
-                console.error(`[NFTPage] Fetch failed with status ${res.status}: ${errorText}`);
-                if (res.status === 429) throw new Error('Rate limit exceeded');
                 throw new Error(`Page ${page} failed with status: ${res.status} - ${errorText}`);
               }
 
               const json = await res.json();
-              console.log(`[NFTPage] Page ${page} response for ${contractKey}: holders=${json.holders.length}, totalTokens=${json.totalTokens}, totalPages=${json.totalPages}`);
-
-              allHolders = allHolders.concat(json.holders);
-              totalTokens = json.totalTokens;
-              totalLockedAscendant = json.totalLockedAscendant || 0;
-              totalShares = json.totalShares || 0;
-              toDistributeDay8 = json.toDistributeDay8 || 0;
-              toDistributeDay28 = json.toDistributeDay28 || 0;
-              toDistributeDay90 = json.toDistributeDay90 || 0;
-              pendingRewards = json.pendingRewards || 0;
-              totalPages = json.totalPages;
-              if (json.holders.length === 0) break;
-
+              allHolders = allHolders.concat(json.holders || []);
+              totalTokens = json.totalTokens || totalTokens;
+              totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
+              totalShares = json.totalShares || totalShares;
+              toDistributeDay8 = json.toDistributeDay8 || toDistributeDay8;
+              toDistributeDay28 = json.toDistributeDay28 || toDistributeDay28;
+              toDistributeDay90 = json.toDistributeDay90 || toDistributeDay90;
+              pendingRewards = json.pendingRewards || pendingRewards;
+              totalPages = json.totalPages || 1;
               page++;
               success = true;
+              if (!json.holders || json.holders.length === 0) break;
             } catch (err) {
               attempts++;
-              if (err.message.includes('Rate limit')) {
-                console.log(`[NFTPage] Rate limit hit on ${contractKey} page ${page}, attempt ${attempts}. Waiting...`);
+              if (err.message.includes('Rate limit') || err.name === 'TimeoutError') {
+                console.log(`[NFTPage] Retry ${attempts} for ${contractKey} page ${page} due to: ${err.message}`);
                 await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
               } else {
                 throw err;
               }
             }
           }
-          if (!success) throw new Error(`Failed to fetch page ${page} for ${contractKey} after ${maxAttempts} attempts`);
+          if (!success) {
+            throw new Error(`Failed to fetch page ${page} for ${contractKey} after ${maxAttempts} attempts`);
+          }
         }
 
         const uniqueHoldersMap = new Map();
-        allHolders.forEach(holder => uniqueHoldersMap.set(holder.wallet, holder));
-        let uniqueHolders = Array.from(uniqueHoldersMap.values());
-        console.log(`[NFTPage] Total Unique ${contractKey} Holders:`, uniqueHolders.length);
+        allHolders.forEach(holder => {
+          if (holder && holder.wallet) uniqueHoldersMap.set(holder.wallet, holder);
+        });
+        const uniqueHolders = Array.from(uniqueHoldersMap.values());
+        console.log(`[NFTPage] Total Unique ${contractKey} Holders: ${uniqueHolders.length}`);
 
-        const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + h.multiplierSum, 0);
-        console.log(`[NFTPage] Total ${contractKey} Multiplier Sum:`, totalMultiplierSum);
+        const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
+        if (!totalTokens && uniqueHolders.length > 0) {
+          totalTokens = uniqueHolders.reduce((sum, h) => sum + (h.total || 0), 0);
+        }
 
-        uniqueHolders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
         uniqueHolders.forEach((holder, index) => {
           holder.rank = index + 1;
           holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
@@ -2028,15 +2336,9 @@ export default function NFTPage({ contractKey }) {
           toDistributeDay90,
           pendingRewards,
           totalMultiplierSum,
-          page: 0,
-          totalPages: 1
         };
 
-        cache[contractKey] = {
-          data: fetchedData,
-          timestamp: Date.now()
-        };
-
+        setCache(contractKey, fetchedData);
         setData(fetchedData);
         setLoading(false);
       } catch (err) {
@@ -2047,23 +2349,26 @@ export default function NFTPage({ contractKey }) {
     }
 
     fetchAllHolders();
-  }, [contractKey, name, apiEndpoint]);
+  }, [contractKey, name, apiEndpoint, getCache, setCache]);
 
   const renderSummary = () => {
     if (!data) return null;
+
+    const totalMultiplierSum = data.totalMultiplierSum || 0;
+    const totalTokens = data.totalTokens || 0;
 
     if (contractKey === 'ascendantNFT') {
       return (
         <>
           <h2 className="text-2xl font-semibold mb-2">Summary</h2>
           <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
-          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{data.totalTokens.toLocaleString()}</span></p>
-          <p>Total Locked Ascendant: <span className="font-bold">{(data.totalLockedAscendant / 1e18).toLocaleString()}</span></p>
-          <p>Total Shares: <span className="font-bold">{(data.totalShares / 1e18).toLocaleString()}</span></p>
-          <p>Total Pending DragonX Rewards: <span className="font-bold">{(data.pendingRewards / 1e18).toLocaleString()}</span></p>
-          <p>Pending DAY8 Rewards: <span className="font-bold">{(data.toDistributeDay8 / 1e18).toLocaleString()}</span></p>
-          <p>Pending DAY28 Rewards: <span className="font-bold">{(data.toDistributeDay28 / 1e18).toLocaleString()}</span></p>
-          <p>Pending DAY90 Rewards: <span className="font-bold">{(data.toDistributeDay90 / 1e18).toLocaleString()}</span></p>
+          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
+          <p>Total Locked Ascendant: <span className="font-bold">{(data.totalLockedAscendant / 1e18 || 0).toLocaleString()}</span></p>
+          <p>Total Shares: <span className="font-bold">{(data.totalShares / 1e18 || 0).toLocaleString()}</span></p>
+          <p>Total Pending DragonX Rewards: <span className="font-bold">{(data.pendingRewards / 1e18 || 0).toLocaleString()}</span></p>
+          <p>Pending DAY8 Rewards: <span className="font-bold">{(data.toDistributeDay8 / 1e18 || 0).toLocaleString()}</span></p>
+          <p>Pending DAY28 Rewards: <span className="font-bold">{(data.toDistributeDay28 / 1e18 || 0).toLocaleString()}</span></p>
+          <p>Pending DAY90 Rewards: <span className="font-bold">{(data.toDistributeDay90 / 1e18 || 0).toLocaleString()}</span></p>
         </>
       );
     } else {
@@ -2071,8 +2376,8 @@ export default function NFTPage({ contractKey }) {
         <>
           <h2 className="text-2xl font-semibold mb-2">Summary</h2>
           <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
-          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{data.totalTokens.toLocaleString()}</span></p>
-          <p>Total Multiplier Sum: <span className="font-bold">{data.totalMultiplierSum.toLocaleString()}</span></p>
+          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
+          <p>Total Multiplier Sum: <span className="font-bold">{totalMultiplierSum.toLocaleString()}</span></p>
         </>
       );
     }
@@ -2080,18 +2385,18 @@ export default function NFTPage({ contractKey }) {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-      <h1 className="text-4xl font-bold mb-6">{name} Holders</h1>
+      <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
       {loading ? (
-        <LoadingIndicator status={`Loading all ${name} holders...`} />
+        <LoadingIndicator status={`Loading all ${name || 'contract'} holders...`} />
       ) : error ? (
         <p className="text-red-500 text-lg">Error: {error}</p>
+      ) : !data ? (
+        <p className="text-gray-400 text-lg">No data available for {name || 'this contract'}.</p>
       ) : (
         <div className="w-full max-w-6xl">
-          <div className="mb-6 p-4 bg-gray-800 rounded-lg shadow">
-            {renderSummary()}
-          </div>
+          <div className="mb-6 p-4 bg-gray-800 rounded-lg shadow">{renderSummary()}</div>
           <HolderTable
-            holders={data.holders}
+            holders={data.holders || []}
             contract={contractKey}
             loading={loading}
             totalShares={contractKey === 'ascendantNFT' ? data.totalShares : undefined}
@@ -2104,37 +2409,6 @@ export default function NFTPage({ contractKey }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}-e 
----
-File: ./components/NFTNavigation.jsx
-// components/NFTNavigation.jsx
-import Link from 'next/link';
-
-export default function NFTNavigation() {
-  const nftCollections = [
-    { name: 'Element280', href: '/nft/ETH/Element280' },
-    { name: 'Element369', href: '/nft/ETH/Element369' },
-    { name: 'Stax', href: '/nft/ETH/Stax' },
-    { name: 'Ascendant', href: '/nft/ETH/Ascendant' },
-    { name: 'E280 (Base)', href: '/nft/BASE/E280' },
-  ];
-
-  return (
-    <div className="bg-gray-800 p-4 rounded-lg shadow-md w-full max-w-6xl mb-6">
-      <h2 className="text-2xl font-semibold text-white mb-4">TitanX NFT Protocols</h2>
-      <div className="flex flex-wrap gap-4">
-        {nftCollections.map((collection) => (
-          <Link
-            key={collection.name}
-            href={collection.href}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            {collection.name}
-          </Link>
-        ))}
-      </div>
     </div>
   );
 }-e 
@@ -2194,122 +2468,73 @@ export default function ProtocolTabs({ activeTab, setActiveTab, loading }) {
   }-e 
 ---
 File: ./components/SearchResultsModal.js
+// components/SearchResultsModal.js
+'use client';
+import { motion } from 'framer-motion';
 import HolderTable from './HolderTable';
 
 export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick }) {
-  console.log("SearchResultsModal props:", { searchResult, searchAddress });
-  return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 px-2 sm:px-0"
-      onClick={handleBackgroundClick}
-    >
-      <div
-        className="bg-gray-800 rounded-xl shadow-2xl p-4 sm:p-6 w-full max-w-full sm:max-w-4xl max-h-[80vh] overflow-y-auto text-white"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl sm:text-2xl font-semibold text-white">
-            Search Results for {searchAddress.slice(0, 6)}...{searchAddress.slice(-4)}
-          </h2>
-          <button
-            onClick={closeModal}
-            className="text-gray-400 hover:text-white text-xl sm:text-2xl font-bold focus:outline-none"
-            aria-label="Close search results"
-          >
-            ×
-          </button>
-        </div>
-        {Object.entries(searchResult)
-          .filter(([contract, data]) => data && contract !== "unknown" && typeof data === "object" && data.wallet)
-          .map(([contract, data]) => (
-            <div key={contract} className="mb-4">
-              <h3 className="text-lg sm:text-xl font-medium text-gray-300 mb-2">
-                {contract === "element280" ? "Element 280" : contract === "staxNFT" ? "Stax NFT" : "Element 369"}
-              </h3>
-              <HolderTable holders={[data]} contract={contract} loading={false} />
-            </div>
-          ))}
-      </div>
-    </div>
-  );
-}-e 
----
-File: ./components/NFTHoldersDashboard.js
-"use client";
-import { useState } from "react";
-import useNFTHolders from "./useNFTHolders";
-import LoadingIndicator from "./LoadingIndicator";
-import ProtocolTabs from "./ProtocolTabs";
-import SearchBar from "./SearchBar";
-import SearchResultsModal from "./SearchResultsModal";
-import HolderTable from "./HolderTable";
-
-export default function NFTHoldersDashboard({ holdersData = { element280: [], staxNFT: [], element369: [] } }) {
-  const {
-    holders,
-    loading,
-    status,
-    progress,
-    searchResult,
-    setSearchAddress,
-    handleSearch,
-    activeTab,
-    setActiveTab,
-    isModalOpen,
-    closeModal,
-  } = useNFTHolders(holdersData);
-
-  const [searchInput, setSearchInput] = useState(""); // Local state for input
-
-  const handleBackgroundClick = (e) => {
-    if (e.target === e.currentTarget) {
-      closeModal();
-    }
+  const modalVariants = {
+    hidden: { opacity: 0, y: -50 },
+    visible: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -50 },
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white p-4">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">NFT Holders Dashboard</h1>
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4"
+      onClick={handleBackgroundClick}
+    >
+      <motion.div
+        className="bg-gray-800 text-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-2xl font-bold">Search Results for {searchAddress}</h2>
+          <button onClick={closeModal} className="text-gray-400 hover:text-white text-2xl">
+            &times;
+          </button>
+        </div>
 
-        <ProtocolTabs activeTab={activeTab} setActiveTab={setActiveTab} loading={loading} />
-
-        <SearchBar
-          setSearchAddress={(value) => {
-            setSearchInput(value);
-            setSearchAddress(value);
-          }}
-          handleSearch={handleSearch}
-          loading={loading}
-        />
-
-        {loading ? (
-          <LoadingIndicator status={status} progress={progress} />
+        {Object.keys(searchResult).length === 0 ? (
+          <p className="text-gray-400">No results available.</p>
         ) : (
-          <>
-            <p className={`mb-4 text-sm sm:text-base ${status.includes("Error") ? "text-red-500" : "text-green-500"}`}>
-              {status}
-            </p>
-            <h2 className="text-xl font-semibold mb-2">
-              {activeTab === "element280" ? "Element 280" : activeTab === "staxNFT" ? "Stax NFT" : "Element 369"} Holders (
-              {holders[activeTab]?.length || 0})
-            </h2>
-            <HolderTable holders={holders[activeTab]} contract={activeTab} loading={loading} />
-          </>
+          Object.entries(searchResult).map(([contract, data]) => (
+            <div key={contract} className="mb-6">
+              <h3 className="text-xl font-semibold mb-2">{contractDetails[contract]?.name || contract}</h3>
+              {data === null ? (
+                <p className="text-gray-400">Wallet not found in this collection.</p>
+              ) : data.error ? (
+                <p className="text-red-500">Error: {data.error}</p>
+              ) : data.message ? (
+                <p className="text-gray-400">{data.message}</p>
+              ) : (
+                <HolderTable
+                  holders={[data]}
+                  contract={contract}
+                  loading={false}
+                  totalShares={data.totalShares} // Pass totalShares from search result
+                />
+              )}
+            </div>
+          ))
         )}
-
-        {isModalOpen && searchResult && (
-          <SearchResultsModal
-            searchResult={searchResult}
-            searchAddress={searchInput}
-            closeModal={closeModal}
-            handleBackgroundClick={handleBackgroundClick}
-          />
-        )}
-      </div>
+      </motion.div>
     </div>
   );
-}-e 
+}
+
+const contractDetails = {
+  element280: { name: 'Element280' },
+  element369: { name: 'Element369' },
+  staxNFT: { name: 'Stax' },
+  ascendantNFT: { name: 'Ascendant' },
+  e280: { name: 'E280' },
+};-e 
 ---
 File: ./components/Navbar.jsx
 // components/Navbar.jsx
@@ -2366,9 +2591,6 @@ function Navbar() {
         },
       ],
     },
-    { name: 'Moon Math', href: '/moonmath' },
-    { name: 'TitanX Hub', href: 'https://titanxhub.com', external: true },
-    { name: 'TitanX Info', href: 'https://titanxinfo.com', external: true },
     { name: 'About', href: '/about' },
   ];
 

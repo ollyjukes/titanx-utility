@@ -1,8 +1,16 @@
-// app/components/HolderTable.js
+// components/HolderTable.js
+import { memo } from 'react'; // Add memo import
+import { motion } from 'framer-motion';
 import { contractTiers } from "@/app/nft-contracts";
 
-export default function HolderTable({ holders, contract, loading, totalShares }) {
-  const safeHolders = Array.isArray(holders) ? holders : [];
+const rowVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
+};
+
+function HolderTable({ holders, contract, loading, totalShares }) {
+  // Filter out null/undefined holders and those without a wallet property
+  const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
   const isAscendant = contract === 'ascendantNFT';
 
   if (!safeHolders.length) {
@@ -28,7 +36,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                     <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
                     <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
                     {Object.keys(contractTiers[contract] || {})
-                      .sort((a, b) => b - a) // Reverse order: highest tier first
+                      .sort((a, b) => b - a)
                       .map(tier => (
                         <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
                           {contractTiers[contract][tier].name}
@@ -40,7 +48,13 @@ export default function HolderTable({ holders, contract, loading, totalShares })
             </thead>
             <tbody className="text-gray-300 text-xs md:text-sm">
               {Array(5).fill().map((_, i) => (
-                <tr key={i} className="animate-pulse">
+                <motion.tr
+                  key={i}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: i * 0.1, duration: 0.5 }}
+                  className="animate-pulse"
+                >
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
@@ -50,7 +64,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md}px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                     </>
                   ) : (
                     <>
@@ -61,7 +75,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                       ))}
                     </>
                   )}
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
@@ -97,7 +111,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
                 {Object.keys(tiers)
-                  .sort((a, b) => b - a) // Reverse order: highest tier first
+                  .sort((a, b) => b - a)
                   .map(tier => (
                     <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
                       {tiers[tier].name}
@@ -109,9 +123,14 @@ export default function HolderTable({ holders, contract, loading, totalShares })
         </thead>
         <tbody className="text-gray-300 text-xs md:text-sm">
           {safeHolders.map((holder, index) => (
-            <tr
+            <motion.tr
               key={holder.wallet}
-              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"} hover:bg-blue-700`}
+              variants={rowVariants}
+              initial="hidden"
+              animate="visible"
+              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              transition={{ delay: index * 0.05 }}
+              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"}`}
             >
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank}</td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
@@ -140,7 +159,7 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.percentage.toFixed(2)}%</td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.displayMultiplierSum.toFixed(2)}</td>
                   {Object.keys(tiers)
-                    .sort((a, b) => b - a) // Reverse order: highest tier first
+                    .sort((a, b) => b - a)
                     .map(tier => (
                       <td key={tier} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
                         {holder.tiers?.[tier] || 0}
@@ -148,10 +167,13 @@ export default function HolderTable({ holders, contract, loading, totalShares })
                     ))}
                 </>
               )}
-            </tr>
+            </motion.tr>
           ))}
         </tbody>
       </table>
     </div>
   );
 }
+
+// Export as memoized component to reduce unnecessary re-renders
+export default memo(HolderTable);

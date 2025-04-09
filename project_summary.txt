@@ -15,6 +15,7 @@ Dependencies from package.json:
   - react-virtualized
   - viem
   - wagmi
+  - zustand
 
 Dev Dependencies from package.json:
   - @eslint/eslintrc

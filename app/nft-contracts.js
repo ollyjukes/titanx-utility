@@ -69,6 +69,14 @@ export const nftContracts = {
     description:
       "Ascendant NFTs are minted with ASCENDANT tokens and offer staking rewards from DragonX pools over 8, 28, and 90-day periods. Features fusion mechanics to combine same-tier NFTs into higher tiers.",
   },
+  e280: {
+    name: "E280",
+    symbol: "E280",
+    address: null, // Not deployed yet
+    deploymentBlock: null,
+    tiers: {}, // Define if applicable
+    description: "E280 NFTs on BASE chain. Contract not yet deployed.",
+  },
 };
 
 export const contractAddresses = {
@@ -76,6 +84,7 @@ export const contractAddresses = {
   element369: nftContracts.element369.address,
   staxNFT: nftContracts.staxNFT.address,
   ascendantNFT: nftContracts.ascendantNFT.address,
+  e280: nftContracts.e280.address,
 };
 
 export const deploymentBlocks = {
@@ -83,6 +92,7 @@ export const deploymentBlocks = {
   element369: nftContracts.element369.deploymentBlock,
   staxNFT: nftContracts.staxNFT.deploymentBlock,
   ascendantNFT: nftContracts.ascendantNFT.deploymentBlock,
+  e280: nftContracts.e280.deploymentBlock,
 };
 
 export const contractTiers = {
@@ -90,33 +100,39 @@ export const contractTiers = {
   element369: nftContracts.element369.tiers,
   staxNFT: nftContracts.staxNFT.tiers,
   ascendantNFT: nftContracts.ascendantNFT.tiers,
+  e280: nftContracts.e280.tiers,
 };
 
-// Add contractDetails for NFTPage compatibility
 export const contractDetails = {
   element280: {
     name: nftContracts.element280.name,
-    totalTokens: 8209, // From your logs
-    pageSize: 1000,   // From your API
-    apiEndpoint: '/api/holders/Element280'
+    totalTokens: 8209, // Update with actual value if needed
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Element280',
   },
   element369: {
     name: nftContracts.element369.name,
-    totalTokens: 0,   // Placeholder - update with actual value
-    pageSize: 1000,   // Adjust as needed
-    apiEndpoint: '/api/holders/Element369'
+    totalTokens: 0, // Update with actual value
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Element369',
   },
   staxNFT: {
     name: nftContracts.staxNFT.name,
-    totalTokens: 0,   // Placeholder - update with actual value
-    pageSize: 1000,   // Adjust as needed
-    apiEndpoint: '/api/holders/Stax'
+    totalTokens: 0, // Update with actual value
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Stax',
   },
   ascendantNFT: {
     name: nftContracts.ascendantNFT.name,
-    totalTokens: 0,   // Placeholder - update with actual value
-    pageSize: 1000,   // Adjust as needed
-    apiEndpoint: '/api/holders/Ascendant'
+    totalTokens: 0, // Update with actual value
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Ascendant',
+  },
+  e280: {
+    name: nftContracts.e280.name,
+    totalTokens: 0,
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/E280',
   },
 };
 
