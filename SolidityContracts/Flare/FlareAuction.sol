@@ -1,0 +1,377 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import "../const/Constants.sol";
+import "../interfaces/IX28.sol";
+import "../interfaces/IWETH.sol";
+import {Time} from "../utils/Time.sol";
+import {wmul, wdiv} from "../utils/Math.sol";
+import {Flare} from "../core/Flare.sol";
+import {FlareMinting} from "../core/FlareMinting.sol";
+import {FlareAuctionBuy} from "./FlareAuctionBuy.sol";
+import {FlareBuyAndBurn} from "../core/FlareBuyNBurn.sol";
+import {FlareAuctionTreasury} from "../core/FlareAuctionTreasury.sol";
+import {SwapActions, SwapActionParams} from "../actions/SwapActions.sol";
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+
+/**
+ * @dev Struct tracking daily auction statistics
+ * @param flareEmitted Amount of Flare tokens emitted for the day
+ * @param titanXDeposited Total TitanX tokens deposited for the day
+ */
+struct DailyStatistic {
+    uint128 flareEmitted;
+    uint128 titanXDeposited;
+}
+
+/**
+ * @dev Struct tracking user deposits
+ * @param ts The timestamp of the deposit
+ * @param day The day of the deposit
+ * @param amount The amount of tokens deposited
+ */
+struct UserAuction {
+    uint32 ts;
+    uint32 day;
+    uint256 amount;
+}
+
+/**
+ * @dev Struct tracking the state of the FlareAuction contract
+ * @param titanX Address of the TitanX token
+ * @param flare Address of the Flare token
+ * @param flareMinting Address of the FlareMinting contract
+ * @param flareBnB Address of the FlareBuyAndBurn contract
+ * @param titanXInfBnB Address of the InfernoBnb contract
+ * @param X28 Address of the X28 contract
+ * @param WETH Address of the WETH contract
+ * @param v3Router Address of the Uniswap V3 Router
+ */
+struct AuctionState {
+    address titanX;
+    Flare flare;
+    FlareMinting flareMinting;
+    FlareBuyAndBurn flareBnB;
+    address titanXInfBnB;
+    address X28;
+    address WETH;
+    address v3Router;
+}
+
+/**
+ * @title FlareAuction Contract
+ * @author Decentra
+ * @dev Contract managing the auction of Flare tokens through TitanX/ETH deposits
+ * @notice This contract:
+ *         - Manages the auction of Flare tokens
+ *         - Handles TitanX and ETH deposits
+ */
+contract FlareAuction is SwapActions {
+    using SafeERC20 for IERC20;
+
+    /// @notice The struct packing state vars
+    AuctionState public state;
+
+    /// @notice The startTimestamp
+    uint32 public immutable startTimestamp;
+
+    /// @notice the depositId
+    uint64 depositId;
+
+    /// @notice the total amount of X28 burnt
+    uint256 public totalX28Burnt;
+
+    /// @notice Mapping to keep track of user deposits
+    mapping(address => mapping(uint64 id => UserAuction)) public depositOf;
+
+    /// @notice Mapping to keep track of daily statistics
+    mapping(uint32 day => DailyStatistic) public dailyStats;
+
+    /// @notice throws if caller claims before 24 hours of deposit
+    error FlareAuction__OnlyClaimableAfter24Hours();
+
+    /// @notice throws if liquidity has already been added
+    error FlareAuction__LiquidityAlreadyAdded();
+
+    /// @notice throws if the auction has not started
+    error FlareAuction__NotStartedYet();
+
+    /// @notice throws if caller has nothing to claim
+    error FlareAuction__NothingToClaim();
+
+    /// @notice throws if the auction has ended
+    error FlareAuction__AuctionEnded();
+
+    /// @notice throws if auction is still in minting phase
+    error FlareAuction__MintingPhase();
+
+    /// @notice throws if the auction has nothing to emit
+    error FlareAuction__NothingToEmit();
+
+    /// @notice throws if genesis transfer fails
+    error FlareAuction__GenesisTransferFailed();
+
+    /// @notice Event emitted when a user deposits tokens during auction cycle
+    /// @param user Address of the user depositing
+    /// @param amount The amount of deposited tokens
+    /// @param id The deposit ID
+    event UserDeposit(address indexed user, uint256 indexed amount, uint64 indexed id);
+
+    /// @notice Event emitted when a user claims tokens
+    /// @param user Address of the user claiming
+    /// @param flareAmount The amount of Flare claimed
+    /// @param id The deposit ID
+    event UserClaimed(address indexed user, uint256 indexed flareAmount, uint64 indexed id);
+
+    /**
+     * @notice Initializes the FlareAuction contract
+     * @param _state The storage state struct
+     * @param _s The swap action parameters
+     * @param _startTimestamp Timestamp when the first auction cycle starts
+     */
+    constructor(AuctionState memory _state, SwapActionParams memory _s, uint32 _startTimestamp)
+        notAddress0(_state.titanX)
+        notAddress0(address(_state.flare))
+        notAddress0(address(_state.flareMinting))
+        notAddress0(address(_state.flareBnB))
+        notAddress0(_state.titanXInfBnB)
+        notAddress0(_state.X28)
+        notAddress0(_state.WETH)
+        notAddress0(_state.v3Router)
+        SwapActions(_s)
+    {
+        state = _state;
+        require((_startTimestamp % Time.SECONDS_PER_DAY) == Time.TURN_OVER_TIME, "_startTimestamp must be 2PM UTC");
+
+        startTimestamp = _startTimestamp;
+    }
+
+    /**
+     * @notice Mints Flare tokens by depositing TITANX tokens during an ongoing auction cycle.
+     * @param _amount The amount of TITANX tokens to deposit.
+     */
+    function deposit(uint256 _amount) external notAmount0(_amount) {
+        _checkCycles();
+
+        _updateAuction();
+
+        uint32 daySinceStart = _daySinceStart();
+
+        UserAuction storage userDeposit = depositOf[msg.sender][++depositId];
+
+        DailyStatistic storage stats = dailyStats[daySinceStart];
+
+        userDeposit.ts = uint32(block.timestamp);
+        userDeposit.amount = _amount;
+        userDeposit.day = daySinceStart;
+
+        stats.titanXDeposited += uint128(_amount);
+        IERC20(state.titanX).safeTransferFrom(msg.sender, address(this), _amount);
+
+        _distributeGenesis(0, _amount, false);
+        uint256 remainingAmount = _distributeTitanX(_amount);
+        uint256 X28Amount = _deposit(remainingAmount);
+        _distribute(X28Amount);
+
+        emit UserDeposit(msg.sender, _amount, depositId);
+    }
+
+    /**
+     * @notice Mints Flare tokens by depositing ETH tokens during an ongoing auction cycle.
+     * @param _minAmount The minimum amount of ETH to deposit.
+     * @param _deadline The deadline for the deposit.
+     */
+    function depositETH(uint256 _minAmount, uint32 _deadline) external payable notAmount0(msg.value) {
+        _checkCycles();
+        _updateAuction();
+
+        uint256 titanXAmount = getSpotPrice(state.WETH, state.titanX, msg.value);
+        checkIsDeviationOutOfBounds(state.WETH, state.titanX, msg.value, titanXAmount);
+
+        IWETH(state.WETH).deposit{value: msg.value}();
+        uint256 _genAmount = wmul(msg.value, TO_GENESIS);
+        uint256 _swapAmount = msg.value - _genAmount;
+
+        uint256 _titanXToDeposit = _swapWethToTitanX(_swapAmount, _minAmount, _deadline);
+
+        uint32 daySinceStart = _daySinceStart();
+
+        UserAuction storage userDeposit = depositOf[msg.sender][++depositId];
+
+        DailyStatistic storage stats = dailyStats[daySinceStart];
+
+        userDeposit.ts = uint32(block.timestamp);
+        userDeposit.amount += titanXAmount;
+        userDeposit.day = daySinceStart;
+
+        stats.titanXDeposited += uint128(titanXAmount);
+
+        _distributeGenesis(_genAmount, 0, true);
+        uint256 remainingTitanX = _distributeTitanX(_titanXToDeposit);
+        uint256 X28Amount = _deposit(remainingTitanX);
+        _distribute(X28Amount);
+
+        emit UserDeposit(msg.sender, titanXAmount, depositId);
+    }
+
+    /**
+     * @notice Claims the minted Flare tokens after the end of the specified auction.
+     * @param _id The ID of the auction to claim
+     */
+    function claim(uint64 _id) public {
+        UserAuction storage userDep = depositOf[msg.sender][_id];
+
+        require(block.timestamp >= userDep.ts + 24 hours, FlareAuction__OnlyClaimableAfter24Hours());
+
+        uint256 toClaim = amountToClaim(msg.sender, _id);
+
+        if (toClaim == 0) revert FlareAuction__NothingToClaim();
+
+        emit UserClaimed(msg.sender, toClaim, _id);
+
+        state.flare.transfer(msg.sender, toClaim);
+
+        userDep.amount = 0;
+    }
+
+    /**
+     * @notice Claims the minted Flare tokens after the end of the specified auction id.
+     * @param _ids The IDs of the deposit ids to claim
+     */
+    function batchClaim(uint32[] calldata _ids) external {
+        for (uint256 i; i < _ids.length; ++i) {
+            claim(_ids[i]);
+        }
+    }
+
+    /**
+     * @notice Calculates the amount of Flare tokens that can be claimed after the end of the specified auction ids.
+     * @param _ids The IDs of the deposit ids to claim
+     */
+    function batchClaimableAmount(address _user, uint32[] calldata _ids) public view returns (uint256 toClaim) {
+        for (uint256 i; i < _ids.length; ++i) {
+            toClaim += amountToClaim(_user, _ids[i]);
+        }
+    }
+
+    /**
+     * @notice Calculates the amount of Flare tokens that can be claimed after the end of the specified auction id.
+     * @param _id The ID of the deposit id to claim
+     */
+    function amountToClaim(address _user, uint64 _id) public view returns (uint256 toClaim) {
+        UserAuction storage userDep = depositOf[_user][_id];
+        DailyStatistic memory stats = dailyStats[userDep.day];
+
+        return (userDep.amount * stats.flareEmitted) / stats.titanXDeposited;
+    }
+
+    /**
+     * @notice Internal function to distribute X28 tokens to various destinations for burning.
+     * @param _amount The amount of X28 tokens to distribute.
+     */
+    function _distribute(uint256 _amount) internal {
+        uint256 _toBuyNBurn = wmul(_amount, wdiv(TO_BUY_AND_BURN, TOTAL_X28_PERCENTAGE_DISTRIBUTION));
+        uint256 _toFlareAuctionBuy = wmul(_amount, wdiv(TO_AUCTION_BUY, TOTAL_X28_PERCENTAGE_DISTRIBUTION));
+
+        IX28(state.X28).approve(address(state.flareBnB), _toBuyNBurn);
+        state.flareBnB.distributeX28ForBurning(_toBuyNBurn);
+
+        IX28(state.X28).approve(state.flare.flareAuctionBuy(), _toFlareAuctionBuy);
+        FlareAuctionBuy(state.flare.flareAuctionBuy()).distribute(_toFlareAuctionBuy);
+
+        totalX28Burnt += _amount;
+    }
+
+    /**
+     * @notice Internal function to distribute genesis tokens to various destinations.
+     * @param _amount The amount of genesis tokens to distribute.
+     * @param _titanXAmount The amount of TITANX tokens to distribute.
+     * @param _isEth True if the distribution is for ETH, false otherwise.
+     */
+    function _distributeGenesis(uint256 _amount, uint256 _titanXAmount, bool _isEth) internal {
+        if (_isEth) {
+            uint256 _toGenesisEth = wmul(_amount, uint256(0.5e18));
+            IWETH(state.WETH).transfer(GENESIS, _toGenesisEth);
+            IWETH(state.WETH).transfer(GENESIS_TWO, _toGenesisEth);
+        } else {
+            uint256 _toGenesis = wmul(_titanXAmount, uint256(TO_GENESIS));
+            IERC20(state.titanX).transfer(GENESIS, wmul(_toGenesis, uint256(0.75e18)));
+            IERC20(state.titanX).transfer(GENESIS_TWO, wmul(_toGenesis, uint256(0.25e18)));
+        }
+    }
+
+    /**
+     * @notice Internal function to distribute TITANX tokens to various destinations.
+     * @param _amount The amount of TITANX tokens to distribute.
+     */
+    function _distributeTitanX(uint256 _amount) internal returns (uint256) {
+        if (block.timestamp <= startTimestamp + FOUR_WEEKS) {
+            IERC20(state.titanX).transfer(FlARE_LP, wmul(_amount, TO_FLARE_LP));
+        } else {
+            IERC20(state.titanX).transfer(state.titanXInfBnB, wmul(_amount, TO_INFERNO_BNB));
+        }
+
+        IERC20(state.titanX).transfer(FLARE_LP_WEBBING, wmul(_amount, TO_FLARE_LP));
+
+        return IERC20(state.titanX).balanceOf(address(this));
+    }
+
+    /**
+     * @notice Deposits TITANX tokens into the X28 contract.
+     * @param _amount The amount of TITANX tokens to deposit.
+     */
+    function _deposit(uint256 _amount) internal returns (uint256) {
+        IERC20(state.titanX).approve(state.X28, _amount);
+        IX28(state.X28).mintX28withTitanX(_amount);
+        return _amount;
+    }
+
+    /**
+     * @notice Swaps WETH for TITANX tokens.
+     * @param _amount The amount of WETH tokens to swap.
+     * @param _minReturn The minimum amount of TITANX tokens to receive.
+     * @param _deadline The deadline for the swap.
+     */
+    function _swapWethToTitanX(uint256 _amount, uint256 _minReturn, uint32 _deadline)
+        internal
+        returns (uint256 _titanXAmount)
+    {
+        _titanXAmount = swapExactInput(state.WETH, state.titanX, _amount, _minReturn, _deadline);
+    }
+
+    /**
+     * @notice Checks if the auction has started and not in minting phase
+     */
+    function _checkCycles() internal view {
+        require(block.timestamp >= startTimestamp, FlareAuction__NotStartedYet());
+
+        // @notice checks that users can't auction during minting days
+        (,, uint32 endsAt) = state.flareMinting.getCurrentMintCycle();
+        require(block.timestamp >= endsAt, FlareAuction__MintingPhase());
+    }
+
+    /**
+     * @notice Gets the current day since the start of the auction.
+     * @return daySinceStart The current day since the start of the auction
+     */
+    function _daySinceStart() internal view returns (uint32 daySinceStart) {
+        daySinceStart = uint32(((block.timestamp - startTimestamp) / 24 hours) + 1);
+    }
+
+    /**
+     * @notice Updates the auction.
+     */
+    function _updateAuction() internal {
+        uint32 daySinceStart = _daySinceStart();
+
+        if (dailyStats[daySinceStart].flareEmitted != 0) return;
+
+        uint256 toEmit = FlareAuctionTreasury(state.flare.flareAuctionTreasury()).emitForAuction();
+
+        require(toEmit != 0, FlareAuction__NothingToEmit());
+
+        dailyStats[daySinceStart].flareEmitted = uint128(toEmit);
+    }
+}

@@ -1,0 +1,59 @@
+Contract: Constant
+Subdirectory: Flare
+Path: ./SolidityContracts/Flare/Constant.sol
+Contents:
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+address constant DEAD_ADDR = 0x000000000000000000000000000000000000dEaD;
+address constant GENESIS = 0x4B6c91c4cFEf82AE48d57CA38fcBe7F1E70250dC;
+address constant GENESIS_TWO = 0x0a71b0F495948C4b3C3b9D0ADa939681BfBEEf30;
+address constant OWNER = 0x95E67464cdAb64ABC8628D6eCD8946E53AB360A0;
+address constant FlARE_LP = 0x95E67464cdAb64ABC8628D6eCD8946E53AB360A0;
+address constant FLARE_LP_WEBBING = 0xF04B1B3f0e94b289CB8D7e19D45136B4B3d3dA3A;
+
+uint64 constant TO_BUY_AND_BURN = 0.28e18; // 28%
+uint64 constant TO_AUCTION_BUY = 0.48e18; // 48%
+uint64 constant TOTAL_X28_PERCENTAGE_DISTRIBUTION = TO_BUY_AND_BURN + TO_AUCTION_BUY;
+uint64 constant TO_GENESIS = 0.08e18; // 8%
+uint64 constant INCENTIVE = 0.01e18; // 1%
+uint64 constant TO_FLARE_LP = 0.08e18; // 8%
+uint64 constant TO_INFERNO_BNB = 0.08e18; // 8%
+
+uint24 constant POOL_FEE = 10_000; // 1%
+uint16 constant MAX_DEVIATION_LIMIT = 10_000;
+
+uint64 constant WAD = 1e18;
+
+///@dev The intial FLARE that pairs with the inferno received from the swap
+uint256 constant INITIAL_FLARE_FOR_LP = 30_000_000_000e18; // 30 billion FLARE
+uint256 constant INITIAL_X28_FLARE_LP = 30_000_000_000e18; // 30 billion X28
+uint256 constant INITIAL_FLARE_FOR_AUCTION = 1_000_000_000_000e18; // 1 trillion FLARE
+
+///@dev  The duration of 1 mint cycle
+uint32 constant MINT_CYCLE_DURATION = 24 hours;
+
+///@dev The gap between mint cycles
+uint32 constant GAP_BETWEEN_CYCLE = 7 days;
+uint256 constant FOUR_WEEKS = 4 weeks;
+///@dev  The final mint cycle
+uint8 constant MAX_MINT_CYCLE = 11;
+
+uint256 constant MINT_BUY_SELL_TAX_BURN = 0.035e18; // 3.5%
+uint256 constant AFTER_MINT_BUY_SELL_TAX_BURN = 0.01e18; // 1%
+
+uint256 constant MINT_BUY_SELL_TAX_AUCTION = 0.035e18; // 3.5%
+uint256 constant AFTER_MINT_BUY_SELL_TAX_AUCTION = 0.01e18; // 1%
+
+uint256 constant MINT_BUY_SELL_TAX_GENESIS = 0.01e18; // 1%
+uint256 constant AFTER_MINT_BUY_SELL_TAX_GENESIS = 0.008e18; // 0.8%
+
+uint32 constant INTERVAL_TIME = 7 minutes + 30 seconds;
+
+uint8 constant INTERVALS_PER_DAY = uint8(24 hours / INTERVAL_TIME);
+
+uint256 constant STARTING_RATIO = 1e18;
+
+uint64 constant SUN_WED_BNB = 0.04e18; // 4%
+uint64 constant THUR_BNB = 0.1e18; // 10%
+uint64 constant FRI_SAT_BNB = 0.15e18; // 15%

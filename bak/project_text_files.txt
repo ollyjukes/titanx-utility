@@ -19,7 +19,9 @@ NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=1dd2a69d54ac94fdefad918243183710
 NEXT_PUBLIC_ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI-e 
 ---
 File: ./app/layout.js
+
 // app/layout.js
+'use client';
 import './layout.css';
 import { Inter } from 'next/font/google';
 import Navbar from '../components/Navbar';
@@ -611,22 +613,6 @@ export default function Mining() {
     </div>
   );
 }-e 
----
-File: ./app/moonmath/page.js
-// app/moonmath/page.js
-
-export default function MoonMath() {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16 text-center">
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">TitanX MoonMath</h1>
-          <p className="mt-4 text-lg sm:text-xl text-gray-300">
-            This page is under construction. Stay tuned for more about the TitanX Moon Math fun
-          </p>
-        </main>
-      </div>
-    );
-  }-e 
 ---
 File: ./app/api/holders/Stax/route.js
 // app/api/holders/Stax/route.js
@@ -1566,94 +1552,44 @@ File: ./app/layout.css
 }-e 
 ---
 File: ./app/auctions/page.js
-// app/auctions/page.js
 'use client';
-import { useState } from 'react';
+import { useFlareROI } from '../../lib/auctions/flare';
 
-export default function Auctions() {
-  const [selectedAuction, setSelectedAuction] = useState(null);
+export default function AuctionsPage() {
+  const { 
+    currentFlarePerTitanX, 
+    marketFlareTitanXPrice, 
+    marketFlarePerX28, 
+    marketX28PerTitanX, 
+    roi, 
+    isLoading, 
+    hasError,
+    currentMarketValue1BTitanX,
+    flareDerivedFromAuction1BTitanX,
+    marketValueFlareReceived,
+    profitBasedROI,
+    currentMarketValue1BTitanXUSD,
+    flareDerivedFromAuction1BTitanXUSD,
+  } = useFlareROI();
 
-  const auctions = [
-    { name: 'Ascendant', url: 'https://app.ascendant.win/auction' },
-    { name: 'Flare', url: 'https://www.flare.win/auction' },
-    { name: 'Shogun', url: 'https://app.shogun.win/auction' },
-    { name: 'Blaze', url: 'https://app.titanblaze.win/auction' },
-    { name: 'Volt', url: 'https://app.volt.win/auction' },
-    { name: 'Vyper', url: 'https://app.vyper.win/auction' },
-    { name: 'Flux', url: 'https://app.flux.win/auction' },
-    { name: 'Phoenix', url: 'https://app.phoenix.win/' },
-    { name: 'Turbo', url: 'https://app.turbo.win/auction' },
-    { name: 'GoatX', url: 'https://app.thegoatx.win/auction' },
-  ];
-
-  const openModal = (auction) => {
-    setSelectedAuction(auction);
-  };
-
-  const closeModal = () => {
-    setSelectedAuction(null);
-  };
-
-  const handleBackgroundClick = (e) => {
-    if (e.target === e.currentTarget) {
-      closeModal();
-    }
-  };
+  if (isLoading) return <div>Loading...</div>;
+  if (hasError) return <div>Error loading data</div>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-center mb-6">
-          TitanX Ecosystem Auctions
-        </h1>
-        <p className="mt-4 text-lg sm:text-xl text-gray-300 text-center max-w-2xl mx-auto">
-          Explore the current auctions running in the TitanX ecosystem. Click any auction to view it.
-        </p>
-        <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {auctions.map((auction) => (
-            <div
-              key={auction.name}
-              className="bg-gray-800 rounded-lg shadow-md p-6 hover:bg-gray-700 
-                transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1"
-            >
-              <button
-                onClick={() => openModal(auction)}
-                className="text-blue-400 hover:text-blue-300 text-xl font-semibold 
-                  transition-colors duration-200 text-left w-full"
-              >
-                {auction.name} Auction
-              </button>
-              <p className="text-gray-400 mt-2 text-sm truncate">
-                <span className="hover:underline">{auction.url}</span>
-              </p>
-            </div>
-          ))}
-        </div>
-      </main>
-
-      {selectedAuction && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
-          onClick={handleBackgroundClick}
-        >
-          <div className="bg-gray-900 rounded-lg p-4 w-full max-w-4xl h-[80vh] relative">
-            <button
-              onClick={closeModal}
-              className="absolute top-2 right-2 text-gray-300 hover:text-white 
-                bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center"
-            >
-              ✕
-            </button>
-            <h2 className="text-2xl font-bold text-white mb-4">{selectedAuction.name} Auction</h2>
-            <iframe
-              src={selectedAuction.url}
-              className="w-full h-[calc(100%-4rem)] border-0 rounded"
-              title={`${selectedAuction.name} Auction`}
-              allowFullScreen
-            />
-          </div>
-        </div>
-      )}
+    <div>
+      <h1>[Flare Auction]</h1>
+      <p>https://example.com/flare-auction</p>
+      <p>ROI: {roi}%</p>
+      <p>Auction: {currentFlarePerTitanX?.toFixed(2)} FLARE/TX</p>
+      <p>Market FLARE/TITANX Price: {marketFlareTitanXPrice?.toFixed(2)} FLARE/TX</p>
+      <p>Market FLARE/X28: {marketFlarePerX28?.toFixed(2)} FLARE/X28</p>
+      <p>Market X28/TITANX: {marketX28PerTitanX?.toFixed(4)} X28/TX</p>
+      <p>Current Market Value of 1B TITANX: {currentMarketValue1BTitanX?.toLocaleString(undefined, { maximumFractionDigits: 2 })} FLARE</p>
+      <p>Equivalent FLARE Derived from Auction (1B TITANX): {flareDerivedFromAuction1BTitanX?.toLocaleString(undefined, { maximumFractionDigits: 2 })} FLARE</p>
+      <p>Market Value of FLARE Received: {marketValueFlareReceived?.toLocaleString(undefined, { maximumFractionDigits: 2 })} TITANX</p>
+      <p>Profit-Based ROI (1B TITANX): {profitBasedROI}%</p>
+      <p>1B TITANX Market Value in USD: ${currentMarketValue1BTitanXUSD?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+      <p>Projected FLARE Tokens ({flareDerivedFromAuction1BTitanX?.toLocaleString(undefined, { maximumFractionDigits: 0 })} FLARE) Value in USD: ${flareDerivedFromAuction1BTitanXUSD?.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
     </div>
   );
 }-e 
@@ -1805,6 +1741,8 @@ File: ./app/ClientProvider.js
 // app/ClientProvider.js
 'use client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { WagmiProvider, createConfig, http } from 'wagmi';
+import { mainnet } from 'wagmi/chains';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -1815,8 +1753,19 @@ const queryClient = new QueryClient({
   },
 });
 
+const config = createConfig({
+  chains: [mainnet],
+  transports: {
+    [mainnet.id]: http(`https://eth-mainnet.alchemyapi.io/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`),
+  },
+});
+
 export default function ClientProvider({ children }) {
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </WagmiProvider>
+  );
 }-e 
 ---
 File: ./postcss.config.mjs
@@ -2054,6 +2003,130 @@ function HolderTable({ holders, contract, loading, totalShares }) {
 // Export as memoized component to reduce unnecessary re-renders
 export default memo(HolderTable);-e 
 ---
+File: ./components/AuctionCard.js
+// components/AuctionCard.js
+'use client';
+import { useState } from 'react';
+
+export default function AuctionCard({ name, url, roiData }) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const openModal = () => setIsModalOpen(true);
+  const closeModal = () => setIsModalOpen(false);
+  const handleBackgroundClick = (e) => {
+    if (e.target === e.currentTarget) closeModal();
+  };
+
+  return (
+    <>
+      <div
+        className="bg-gray-800 rounded-lg shadow-md p-6 hover:bg-gray-700 
+          transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1"
+      >
+        <button
+          onClick={openModal}
+          className="text-blue-400 hover:text-blue-300 text-xl font-semibold 
+            transition-colors duration-200 text-left w-full"
+        >
+          {name} Auction
+        </button>
+        <p className="text-gray-400 mt-2 text-sm">
+          <span className="hover:underline">{url}</span>
+        </p>
+        {roiData && (
+          <div className="mt-2 text-sm text-orange-400">
+            {roiData.isLoading ? (
+              <p>Calculating ROI...</p>
+            ) : roiData.hasError ? (
+              <p>ROI: Error</p>
+            ) : (
+              <>
+                <p>{roiData.roi !== null ? `ROI: ${roiData.roi}%` : 'ROI: N/A'}</p>
+                <p>
+                  {roiData.currentFlarePerTitanX !== null
+                    ? `Auction: ${roiData.currentFlarePerTitanX.toFixed(2)} FLARE/TX`
+                    : 'Auction: N/A'}
+                </p>
+                <p>
+                  {roiData.marketFlareTitanXPrice !== null
+                    ? `Market FLARE/TITANX Price: ${roiData.marketFlareTitanXPrice.toFixed(2)} FLARE/TX`
+                    : 'Market FLARE/TITANX Price: N/A'}
+                </p>
+                <p>
+                  {roiData.marketFlarePerX28 !== null
+                    ? `Market FLARE/X28: ${roiData.marketFlarePerX28.toFixed(2)} FLARE/X28`
+                    : 'Market FLARE/X28: N/A'}
+                </p>
+                <p>
+                  {roiData.marketX28PerTitanX !== null
+                    ? `Market X28/TITANX: ${roiData.marketX28PerTitanX.toFixed(4)} X28/TX`
+                    : 'Market X28/TITANX: N/A'}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {isModalOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
+          onClick={handleBackgroundClick}
+        >
+          <div className="bg-gray-900 rounded-lg p-4 w-full max-w-4xl h-[80vh] relative">
+            <button
+              onClick={closeModal}
+              className="absolute top-2 right-2 text-gray-300 hover:text-white 
+                bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center"
+            >
+              ✕
+            </button>
+            <h2 className="text-2xl font-bold text-white mb-4">{name} Auction</h2>
+            {roiData && (
+              <div className="text-gray-300 mb-4">
+                {roiData.isLoading ? (
+                  <p>Calculating data...</p>
+                ) : roiData.hasError ? (
+                  <p>Error loading data</p>
+                ) : (
+                  <>
+                    <p>
+                      <strong>Current FLARE/TITANX Ratio (Auction):</strong>{' '}
+                      {roiData.currentFlarePerTitanX !== null ? `${roiData.currentFlarePerTitanX.toFixed(2)} FLARE` : 'N/A'}
+                    </p>
+                    <p>
+                      <strong>Market FLARE/TITANX Price:</strong>{' '}
+                      {roiData.marketFlareTitanXPrice !== null ? `${roiData.marketFlareTitanXPrice.toFixed(2)} FLARE/TX` : 'N/A'}
+                    </p>
+                    <p>
+                      <strong>Market FLARE/X28 Price:</strong>{' '}
+                      {roiData.marketFlarePerX28 !== null ? `${roiData.marketFlarePerX28.toFixed(2)} FLARE/X28` : 'N/A'}
+                    </p>
+                    <p>
+                      <strong>Market X28/TITANX Price:</strong>{' '}
+                      {roiData.marketX28PerTitanX !== null ? `${roiData.marketX28PerTitanX.toFixed(4)} X28/TX` : 'N/A'}
+                    </p>
+                    <p>
+                      <strong>ROI:</strong>{' '}
+                      {roiData.roi !== null ? `${roiData.roi}%` : 'N/A'}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+            <iframe
+              src={url}
+              className="w-full h-[calc(100%-8rem)] border-0 rounded"
+              title={`${name} Auction`}
+              allowFullScreen
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}-e 
+---
 File: ./components/LoadingIndicator.js
 // app/components/LoadingIndicator.js
 import { motion } from 'framer-motion';
@@ -2079,142 +2152,6 @@ export default function LoadingIndicator({ status }) {
       <p className="text-sm sm:text-base text-gray-300">{status}</p>
     </div>
   );
-}-e 
----
-File: ./components/useNFTHolders.js
-"use client";
-import { useState, useEffect, useCallback } from "react";
-import { contractAddresses } from "../app/nft-contracts";
-
-export default function useNFTHolders(dataCache) {
-  const [holders, setHolders] = useState(dataCache);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [searchAddress, setSearchAddress] = useState("");
-  const [searchResult, setSearchResult] = useState(null);
-  const [activeTab, setActiveTab] = useState("element280");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  const closeModal = () => setIsModalOpen(false);
-
-  const loadAllData = useCallback(async () => {
-    setLoading(true);
-    setStatus("Fetching holders...");
-    setProgress(0);
-    try {
-      const contracts = ["element280", "staxNFT", "element369"];
-      const results = await Promise.all(
-        contracts.map(async (contract, i) => {
-          let page = 0;
-          let totalPages = 1;
-          const pageSize = 500;
-          let holderMap = new Map();
-
-          do {
-            const response = await fetch(
-              `/api/holders?contract=${contract}&address=${contractAddresses[contract]}&page=${page}&pageSize=${pageSize}`
-            );
-            if (!response.ok) throw new Error(`Failed to fetch ${contract} holders, page ${page}`);
-            const data = await response.json();
-            const holdersArray = Array.isArray(data.holders) ? data.holders : [];
-
-            holdersArray.forEach((holder) => {
-              const existing = holderMap.get(holder.wallet);
-              if (existing) {
-                existing.total += holder.total;
-                existing.multiplierSum += holder.multiplierSum;
-                existing.percentage += holder.percentage;
-                existing.tiers = existing.tiers.map((t, idx) => t + (holder.tiers[idx] || 0));
-                existing.rank = Math.min(existing.rank, holder.rank);
-                existing.displayMultiplierSum += holder.displayMultiplierSum;
-              } else {
-                holderMap.set(holder.wallet, { ...holder });
-              }
-            });
-
-            totalPages = data.totalPages || 1;
-            page++;
-          } while (page < totalPages);
-
-          const allHolders = Array.from(holderMap.values());
-          const totalMultiplierSum = allHolders.reduce((sum, h) => sum + h.multiplierSum, 0);
-          allHolders.forEach((holder) => {
-            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-            holder.displayMultiplierSum = contract === "element280" ? holder.multiplierSum / 10 : holder.multiplierSum;
-          });
-          allHolders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-          allHolders.forEach((holder, index) => (holder.rank = index + 1));
-
-          setProgress(((i + 1) / contracts.length) * 100);
-          return [contract, allHolders];
-        })
-      );
-
-      const updatedHolders = Object.fromEntries(results);
-      setHolders(updatedHolders);
-      Object.assign(dataCache, updatedHolders);
-      setStatus("Holders loaded successfully!");
-    } catch (error) {
-      console.error(`Error fetching holders: ${error.message}`);
-      setStatus(`Error: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [dataCache]);
-
-  const handleSearch = useCallback(() => {
-    if (!searchAddress) {
-      setSearchResult(null);
-      setIsModalOpen(false);
-      setStatus("");
-      return;
-    }
-
-    setLoading(true);
-    setStatus(`Searching for address ${searchAddress}...`);
-
-    // Search across all contracts
-    const contracts = ["element280", "staxNFT", "element369"];
-    const searchResults = {};
-
-    contracts.forEach((contract) => {
-      const contractHolders = holders[contract] || [];
-      const foundHolder = contractHolders.find(
-        (holder) => holder.wallet.toLowerCase() === searchAddress.toLowerCase()
-      );
-      searchResults[contract] = foundHolder || null;
-    });
-
-    console.log("Search results across contracts:", searchResults);
-
-    // Check if any results were found
-    const hasResults = Object.values(searchResults).some((result) => result !== null);
-
-    setSearchResult(searchResults);
-    setIsModalOpen(true);
-    setStatus(hasResults ? "Search completed!" : "No results found for this address across all contracts.");
-    setLoading(false);
-  }, [searchAddress, holders]);
-
-  useEffect(() => {
-    loadAllData();
-  }, [loadAllData]);
-
-  return {
-    holders,
-    loading,
-    status,
-    progress,
-    searchResult,
-    setSearchAddress,
-    handleSearch,
-    loadAllData,
-    activeTab,
-    setActiveTab,
-    isModalOpen,
-    closeModal,
-  };
 }-e 
 ---
 File: ./components/NFTPage.js
@@ -2412,60 +2349,6 @@ export default function NFTPage({ contractKey }) {
     </div>
   );
 }-e 
----
-File: ./components/SearchBar.js
-// app/components/SearchBar.js
-export default function SearchBar({ setSearchAddress, handleSearch, loading }) {
-    return (
-      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 mb-4 w-full">
-        <input
-          type="text"
-          onChange={(e) => setSearchAddress(e.target.value)}
-          placeholder="Enter wallet address (0x...)"
-          className="p-2 sm:p-3 w-full sm:w-96 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed transition-shadow text-sm sm:text-base bg-gray-900 text-white"
-          disabled={loading}
-        />
-        <button
-          onClick={handleSearch}
-          disabled={loading}
-          className="p-2 sm:p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors shadow-md text-sm sm:text-base"
-        >
-          Search
-        </button>
-      </div>
-    );
-  }-e 
----
-File: ./components/ProtocolTabs.js
-// app/components/ProtocolTabs.js
-export default function ProtocolTabs({ activeTab, setActiveTab, loading }) {
-    const tabs = [
-      { id: "element280", label: "Element 280" },
-      { id: "staxNFT", label: "Stax NFT" },
-      { id: "element369", label: "Element 369" },
-    ];
-  
-    return (
-      <nav className="px-4 sm:px-6 py-2 sm:py-4 border-b border-gray-700">
-        <div className="flex flex-wrap gap-2 sm:gap-4">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              disabled={loading}
-              className={`py-2 px-3 sm:py-3 sm:px-6 font-medium text-gray-300 rounded-t-lg transition-all duration-200 text-sm sm:text-base ${
-                activeTab === tab.id
-                  ? "bg-blue-600 text-white shadow-md"
-                  : "bg-gray-700 hover:bg-gray-600 hover:text-white"
-              } ${loading ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </nav>
-    );
-  }-e 
 ---
 File: ./components/SearchResultsModal.js
 // components/SearchResultsModal.js
@@ -2836,6 +2719,509 @@ yarn-error.log*
 # typescript (optional if no TS)
 *.tsbuildinfo
 next-env.d.ts-e 
+---
+File: ./lib/token_contracts.js
+// lib/token_contracts.js
+export const tokenContracts = {
+  FLARE: {
+    name: 'Flare',
+    address: '0x34a4FE5397bf2768189EDe14FE4adAD374B993B8',
+    chainId: 1,
+    type: 'token',
+  },
+  FLARE_AUCTION: {
+    name: 'Flare Auction',
+    address: '0x58aD6ef28BfB092635454D02303aDbd4D87b503C',
+    chainId: 1,
+    type: 'auction',
+  },
+  TITANX: {
+    name: 'TitanX',
+    address: '0xF19308F923582A6f7c465e5CE7a9Dc1BEC6665B1',
+    chainId: 1,
+    type: 'token',
+  },
+  X28: {
+    name: 'X28',
+    address: '0x5c47902c8C80779CB99235E42C354E53F38C3B0d',
+    chainId: 1,
+    type: 'token',
+  },
+  ETH: {
+    name: 'Ethereum',
+    address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+    chainId: 1,
+    type: 'token',
+    isNativeWrapper: true,
+  },
+  WETH: {
+    name: 'Wrapped Ether',
+    address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    chainId: 1,
+    type: 'token',
+  },
+  USDC: {
+    name: 'USD Coin',
+    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    chainId: 1,
+    type: 'token',
+  },
+  VOLT: {
+    name: 'Volt',
+    address: '0x66b5228CfD34d9f4d9f03188d67816286C7c0b74',
+    chainId: 1,
+    type: 'token',
+  },
+  BLAZE: {
+    name: 'Blaze',
+    address: '0xfcd7cceE4071aA4ecFAC1683b7CC0aFeCAF42A36',
+    chainId: 1,
+    type: 'token',
+  },
+  SHOGUN: {
+    name: 'Shogun',
+    address: '0xfD4cB1294dF23920e683e046963117cAe6C807D9',
+    chainId: 1,
+    type: 'token',
+  },
+  ASCEND: {
+    name: 'Ascendant',
+    address: '0x0943D06A5Ff3B25ddC51642717680c105AD63c01',
+    chainId: 1,
+    type: 'token',
+  },
+  DRAGONX: {
+    name: 'DragonX',
+    address: '0x96a5399D07896f757Bd4c6eF56461F58DB951862',
+    chainId: 1,
+    type: 'token',
+  },
+  FLUX: {
+    name: 'Flux',
+    address: '0xBFDE5ac4f5Adb419A931a5bF64B0f3BB5a623d06',
+    chainId: 1,
+    type: 'token',
+  },
+  VYPER: {
+    name: 'Vyper',
+    address: '0xd7fa4cFC22eA07DfCeD53033fbE59d8b62B8Ee9E',
+    chainId: 1,
+    type: 'token',
+  },
+  HYDRA: {
+    name: 'Hydra',
+    address: '0xCC7ed2ab6c3396DdBc4316D2d7C1b59ff9d2091F',
+    chainId: 1,
+    type: 'token',
+  },
+  HYPER: {
+    name: 'Hyper',
+    address: '0xE2cfD7a01ec63875cd9Da6C7c1B7025166c2fA2F',
+    chainId: 1,
+    type: 'token',
+  },
+};
+
+export const uniswapPools = {
+  FLARE_X28_03: {
+    name: 'Flare/X28 0.3%',
+    address: '0x05b7Cc21A11354778Cf0D7faf159f1a99724ccFd',
+    chainId: 1,
+    token0: tokenContracts.FLARE.address,
+    token1: tokenContracts.X28.address,
+    fee: 3000,
+  },
+  TITANX_WETH_03: {
+    name: 'TitanX/WETH 0.3%',
+    address: '0xc45A81BC23A64eA556ab4CdF08A86B61cdcEEA8b',
+    chainId: 1,
+    token0: tokenContracts.WETH.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  WETH_USDC_03: {
+    name: 'WETH/USDC 0.3%',
+    address: '0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640',
+    chainId: 1,
+    token0: tokenContracts.USDC.address,
+    token1: tokenContracts.WETH.address,
+    fee: 3000,
+  },
+  VOLT_TITANX: {
+    name: 'Volt/TitanX 0.3%',
+    address: '0x3F1A36B6C946E406f4295A89fF06a5c7d62F2fe2',
+    chainId: 1,
+    token0: tokenContracts.VOLT.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  BLAZE_TITANX: {
+    name: 'Blaze/TitanX 0.3%',
+    address: '0x4D3A10d4792Dd12ececc5F3034C8e264B28485d1',
+    chainId: 1,
+    token0: tokenContracts.BLAZE.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  SHOGUN_TITANX: {
+    name: 'Shogun/TitanX 0.3%',
+    address: '0x79bd712f876c364Aa5e775A1eD40dE1FfdB2a50',
+    chainId: 1,
+    token0: tokenContracts.SHOGUN.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  ASCEND_DRAGONX: {
+    name: 'Ascend/DragonX 0.3%',
+    address: '0xe8cC60F526bec8C663C6eEc5A65eFAe9d89Ee6aD',
+    chainId: 1,
+    token0: tokenContracts.ASCEND.address,
+    token1: tokenContracts.DRAGONX.address,
+    fee: 3000,
+  },
+  VYPER_DRAGONX: {
+    name: 'Vyper/DragonX 0.3%',
+    address: '0x214CAD3f7FbBe66919968Fa3a1b16E84cFcd457F',
+    chainId: 1,
+    token0: tokenContracts.VYPER.address,
+    token1: tokenContracts.DRAGONX.address,
+    fee: 3000,
+  },
+  DRAGONX_TITANX: {
+    name: 'DragonX/TitanX 0.3%',
+    address: '0x25215d9ba4403b3DA77ce50606b54577a71b7895',
+    chainId: 1,
+    token0: tokenContracts.DRAGONX.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  HYPER_TITANX: {
+    name: 'Hyper/TitanX 0.3%',
+    address: '0x14d725edB1299fF560d96f42462f0234B65B00AF',
+    chainId: 1,
+    token0: tokenContracts.HYPER.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  X28_TITANX: {
+    name: 'X28/TitanX 0.3%',
+    address: '0x99f60479da6A49D55eBA34893958cdAACc710eE9',
+    chainId: 1,
+    token0: tokenContracts.X28.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  FLUX_TITANX: {
+    name: 'Flux/TitanX 0.3%',
+    address: '0x2278012E61c0fB38DaE1579bD41a87A59A5954c2',
+    chainId: 1,
+    token0: tokenContracts.FLUX.address,
+    token1: tokenContracts.TITANX.address,
+    fee: 3000,
+  },
+  HYDRA_DRAGONX: {
+    name: 'Hydra/DragonX 0.3%',
+    address: '0xF8F0Ef9f6A12336A1e035adDDbD634F3B0962F54',
+    chainId: 1,
+    token0: tokenContracts.HYDRA.address,
+    token1: tokenContracts.DRAGONX.address,
+    fee: 3000,
+  },
+};
+
+// ABIs and utility functions remain unchanged
+export const auctionABI = [
+  {
+    name: 'dailyStats',
+    type: 'function',
+    inputs: [{ name: 'day', type: 'uint32' }],
+    outputs: [
+      { name: 'flareEmitted', type: 'uint128' },
+      { name: 'titanXDeposited', type: 'uint128' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    name: 'startTimestamp',
+    type: 'function',
+    inputs: [],
+    outputs: [{ type: 'uint32' }],
+    stateMutability: 'view',
+  },
+];
+
+export const uniswapPoolABI = [
+  {
+    name: 'slot0',
+    type: 'function',
+    inputs: [],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'tick', type: 'int24' },
+      { name: '', type: 'uint16' },
+      { name: '', type: 'uint16' },
+      { name: '', type: 'uint16' },
+      { name: '', type: 'uint8' },
+      { name: '', type: 'bool' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    name: 'token0',
+    type: 'function',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+
+export const uniswapV2PoolABI = [
+  {
+    name: 'getReserves',
+    type: 'function',
+    inputs: [],
+    outputs: [
+      { name: '_reserve0', type: 'uint112' },
+      { name: '_reserve1', type: 'uint112' },
+      { name: '_blockTimestampLast', type: 'uint32' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    name: 'token0',
+    type: 'function',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+
+export const flareTokenABI = [
+  {
+    name: 'x28FlarePool',
+    type: 'function',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+
+export function getTokenContract(tokenName) {
+  return tokenContracts[tokenName.toUpperCase()] || null;
+}
+
+export function getUniswapPool(poolName) {
+  return uniswapPools[poolName] || null;
+}-e 
+---
+File: ./lib/auctions/flare.js
+// lib/auctions/flare.js
+import { useReadContract } from 'wagmi';
+import { formatEther } from 'viem';
+import { tokenContracts, uniswapPools, auctionABI, uniswapV2PoolABI, flareTokenABI, uniswapPoolABI } from '../token_contracts';
+
+export function useFlareROI() {
+  console.log("[FlareROI] Hook initialized");
+
+  const auctionConfig = { address: tokenContracts.FLARE_AUCTION.address, abi: auctionABI, chainId: 1 };
+  const flareTokenConfig = { address: tokenContracts.FLARE.address, abi: flareTokenABI, chainId: 1 };
+  const x28TitanXConfig = { address: uniswapPools.X28_TITANX.address, abi: uniswapPoolABI, chainId: 1 };
+  const titanXWethConfig = { address: uniswapPools.TITANX_WETH_03.address, abi: uniswapPoolABI, chainId: 1 };
+  const wethUsdcConfig = { address: uniswapPools.WETH_USDC_03.address, abi: uniswapPoolABI, chainId: 1 };
+
+  const { data: flareX28PoolAddress, isLoading: flareX28PoolLoading, isError: flareX28PoolError } = useReadContract({ ...flareTokenConfig, functionName: 'x28FlarePool' });
+  const flareX28PoolConfig = { address: flareX28PoolAddress, abi: uniswapV2PoolABI, chainId: 1 };
+  const { data: startTimestamp, isLoading: startLoading, isError: startError } = useReadContract({ ...auctionConfig, functionName: 'startTimestamp' });
+  const currentDay = startTimestamp ? Math.floor((Date.now() / 1000 - Number(startTimestamp)) / (24 * 60 * 60)) + 1 : 0;
+  const { data: dailyStats, isLoading: statsLoading, isError: statsError } = useReadContract({ ...auctionConfig, functionName: 'dailyStats', args: [currentDay] });
+  const { data: flareX28Reserves, isLoading: flareX28ReservesLoading, isError: flareX28ReservesError } = useReadContract({ ...flareX28PoolConfig, functionName: 'getReserves' });
+  const { data: flareX28Token0, isLoading: flareX28Token0Loading, isError: flareX28Token0Error } = useReadContract({ ...flareX28PoolConfig, functionName: 'token0' });
+  const { data: x28TitanXSlot0, isLoading: x28TitanXSlot0Loading, isError: x28TitanXSlot0Error } = useReadContract({ ...x28TitanXConfig, functionName: 'slot0', cacheTime: 0 });
+  const { data: x28TitanXToken0, isLoading: x28TitanXToken0Loading, isError: x28TitanXToken0Error } = useReadContract({ ...x28TitanXConfig, functionName: 'token0' });
+  const { data: titanXWethSlot0, isLoading: titanXWethSlot0Loading, isError: titanXWethSlot0Error } = useReadContract({ ...titanXWethConfig, functionName: 'slot0', cacheTime: 0 });
+  const { data: titanXWethToken0, isLoading: titanXWethToken0Loading, isError: titanXWethToken0Error } = useReadContract({ ...titanXWethConfig, functionName: 'token0' });
+  const { data: wethUsdcSlot0, isLoading: wethUsdcSlot0Loading, isError: wethUsdcSlot0Error } = useReadContract({ ...wethUsdcConfig, functionName: 'slot0', cacheTime: 0 });
+  const { data: wethUsdcToken0, isLoading: wethUsdcToken0Loading, isError: wethUsdcToken0Error } = useReadContract({ ...wethUsdcConfig, functionName: 'token0' });
+
+  const purchasePrice = dailyStats && dailyStats[1] > 0n ? Number(formatEther(BigInt(dailyStats[1]))) / Number(formatEther(BigInt(dailyStats[0]))) : null;
+
+  const getPoolPrice = (reservesOrSlot0, token0Address, token1Address, poolAddress, isV3 = false) => {
+    console.log("[FlareROI] getPoolPrice called with:", { reservesOrSlot0, token0Address, token1Address, poolAddress, isV3 });
+    if (!isV3 && Array.isArray(reservesOrSlot0) && reservesOrSlot0.length === 3) {
+      const reserve0 = Number(formatEther(BigInt(reservesOrSlot0[0])));
+      const reserve1 = Number(formatEther(BigInt(reservesOrSlot0[1])));
+      const price = reserve1 / reserve0; // token1/token0
+      console.log("[FlareROI] V2 Price Calculated:", { price, reserve0, reserve1 });
+      return { price, description: `${token1Address}/${token0Address} from ${poolAddress}` };
+    } else if (isV3 && Array.isArray(reservesOrSlot0) && reservesOrSlot0.length >= 1) {
+      const sqrtPriceX96 = BigInt(reservesOrSlot0[0]);
+      const sqrtPrice = Number(sqrtPriceX96) / (2 ** 96);
+      let price = sqrtPrice * sqrtPrice; // token1/token0
+      const isToken0USDC = token0Address.toLowerCase() === tokenContracts.USDC.address.toLowerCase();
+      const isToken1USDC = token1Address.toLowerCase() === tokenContracts.USDC.address.toLowerCase();
+      if (isToken0USDC) {
+        price = price * (10 ** 12); // USDC (6 decimals) to WETH (18 decimals)
+      } else if (isToken1USDC) {
+        price = price / (10 ** 12); // WETH to USDC
+      }
+      console.log("[FlareROI] V3 Price Debug for", poolAddress, { sqrtPriceX96: sqrtPriceX96.toString(), rawPrice: price });
+      return { price, description: `${token1Address}/${token0Address} from ${poolAddress}` };
+    }
+    console.log("[FlareROI] getPoolPrice: No valid data");
+    return { price: null, description: 'No data available' };
+  };
+
+  const validateMarketPrice = (calculatedMarketFlare, flareX28Price, x28TitanXPrice) => {
+    console.log("[FlareROI] Price Validation:", {
+      flareX28Price: flareX28Price.price,
+      flareX28Source: flareX28Price.description,
+      x28TitanXPrice: x28TitanXPrice.price,
+      x28TitanXSource: x28TitanXPrice.description,
+      calculatedMarketFlarePerTitanX: calculatedMarketFlare,
+    });
+  };
+
+  let marketPrice = null;
+  let auctionFlarePerTitanX = null;
+  let marketFlarePerTitanX = null;
+  let flarePerX28 = null;
+  let x28PerTitanX = null;
+  let titanxAmount = 1000000000; // 1 billion TITANX
+  let currentMarketValue1BTitanX = null;
+  let flareDerivedFromAuction1BTitanX = null;
+  let marketValueFlareReceived = null;
+  let profitBasedROI = null;
+  let currentMarketValue1BTitanXUSD = null;
+  let flareDerivedFromAuction1BTitanXUSD = null;
+
+  const coreLoading = startLoading || statsLoading || flareX28ReservesLoading || flareX28Token0Loading || x28TitanXSlot0Loading || x28TitanXToken0Loading || flareX28PoolLoading;
+  const usdLoading = titanXWethSlot0Loading || titanXWethToken0Loading || wethUsdcSlot0Loading || wethUsdcToken0Loading;
+  const coreError = startError || statsError || flareX28ReservesError || flareX28Token0Error || x28TitanXSlot0Error || x28TitanXToken0Error || flareX28PoolError;
+  const usdError = titanXWethSlot0Error || titanXWethToken0Error || wethUsdcSlot0Error || wethUsdcToken0Error;
+
+  const isLoading = coreLoading || usdLoading;
+  const hasError = coreError && usdError;
+
+  if (!coreLoading && !coreError && flareX28Reserves && flareX28Reserves[0] && flareX28Reserves[1] && flareX28Token0 &&
+      x28TitanXSlot0 && x28TitanXSlot0[0] && x28TitanXToken0 && dailyStats && flareX28PoolAddress) {
+    console.log("[FlareROI] Core conditions met, calculating prices");
+
+    const isFlareToken0 = flareX28Token0.toLowerCase() === tokenContracts.FLARE.address.toLowerCase();
+    const flareX28PriceInfo = getPoolPrice(flareX28Reserves, flareX28Token0, tokenContracts.X28.address, flareX28PoolAddress, false);
+    flarePerX28 = isFlareToken0 ? flareX28PriceInfo.price : 1 / flareX28PriceInfo.price; // X28/FLARE
+
+    const isX28Token0 = x28TitanXToken0.toLowerCase() === tokenContracts.X28.address.toLowerCase();
+    const x28TitanXPriceInfo = getPoolPrice(x28TitanXSlot0, x28TitanXToken0, tokenContracts.TITANX.address, x28TitanXConfig.address, true);
+    x28PerTitanX = isX28Token0 ? 1 / x28TitanXPriceInfo.price : x28TitanXPriceInfo.price; // X28/TITANX (fixed inversion)
+
+    marketFlarePerTitanX = (1 / flarePerX28) * x28PerTitanX; // FLARE/TITANX
+    marketPrice = 1 / marketFlarePerTitanX; // TITANX/FLARE
+
+    const flareEmitted = Number(formatEther(BigInt(dailyStats[0])));
+    const titanXDeposited = Number(formatEther(BigInt(dailyStats[1])));
+    auctionFlarePerTitanX = flareEmitted / titanXDeposited;
+
+    currentMarketValue1BTitanX = titanxAmount * marketFlarePerTitanX;
+    const totalTitanXAfterDeposit = titanXDeposited + titanxAmount;
+    const newAuctionRate = flareEmitted / totalTitanXAfterDeposit;
+    flareDerivedFromAuction1BTitanX = titanxAmount * newAuctionRate;
+    marketValueFlareReceived = flareDerivedFromAuction1BTitanX / marketFlarePerTitanX;
+    profitBasedROI = ((marketValueFlareReceived - titanxAmount) / titanxAmount) * 100;
+
+    console.log('[FlareROI] Core Debug:', {
+      dailyStats: [flareEmitted, titanXDeposited],
+      marketFlarePerTitanX,
+      auctionFlarePerTitanX,
+      currentMarketValue1BTitanX,
+      flareDerivedFromAuction1BTitanX,
+      marketValueFlareReceived,
+      profitBasedROI,
+    });
+
+    validateMarketPrice(marketFlarePerTitanX, flareX28PriceInfo, x28TitanXPriceInfo);
+  } else {
+    console.log("[FlareROI] Core conditions not met:", {
+      coreLoading,
+      coreError,
+      flareX28Reserves: !!flareX28Reserves,
+      flareX28Token0: !!flareX28Token0,
+      x28TitanXSlot0: !!x28TitanXSlot0,
+      x28TitanXToken0: !!x28TitanXToken0,
+      dailyStats: !!dailyStats,
+      flareX28PoolAddress: !!flareX28PoolAddress,
+    });
+  }
+
+  if (!usdLoading && !usdError && titanXWethSlot0 && titanXWethSlot0[0] && titanXWethToken0 && wethUsdcSlot0 && wethUsdcSlot0[0] && wethUsdcToken0) {
+    console.log("[FlareROI] USD conditions met, calculating USD prices");
+
+    const isWethToken0TitanX = titanXWethToken0.toLowerCase() === tokenContracts.WETH.address.toLowerCase();
+    const titanXWethPriceInfo = getPoolPrice(titanXWethSlot0, titanXWethToken0, tokenContracts.TITANX.address, titanXWethConfig.address, true);
+    const wethPerTitanX = isWethToken0TitanX ? 1 / titanXWethPriceInfo.price : titanXWethPriceInfo.price; // WETH/TITANX
+
+    const isUsdcToken0 = wethUsdcToken0.toLowerCase() === tokenContracts.USDC.address.toLowerCase();
+    const wethUsdcPriceInfo = getPoolPrice(wethUsdcSlot0, wethUsdcToken0, tokenContracts.WETH.address, wethUsdcConfig.address, true);
+    const usdcPerWeth = isUsdcToken0 ? 1 / wethUsdcPriceInfo.price : wethUsdcPriceInfo.price; // USDC/WETH (fixed)
+
+    const usdcPerTitanX = usdcPerWeth * wethPerTitanX; // USD/TITANX
+    currentMarketValue1BTitanXUSD = titanxAmount * usdcPerTitanX;
+    flareDerivedFromAuction1BTitanXUSD = flareDerivedFromAuction1BTitanX ? (flareDerivedFromAuction1BTitanX * usdcPerTitanX / marketFlarePerTitanX) : null;
+
+    console.log('[FlareROI] USD Debug:', {
+      wethPerTitanX,
+      usdcPerWeth,
+      usdcPerTitanX,
+      currentMarketValue1BTitanXUSD,
+      flareDerivedFromAuction1BTitanXUSD,
+    });
+  } else {
+    console.log("[FlareROI] USD conditions not met:", {
+      usdLoading,
+      usdError,
+      titanXWethSlot0: !!titanXWethSlot0,
+      titanXWethToken0: !!titanXWethToken0,
+      wethUsdcSlot0: !!wethUsdcSlot0,
+      wethUsdcToken0: !!wethUsdcToken0,
+    });
+  }
+
+  const roi = auctionFlarePerTitanX && marketFlarePerTitanX ? ((auctionFlarePerTitanX / marketFlarePerTitanX) * 100).toFixed(2) : null;
+  const marketFlarePerX28Inverted = flarePerX28 ? 1 / flarePerX28 : null;
+
+  console.log('[FlareROI] Final:', { 
+    currentFlarePerTitanX: auctionFlarePerTitanX,
+    marketFlareTitanXPrice: marketFlarePerTitanX,
+    marketFlarePerX28: marketFlarePerX28Inverted,
+    marketX28PerTitanX: x28PerTitanX,
+    roi: roi,
+    isLoading,
+    hasError,
+    purchasePrice,
+    currentDay,
+    currentMarketValue1BTitanX,
+    flareDerivedFromAuction1BTitanX,
+    marketValueFlareReceived,
+    profitBasedROI: profitBasedROI?.toFixed(2),
+    currentMarketValue1BTitanXUSD,
+    flareDerivedFromAuction1BTitanXUSD,
+  });
+
+  return { 
+    currentFlarePerTitanX: auctionFlarePerTitanX,
+    marketFlareTitanXPrice: marketFlarePerTitanX,
+    marketFlarePerX28: marketFlarePerX28Inverted,
+    marketX28PerTitanX: x28PerTitanX,
+    roi: roi,
+    isLoading,
+    hasError,
+    currentMarketValue1BTitanX,
+    flareDerivedFromAuction1BTitanX,
+    marketValueFlareReceived,
+    profitBasedROI: profitBasedROI?.toFixed(2),
+    currentMarketValue1BTitanXUSD,
+    flareDerivedFromAuction1BTitanXUSD,
+  };
+}-e 
 ---
 File: ./eslint.config.mjs
 import { dirname } from "path";
