@@ -1,9 +1,32 @@
 // app/auctions/page.js
 'use client';
 import { useState } from 'react';
+import { useFlareROI } from '@/lib/auctions/flare';
+import { useAscendantROI } from '@/lib/auctions/ascendant';
 
 export default function Auctions() {
   const [selectedAuction, setSelectedAuction] = useState(null);
+
+  const {
+    auctionFlarePerTitanX,
+    marketFlarePerTitanX,
+    flarePerX28,
+    roi: flareROI,
+    isLoading: flareLoading,
+    hasError: flareError,
+    status: flareStatus,
+  } = useFlareROI();
+
+  const {
+    auctionAscendantPerTitanX,
+    marketAscendantPerTitanX,
+    ascendPerDragonX,
+    marketDragonXPerTitanX,
+    roi: ascendantROI,
+    isLoading: ascendantLoading,
+    hasError: ascendantError,
+    status: ascendantStatus,
+  } = useAscendantROI();
 
   const auctions = [
     { name: 'Ascendant', url: 'https://app.ascendant.win/auction' },
@@ -32,6 +55,49 @@ export default function Auctions() {
     }
   };
 
+  const renderAuctionDetails = (auction) => {
+    if (auction.name === 'Flare') {
+      if (flareLoading) {
+        return <p className="text-gray-300 text-sm">Loading Flare data...</p>;
+      }
+      if (flareError || flareStatus === 'error') {
+        return <p className="text-red-500 text-sm">Error loading Flare data.</p>;
+      }
+      if (flareStatus === 'no_data') {
+        return <p className="text-gray-300 text-sm">No Flare auction data available.</p>;
+      }
+      return (
+        <div className="text-gray-300 text-sm mt-2">
+          <p><strong>ROI:</strong> {flareROI ? `${flareROI}%` : 'N/A'}</p>
+          <p><strong>Auction Rate:</strong> {auctionFlarePerTitanX ? `${auctionFlarePerTitanX.toFixed(2)} FLARE/TX` : 'N/A'}</p>
+          <p><strong>Market Rate:</strong> {marketFlarePerTitanX ? `${marketFlarePerTitanX.toFixed(2)} FLARE/TX` : 'N/A'}</p>
+          <p><strong>FLARE/X28:</strong> {flarePerX28 ? `${flarePerX28.toFixed(2)} FLARE/X28` : 'N/A'}</p>
+        </div>
+      );
+    }
+    if (auction.name === 'Ascendant') {
+      if (ascendantLoading) {
+        return <p className="text-gray-300 text-sm">Loading Ascendant data...</p>;
+      }
+      if (ascendantError || ascendantStatus === 'error') {
+        return <p className="text-red-500 text-sm">Error loading Ascendant data.</p>;
+      }
+      if (ascendantStatus === 'no_data') {
+        return <p className="text-gray-300 text-sm">No Ascendant auction data available.</p>;
+      }
+      return (
+        <div className="text-gray-300 text-sm mt-2">
+          <p><strong>ROI:</strong> {ascendantROI ? `${ascendantROI}%` : 'N/A'}</p>
+          <p><strong>Auction Rate:</strong> {auctionAscendantPerTitanX ? `${auctionAscendantPerTitanX.toFixed(2)} ASCEND/TX` : 'N/A'}</p>
+          <p><strong>Market Rate:</strong> {marketAscendantPerTitanX ? `${marketAscendantPerTitanX.toFixed(2)} ASCEND/TX` : 'N/A'}</p>
+          <p><strong>ASCEND/DRAGONX:</strong> {ascendPerDragonX ? `${ascendPerDragonX.toFixed(2)} ASCEND/DRAGONX` : 'N/A'}</p>
+          <p><strong>DRAGONX/TITANX:</strong> {marketDragonXPerTitanX ? `${marketDragonXPerTitanX.toFixed(2)} DRAGONX/TX` : 'N/A'}</p>
+        </div>
+      );
+    }
+    return null; // No details for other auctions
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
@@ -39,7 +105,7 @@ export default function Auctions() {
           TitanX Ecosystem Auctions
         </h1>
         <p className="mt-4 text-lg sm:text-xl text-gray-300 text-center max-w-2xl mx-auto">
-          Explore the current auctions running in the TitanX ecosystem. Click any auction to view it.
+          Explore the current auctions in the TitanX ecosystem. Click to view.
         </p>
         <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {auctions.map((auction) => (
@@ -56,8 +122,17 @@ export default function Auctions() {
                 {auction.name} Auction
               </button>
               <p className="text-gray-400 mt-2 text-sm truncate">
-                <span className="hover:underline">{auction.url}</span>
+                <a
+                  href={auction.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline"
+                  onClick={(e) => e.preventDefault()}
+                >
+                  {auction.url}
+                </a>
               </p>
+              {renderAuctionDetails(auction)}
             </div>
           ))}
         </div>
@@ -76,12 +151,14 @@ export default function Auctions() {
             >
               ✕
             </button>
-            <h2 className="text-2xl font-bold text-white mb-4">{selectedAuction.name} Auction</h2>
             <iframe
               src={selectedAuction.url}
-              className="w-full h-[calc(100%-4rem)] border-0 rounded"
+              className="w-full h-full border-0 rounded"
               title={`${selectedAuction.name} Auction`}
               allowFullScreen
+              onError={(e) => {
+                console.error(`Failed to load iframe for ${selectedAuction.name}: ${selectedAuction.url}`, e);
+              }}
             />
           </div>
         </div>

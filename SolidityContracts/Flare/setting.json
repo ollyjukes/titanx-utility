@@ -1,0 +1,48 @@
+{
+	"remappings": [
+		"@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+		"ds-test/=lib/openzeppelin-contracts/lib/forge-std/lib/ds-test/src/",
+		"erc4626-tests/=lib/openzeppelin-contracts/lib/erc4626-tests/",
+		"forge-std/=lib/forge-std/src/",
+		"openzeppelin-contracts/=lib/openzeppelin-contracts/",
+		"v2-core/=lib/v2-core/contracts/",
+		"v2-periphery/=lib/v2-periphery/contracts/",
+		"v3-core/=lib/v3-core/",
+		"v3-periphery/=lib/v3-periphery/contracts/",
+		"@uniswap/v3-core/=lib/v3-core/",
+		"@uniswap/v3-periphery/=lib/v3-periphery/",
+		"@layerzerolabs/oft-evm/=lib/devtools/packages/oft-evm/",
+		"@layerzerolabs/oapp-evm/=lib/devtools/packages/oapp-evm/",
+		"@layerzerolabs/lz-evm-protocol-v2/=lib/layerzero-v2/packages/layerzero-v2/evm/protocol/",
+		"LayerZero-v2/=lib/LayerZero-v2/",
+		"devtools/=lib/devtools/packages/toolbox-foundry/src/"
+	],
+	"optimizer": {
+		"enabled": true,
+		"runs": 999999
+	},
+	"metadata": {
+		"useLiteralContent": false,
+		"bytecodeHash": "ipfs",
+		"appendCBOR": true
+	},
+	"outputSelection": {
+		"*": {
+			"*": [
+				"evm.bytecode",
+				"evm.deployedBytecode",
+				"devdoc",
+				"userdoc",
+				"metadata",
+				"abi"
+			]
+		}
+	},
+	"evmVersion": "cancun",
+	"viaIR": false,
+	"libraries": {
+		"src/utils/Time.sol": {
+			"Time": "0x5d60e63bC0C0B186edb3cFc2740F555406D0434a"
+		}
+	}
+}

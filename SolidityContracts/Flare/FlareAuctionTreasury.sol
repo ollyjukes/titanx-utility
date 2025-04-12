@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import "../const/Constants.sol";
+import {wmul} from "../utils/Math.sol";
+import {Errors} from "../utils/Errors.sol";
+import {Flare} from "../core/Flare.sol";
+import {FlareMinting} from "../core/FlareMinting.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+/**
+ * @title FlareAuctionTreasury
+ * @author Decentra
+ * @notice This contract acumulates Flare from the buy and burn and later distributes them to the auction for recycling
+ */
+contract FlareAuctionTreasury is Errors {
+    using SafeERC20 for Flare;
+
+    /// @notice Flare contract
+    Flare immutable flare;
+
+    /// @notice Auction contract
+    address immutable auction;
+
+    /// @notice FlareMinting contract
+    FlareMinting public minting;
+
+    /// @notice throws if the caller is not the auction
+    error FlareAuctionTreasury__OnlyAuction();
+
+    /**
+     * @notice intializes the auction treasury contract
+     * @param _auction Address of the auction
+     * @param _flare Address of the Flare contract
+     * @param _flareMinting Address of the FlareMinting contract
+     */
+    constructor(address _auction, address _flare, address _flareMinting)
+        notAddress0(_auction)
+        notAddress0(_flare)
+        notAddress0(_flareMinting)
+    {
+        auction = _auction;
+        flare = Flare(_flare);
+
+        minting = FlareMinting(_flareMinting);
+    }
+
+    // @notice Modifier to check if the caller is the auction
+    modifier onlyAuction() {
+        _onlyAuction();
+        _;
+    }
+
+    // @notice Distribute Flare to the auction
+    function emitForAuction() external onlyAuction returns (uint256 emitted) {
+        uint256 balanceOf = flare.balanceOf(address(this));
+        uint32 timeElapsedSince = uint32(block.timestamp - minting.startTimestamp());
+        uint256 currentCycle = (timeElapsedSince / GAP_BETWEEN_CYCLE) + 1;
+
+        uint256 auctionAllocation = currentCycle > MAX_MINT_CYCLE ? 0.05e18 : 0.11e18;
+        emitted = wmul(balanceOf, auctionAllocation);
+        flare.safeTransfer(msg.sender, emitted);
+    }
+
+    // @notice checks if the caller is the auction
+    function _onlyAuction() internal view {
+        if (msg.sender != auction) revert FlareAuctionTreasury__OnlyAuction();
+    }
+}

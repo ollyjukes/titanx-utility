@@ -1,4 +1,5 @@
 // app/layout.js
+'use client';
 import './layout.css';
 import { Inter } from 'next/font/google';
 import Navbar from '../components/Navbar';

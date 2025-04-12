@@ -1,0 +1,710 @@
+Contract: AscendantNFTMarketplace
+Subdirectory: Ascendant
+Path: ./SolidityContracts/Ascendant/AscendantNFTMarketplace.sol
+Contents:
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity 0.8.27;
+
+import "@const/Constants.sol";
+import {Errors} from "@utils/Errors.sol";
+import {wmul} from "@utils/Math.sol";
+import {OracleLibrary} from "@libs/OracleLibrary.sol";
+import {IAscendantNFTMinting} from "@interfaces/IAscendant.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {FullMath} from "@uniswap/v3-core/contracts/libraries/FullMath.sol";
+import {TickMath} from "@uniswap/v3-core/contracts/libraries/TickMath.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {IUniswapV3Pool} from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
+import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
+
+/**
+ * @title Ascendant NFT Marketplace Contract
+ * @author Decentra
+ * @notice Marketplace for trading Ascendant Hybrid NFTs
+ * @dev Implements:
+ *      - ERC721Holder for NFT escrow capabilities
+ *      - ReentrancyGuard for protection against reentrancy attacks
+ *      - Ownable2Step for secure ownership management
+ *      - Errors for custom error handling
+ *      Uses:
+ *      - SafeERC20 for secure token transfers
+ *      - Math for mathematical operations
+ *      - EnumerableSet for managing NFT collections
+ */
+contract AscendantNFTMarketplace is ERC721Holder, ReentrancyGuard, Ownable2Step, Errors {
+    using SafeERC20 for IERC20;
+    using Math for uint256;
+    using EnumerableSet for EnumerableSet.UintSet;
+
+    //==========STRUCTS==========//
+
+    /**
+     * @dev Represents an NFT listing in the marketplace
+     * @param tokenId The ID of the listed NFT
+     * @param price The listing price in either TitanX or ETH
+     * @param seller Address of the NFT seller
+     */
+    struct Listing {
+        uint256 tokenId;
+        uint256 price;
+        address seller;
+    }
+
+    /**
+     * @dev Tracks marketplace payouts for sellers
+     * @param payoutInTitanX Amount to be paid out in TitanX tokens
+     * @param payoutInETH Amount to be paid out in ETH
+     */
+    struct Payout {
+        uint256 payoutInTitanX;
+        uint256 payoutInETH;
+    }
+
+    /* == ERRORS == */
+    error NftMarketplace__NftNotApprovedForMarketplace();
+    error NftMarketplace__AlreadyListed(uint256 tokenId);
+    error NftMarketplace__NotListed(uint256 tokenId);
+    error NftMarketplace__TransferFailed();
+    error NftMarketplace__InvalidPrice();
+    error NftMarketplace__IncorrectInput();
+    error NftMarketplace__NoPayout();
+    error NftMarketplace__PaymentForNFTIsInTitanX();
+    error NftMarketplace__PaymentForNFTIsInETH();
+    error NftMarketplace__NotOwner();
+    error NftMarketplace__DeviationOutOfBounds();
+    error NftMarketplace__InsufficientEth();
+    error NftMarketplace__ContractCallsProhibited();
+
+    //==========EVENTS==========//
+
+    /**
+     * @dev Emitted when a new NFT is listed for sale
+     * @param seller Address of the NFT seller
+     * @param tokenId ID of the listed NFT
+     * @param listingId Unique identifier for the listing
+     * @param price Listed price in TitanX or ETH
+     */
+    event ItemListed(address indexed seller, uint256 indexed tokenId, uint256 listingId, uint256 price);
+
+    /**
+     * @dev Emitted when a listing's price is updated
+     * @param seller Address of the NFT seller
+     * @param tokenId ID of the listed NFT
+     * @param listingId Unique identifier for the listing
+     * @param price Updated price in TitanX or ETH
+     */
+    event ItemUpdated(address indexed seller, uint256 indexed tokenId, uint256 listingId, uint256 price);
+
+    /**
+     * @dev Emitted when an NFT is purchased
+     * @param buyer Address of the NFT buyer
+     * @param tokenId ID of the purchased NFT
+     * @param listingId Unique identifier for the listing
+     * @param price Final sale price in TitanX or ETH
+     */
+    event ItemPurchased(address indexed buyer, uint256 indexed tokenId, uint256 listingId, uint256 price);
+
+    /**
+     * @dev Emitted when a listing is cancelled
+     * @param buyer Address of the NFT owner
+     * @param tokenId ID of the delisted NFT
+     * @param listingId Unique identifier for the cancelled listing
+     */
+    event ItemCancelled(address indexed buyer, uint256 indexed tokenId, uint256 listingId);
+
+    //==========MODIFIER==========//
+
+    /**
+     * @dev Ensures the NFT is currently listed in the marketplace
+     * @param _listingId The ID of the listing to check
+     * @notice Reverts with NftMarketplace__NotListed if the listing is not active
+     */
+    modifier isListed(uint256 _listingId) {
+        if (!isListingActive(_listingId)) {
+            revert NftMarketplace__NotListed(_listingId);
+        }
+        _;
+    }
+
+    /**
+     * @dev Validates that msg.sender is the owner of the listed NFT
+     * @param _listingId The ID of the listing to check ownership
+     * @notice Reverts with NftMarketplace__NotOwner if msg.sender is not the seller
+     */
+    modifier isOwner(uint256 _listingId) {
+        if (listings[_listingId].seller != msg.sender) {
+            revert NftMarketplace__NotOwner();
+        }
+
+        _;
+    }
+
+    /**
+     * @dev Prevents smart contracts from interacting with the marketplace
+     * @notice Reverts with NftMarketplace__ContractCallsProhibited if caller is a contract
+     */
+    modifier noContract() {
+        if (address(msg.sender).code.length > 0) revert NftMarketplace__ContractCallsProhibited();
+        _;
+    }
+
+    //=========IMMUTABLE=========//
+
+    /**
+     * @notice TitanX token contract used for NFT payments
+     * @dev Immutable reference set in constructor
+     */
+    IERC20 public immutable titanX;
+
+    /**
+     * @notice WETH9 contract address for ETH payments
+     * @dev Immutable reference set in constructor
+     */
+    address public immutable weth9;
+
+    /**
+     * @notice Ascendant NFT minting contract interface
+     * @dev Immutable reference set in constructor, used to claim NFT rewards before listing
+     */
+    IAscendantNFTMinting immutable ascendantNFTMinting;
+
+    //==========STATE==========//
+
+    /**
+     * @notice Maps listing IDs to their full listing details
+     * @dev Stores active and historical listings
+     */
+    mapping(uint256 => Listing) public listings;
+
+    /**
+     * @notice Maps seller addresses to their accumulated payouts
+     * @dev Private mapping for tracking owed TitanX and ETH
+     */
+    mapping(address => Payout) private payouts;
+
+    /**
+     * @notice NFT collection contract interface
+     * @dev Reference to the Ascendant NFT collection being traded
+     */
+    IERC721 public immutable collection;
+
+    /**
+     * @notice Set of currently active listing IDs
+     * @dev Uses EnumerableSet for efficient listing management
+     */
+    EnumerableSet.UintSet private activeListings;
+
+    /**
+     * @notice Time window for price comparisons (in seconds)
+     * @dev Defaults to 900 seconds (15 minutes)
+     */
+    uint32 public secondsAgo = 15 * 60;
+
+    /**
+     * @notice Maximum allowed price deviation in basis points
+     * @dev Defaults to 300 (3.00%)
+     */
+    uint32 public deviation = 300;
+
+    /**
+     * @notice Monotonically increasing identifier for marketplace listings
+     * @dev Increments by 1 for each new listing
+     */
+    uint256 public currentListingId;
+
+    //==========CONSTANTS==========//
+
+    /**
+     * @notice Maximum allowable deviation value in basis points
+     * @dev Set to 10000 (100.00%)
+     */
+    uint16 constant MAX_DEVIATION_LIMIT = 10_000;
+
+    //==========CONSTRUCTOR==========//
+
+    /**
+     * @notice Initializes the NFT marketplace contract
+     * @dev Sets up immutable contract references and initializes the marketplace state
+     * @param _initialOwner Address that will own the marketplace contract
+     * @param _titanX Address of the TitanX token contract used for payments
+     * @param _weth9 Address of the WETH9 contract for ETH payments
+     * @param _ascendantNFTMinting Address of the Ascendant NFT contract
+     */
+    constructor(address _initialOwner, address _titanX, address _weth9, address _ascendantNFTMinting)
+        Ownable(_initialOwner)
+        notAddress0(_titanX)
+        notAddress0(_weth9)
+        notAddress0(_ascendantNFTMinting)
+    {
+        weth9 = _weth9;
+        titanX = IERC20(_titanX);
+        collection = IERC721(_ascendantNFTMinting);
+        ascendantNFTMinting = IAscendantNFTMinting(_ascendantNFTMinting);
+    }
+
+    //==========================//
+    //==========PUBLIC==========//
+    //==========================//
+
+    /**
+     * @notice Calculates the royalty fee for an NFT sale
+     * @dev Applies ASCENDANT_NFT_SALE_FEE percentage to the given amount
+     * @param _amount The sale amount to calculate fee from
+     * @return The calculated royalty fee amount
+     */
+    function getNFTSaleRoyaltyFee(uint256 _amount) public pure returns (uint256) {
+        return wmul(_amount, ASCENDANT_NFT_SALE_FEE);
+    }
+
+    //==========================//
+    //=========EXTERNAL=========//
+    //==========================//
+
+    /**
+     * @notice Lists an NFT for sale in the marketplace
+     * @dev Implements checks-effects-interactions pattern with reentrancy and contract interaction protection.
+     *      The function will:
+     *      1. Verify NFT ownership and price validity
+     *      2. Create a new listing with a unique ID
+     *      3. Transfer NFT to the marketplace contract
+     *      4. Claim any associated Ascendant tokens
+     *
+     * @dev ItemListed Emitted when an item is successfully listed
+     *       - seller: Address of the NFT seller
+     *       - tokenId: ID of the listed NFT
+     *       - listingId: Unique identifier for the listing
+     *       - price: Listed price of the NFT
+     *
+     * @param _tokenId The ID of the NFT to list
+     * @param _price The listing price in platform's native token (must be > 0)
+     */
+    function listItem(uint256 _tokenId, uint256 _price) external nonReentrant noContract {
+        if (collection.ownerOf(_tokenId) != msg.sender) {
+            revert NftMarketplace__NotOwner();
+        }
+
+        if (_price == 0) {
+            revert NftMarketplace__InvalidPrice();
+        }
+
+        uint256 listingId = currentListingId++;
+
+        listings[listingId] = Listing(_tokenId, _price, msg.sender);
+        activeListings.add(listingId);
+
+        collection.transferFrom(msg.sender, address(this), _tokenId);
+
+        ascendantNFTMinting.claim(_tokenId, msg.sender);
+
+        emit ItemListed(msg.sender, _tokenId, listingId, _price);
+    }
+
+    /**
+     * @notice Allows a user to purchase a listed NFT using ETH
+     * @dev Implements checks-effects-interactions pattern with royalty handling and price deviation checks.
+     *      The function will:
+     *      1. Verify listing exists and price matches
+     *      2. Check price deviation is within bounds
+     *      3. Calculate ETH amount including spot price conversion
+     *      4. Handle royalty fee distribution
+     *      5. Process seller payout
+     *      6. Transfer NFT to buyer
+     *
+     * @dev ItemPurchased Emitted when an item is successfully purchased
+     *       - buyer: Address of the NFT buyer
+     *       - tokenId: ID of the purchased NFT
+     *       - listingId: ID of the completed listing
+     *       - price: Final price in ETH
+     * @param _listingId The ID of the listing to purchase
+     * @param _price The expected price of the listing in platform's native token
+     */
+    function buyItemWithETH(uint256 _listingId, uint256 _price)
+        external
+        payable
+        nonReentrant
+        isListed(_listingId)
+        noContract
+    {
+        Listing memory _listedItem = listings[_listingId];
+
+        if (_listedItem.price != _price) revert NftMarketplace__InvalidPrice();
+
+        uint256 spotPrice = getSpotPrice();
+
+        checkIsDeviationOutOfBounds(spotPrice);
+
+        uint256 priceInEth = FullMath.mulDiv(_price, spotPrice, WAD);
+
+        if (msg.value < priceInEth) revert NftMarketplace__InsufficientEth();
+
+        uint256 _royaltyFee = getNFTSaleRoyaltyFee(priceInEth);
+        uint256 _payout = priceInEth - _royaltyFee;
+
+        payouts[_listedItem.seller].payoutInETH += _payout;
+
+        delete (listings[_listingId]);
+
+        activeListings.remove(_listingId);
+
+        sendETHToGenesisWallets(_royaltyFee);
+
+        collection.safeTransferFrom(address(this), msg.sender, _listedItem.tokenId);
+
+        if (priceInEth < msg.value) {
+            (bool refundTx,) = msg.sender.call{value: msg.value - priceInEth}("");
+            if (!refundTx) revert NftMarketplace__TransferFailed();
+        }
+
+        emit ItemPurchased(msg.sender, _listedItem.tokenId, _listingId, _listedItem.price);
+    }
+
+    /**
+     * @notice Allows a user to purchase a listed NFT using TitanX tokens
+     * @dev Implements checks-effects-interactions pattern with royalty handling.
+     *      The function will:
+     *      1. Verify listing exists and price matches
+     *      2. Calculate and handle royalty fee
+     *      3. Process seller payout in TitanX
+     *      4. Transfer TitanX tokens from buyer
+     *      5. Transfer NFT to buyer
+     *
+     * @dev ItemPurchased Emitted when an item is successfully purchased
+     *       - buyer: Address of the NFT buyer
+     *       - tokenId: ID of the purchased NFT
+     *       - listingId: ID of the completed listing
+     *       - price: Final price in TitanX
+     * @param _listingId The ID of the listing to purchase
+     * @param _price The expected price of the listing in TitanX
+     */
+    function buyItemWithTitanX(uint256 _listingId, uint256 _price)
+        external
+        nonReentrant
+        isListed(_listingId)
+        noContract
+    {
+        Listing memory _listedItem = listings[_listingId];
+
+        if (_listedItem.price != _price) {
+            revert NftMarketplace__InvalidPrice();
+        }
+
+        uint256 _royaltyFee = getNFTSaleRoyaltyFee(_listedItem.price);
+        uint256 _payout = _listedItem.price - _royaltyFee;
+
+        payouts[_listedItem.seller].payoutInTitanX += _payout;
+
+        delete (listings[_listingId]);
+
+        activeListings.remove(_listingId);
+
+        titanX.transferFrom(msg.sender, address(this), _price);
+
+        sendToGenesisWallets(titanX, _royaltyFee);
+
+        collection.safeTransferFrom(address(this), msg.sender, _listedItem.tokenId);
+
+        emit ItemPurchased(msg.sender, _listedItem.tokenId, _listingId, _listedItem.price);
+    }
+
+    /**
+     * @notice Allows the original seller to cancel their NFT listing
+     * @dev Implements checks-effects-interactions pattern and includes reentrancy protection.
+     *      The function will:
+     *      1. Verify caller is the original seller
+     *      2. Remove the listing from storage
+     *      3. Remove from active listings set
+     *      4. Return the NFT to the seller
+     *
+     * @dev ItemCancelled Emitted when a listing is successfully cancelled
+     *       - seller: Address of the original NFT seller
+     *       - tokenId: ID of the NFT being delisted
+     *       - listingId: ID of the cancelled listing
+     *
+     * @param _listingId The ID of the listing to cancel
+     */
+    function cancelListing(uint256 _listingId) external nonReentrant isOwner(_listingId) isListed(_listingId) {
+        Listing memory _listedItem = listings[_listingId];
+
+        delete (listings[_listingId]);
+
+        activeListings.remove(_listingId);
+
+        collection.safeTransferFrom(address(this), msg.sender, _listedItem.tokenId);
+
+        emit ItemCancelled(msg.sender, _listedItem.tokenId, _listingId);
+    }
+
+    /**
+     * @notice Allows the original seller to update the price of their NFT listing
+     * @dev The function will:
+     *      1. Verify caller is the original seller
+     *      2. Validate the new price
+     *      3. Update the listing price
+     *
+     * @dev ItemUpdated Emitted when a listing price is successfully updated
+     *       - seller: Address of the NFT seller
+     *       - tokenId: ID of the listed NFT
+     *       - listingId: ID of the updated listing
+     *       - price: New price in TitanX or ETH
+     *
+     * @param _listingId The ID of the listing to update
+     * @param _newPrice The new listing price in TitanX or ETH (must be > 0)
+     */
+    function updateListing(uint256 _listingId, uint256 _newPrice)
+        external
+        nonReentrant
+        isOwner(_listingId)
+        isListed(_listingId)
+    {
+        if (_newPrice == 0) {
+            revert NftMarketplace__InvalidPrice();
+        }
+
+        Listing storage _listedItem = listings[_listingId];
+
+        _listedItem.price = _newPrice;
+
+        emit ItemUpdated(msg.sender, _listedItem.tokenId, _listingId, _newPrice);
+    }
+
+    /**
+     * @notice Allows sellers to withdraw their accumulated payouts from NFT sales
+     * @dev Implements checks-effects-interactions pattern with reentrancy protection.
+     *      Handles both TitanX token and ETH payouts in a single transaction.
+     *      The function will:
+     *      1. Check if caller has any pending payouts
+     *      2. Clear payout records before transfers
+     *      3. Transfer TitanX tokens if applicable
+     *      4. Transfer ETH if applicable
+     *
+     * @notice The function handles two types of payouts:
+     *         - TitanX tokens from sales in TitanX
+     *         - ETH from sales in ETH
+     *         Both balances are cleared after successful withdrawal
+     */
+    function withdrawPayout() external nonReentrant {
+        Payout memory _payout = payouts[msg.sender];
+
+        if (_payout.payoutInTitanX == 0 && _payout.payoutInETH == 0) {
+            revert NftMarketplace__NoPayout();
+        }
+
+        delete payouts[msg.sender];
+
+        if (_payout.payoutInTitanX > 0) {
+            titanX.safeTransfer(msg.sender, _payout.payoutInTitanX);
+        }
+
+        if (_payout.payoutInETH > 0) {
+            (bool success,) = payable(msg.sender).call{value: _payout.payoutInETH}("");
+            if (!success) {
+                revert NftMarketplace__TransferFailed();
+            }
+        }
+    }
+
+    //==========================//
+    //==========PRIVATE=========//
+    //==========================//
+
+    /**
+     * @notice Checks if the current spot price deviation from TWAP is within acceptable bounds
+     * @dev Calculates the difference between spot and TWAP prices and compares against
+     *      maximum allowed deviation threshold.
+     *
+     * @param _spotPrice Current spot price to check against TWAP
+     *
+     * @notice This is a critical price protection mechanism to prevent:
+     *         - Market manipulation
+     *         - Extreme price volatility
+     *         - Unfair trading conditions
+     */
+    function checkIsDeviationOutOfBounds(uint256 _spotPrice) private view {
+        uint256 _twapPrice = getTwapPrice();
+        uint256 _diff = _twapPrice >= _spotPrice ? _twapPrice - _spotPrice : _spotPrice - _twapPrice;
+
+        if (FullMath.mulDiv(_spotPrice, deviation, MAX_DEVIATION_LIMIT) < _diff) {
+            revert NftMarketplace__DeviationOutOfBounds();
+        }
+    }
+
+    function sendToGenesisWallets(IERC20 erc20Token, uint256 _amount) private {
+
+		uint256 genesisHalf = wmul(_amount, HALF);
+
+		erc20Token.safeTransfer(GENESIS_WALLET_1, genesisHalf);
+		erc20Token.safeTransfer(GENESIS_WALLET_2, genesisHalf);
+	}
+
+    function sendETHToGenesisWallets(uint256 _amount) private {
+
+        uint256 genesisHalf = wmul(_amount, HALF);
+
+        (bool genesisFirstHalfFundTransferSuccess,) = payable(GENESIS_WALLET_1).call{value: genesisHalf}("");
+        if (!genesisFirstHalfFundTransferSuccess) {
+            revert NftMarketplace__TransferFailed();
+        }
+
+        (bool genesisSecondHalfFundTransferSuccess,) = payable(GENESIS_WALLET_2).call{value: genesisHalf}("");
+        if (!genesisSecondHalfFundTransferSuccess) {
+            revert NftMarketplace__TransferFailed();
+        }
+        
+	}
+
+    //==========================//
+    //=====EXTERNAL SETTERS=====//
+    //==========================//
+
+    /**
+     * @notice Sets the time window for TWAP calculation
+     * @dev Only callable by contract owner. Updates the time period used for calculating
+     *      Time Weighted Average Price (TWAP) for price deviation checks.
+     *
+     * @param _secondsAgoLimit New time window in seconds for TWAP calculation
+     *
+     * @notice This parameter affects price protection mechanisms by determining:
+     *         - How far back in time the TWAP calculation looks
+     *         - The responsiveness vs stability of price checks
+     */
+    function setSecondsAgo(uint32 _secondsAgoLimit) external onlyOwner {
+        if (_secondsAgoLimit == 0) revert NftMarketplace__IncorrectInput();
+        secondsAgo = _secondsAgoLimit;
+    }
+
+    /**
+     * @notice Sets the maximum allowed price deviation threshold
+     * @dev Only callable by contract owner. Controls how much spot price can deviate
+     *      from TWAP before transactions are rejected.
+     *
+     * @param _deviationLimit New maximum deviation limit (must be > 0 and <= MAX_DEVIATION_LIMIT)
+     *
+     * @notice This parameter is critical for market stability:
+     *         - Lower values = stricter price movement restrictions
+     *         - Higher values = more price flexibility
+     *         - Must be below MAX_DEVIATION_LIMIT for system safety
+     */
+    function setDeviation(uint32 _deviationLimit) external onlyOwner {
+        if (_deviationLimit == 0) revert NftMarketplace__IncorrectInput();
+        if (_deviationLimit > MAX_DEVIATION_LIMIT) revert NftMarketplace__IncorrectInput();
+        deviation = _deviationLimit;
+    }
+
+    //==========================//
+    //========PUBLIC VIEW=======//
+    //==========================//
+
+    /**
+     * @notice Calculates the Time Weighted Average Price (TWAP) of TitanX in WETH
+     *
+     * @return quote The TWAP price of 1 WAD (1e18) TitanX in WETH
+     *
+     * @dev Calculation process:
+     *      1. Get oldest available observation
+     *      2. Adjust seconds ago if needed
+     *      3. Compute arithmetic mean tick
+     *      4. Convert tick to sqrt price
+     *      5. Calculate final quote
+     *
+     * @notice The returned price:
+     *         - Is denominated in WETH
+     *         - Is time-weighted over the configured period
+     */
+    function getTwapPrice() public view returns (uint256 quote) {
+        uint32 _secondsAgo = secondsAgo;
+        uint32 oldestObservation = OracleLibrary.getOldestObservationSecondsAgo(TITANX_WETH_POOL);
+        if (oldestObservation < _secondsAgo) _secondsAgo = oldestObservation;
+
+        (int24 arithmeticMeanTick,) = OracleLibrary.consult(TITANX_WETH_POOL, _secondsAgo);
+        uint160 sqrtPriceX96 = TickMath.getSqrtRatioAtTick(arithmeticMeanTick);
+
+        quote = OracleLibrary.getQuoteForSqrtRatioX96(sqrtPriceX96, WAD, address(titanX), weth9);
+    }
+
+    /**
+     * @notice Gets the current spot price of TitanX in WETH from Uniswap V3
+     * @dev Reads directly from the pool's slot0 for current sqrt price
+     *
+     * @return uint256 The current spot price of 1 WAD (1e18) TitanX in WETH
+     *
+     * @dev Calculation process:
+     *      1. Read sqrt price from pool slot0
+     *      2. Convert to quote using OracleLibrary
+     *
+     * @notice The returned price:
+     *         - Is instantaneous (not time-weighted)
+     *         - Is denominated in WETH
+     */
+    function getSpotPrice() public view returns (uint256) {
+        IUniswapV3Pool pool = IUniswapV3Pool(TITANX_WETH_POOL);
+        (uint160 sqrtPriceX96,,,,,,) = pool.slot0();
+        return OracleLibrary.getQuoteForSqrtRatioX96(sqrtPriceX96, WAD, address(titanX), weth9);
+    }
+
+    /**
+     * @notice Checks if a listing is currently active
+     * @dev Uses EnumerableSet to efficiently check listing status
+     *
+     * @param _listingId The ID of the listing to check
+     * @return bool True if listing is active, false otherwise
+     *
+     * @notice A listing is considered active if:
+     *         - It has been created
+     *         - Has not been cancelled
+     *         - Has not been purchased
+     */
+    function isListingActive(uint256 _listingId) public view returns (bool) {
+        return activeListings.contains(_listingId);
+    }
+
+    //==========================//
+    //======EXTERNAL VIEW=======//
+    //==========================//
+
+    /**
+     * @notice Retrieves detailed information about a specific listing
+     * @dev Returns a Listing struct containing tokenId, price, and seller information
+     *
+     * @param _listingId The ID of the listing to query
+     * @return Listing struct containing listing details:
+     *         - tokenId: The ID of the listed NFT
+     *         - price: The listing price in USD
+     *         - seller: Address of the seller
+     *
+     * @notice Returns empty values if listing doesn't exist
+     */
+    function getListing(uint256 _listingId) external view returns (Listing memory) {
+        return listings[_listingId];
+    }
+
+    /**
+     * @notice Retrieves pending payout information for a seller
+     * @dev Returns a Payout struct containing both TitanX and ETH payout amounts
+     *
+     * @param seller The address of the seller to check payouts for
+     * @return Payout struct containing:
+     *         - payoutInTitanX: Amount of TitanX tokens pending withdrawal
+     *         - payoutInETH: Amount of ETH pending withdrawal
+     */
+    function getPayout(address seller) external view returns (Payout memory) {
+        return payouts[seller];
+    }
+
+    /**
+     * @notice Returns an array of all currently active listing IDs
+     * @dev Uses EnumerableSet to maintain and return active listings
+     *
+     * @return uint256[] Array of active listing IDs
+     *
+     * @notice The returned array contains all non-cancelled, non-purchased listing IDs
+     */
+    function getActiveListings() external view returns (uint256[] memory) {
+        return activeListings.values();
+    }
+}

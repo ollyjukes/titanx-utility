@@ -1,0 +1,140 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import "../const/Constants.sol";
+import {wmul} from "../utils/Math.sol";
+import {Time} from "../utils/Time.sol";
+import {Flare} from "../core/Flare.sol";
+import "../BuyNBurn/BaseBuyNBurn.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IUniswapV2Router02} from "v2-periphery/interfaces/IUniswapV2Router02.sol";
+
+/**
+ *  @title FlareBuyAndBurn
+ *  @author Decentra
+ *  @notice This contract manages the automated buying and burning of Flare tokens using X28 through Uniswap V2 pools
+ */
+contract FlareBuyAndBurn is BaseBuyAndBurn {
+    /// @notice The Flare token contract
+    Flare private immutable flare;
+
+    /// @notice The X28 contract
+    IERC20 private immutable X28;
+
+    /**
+     * @notice Constructor initializes the contract
+     * @notice Constructor is payable to save gas
+     */
+    constructor(uint32 _startTimestamp, address _X28, address _flare, address _v2Router, address _owner)
+        payable
+        BaseBuyAndBurn(_startTimestamp, _v2Router, _X28, _owner)
+        notAddress0(_flare)
+    {
+        require((_startTimestamp % Time.SECONDS_PER_DAY) == Time.TURN_OVER_TIME, "_startTimestamp must be 2PM UTC");
+        flare = Flare(_flare);
+        X28 = IERC20(_X28);
+    }
+
+    /**
+     * @notice Swaps X28 for Flare and burns the Flare tokens
+     * @param _amountFlareMin Minimum amount of Flare tokens expected
+     * @param _deadline The deadline for which the passes should pass
+     */
+    function swapX28ForFlareAndBurn(uint256 _amountFlareMin, uint32 _deadline)
+        external
+        intervalUpdate
+        notAmount0(_amountFlareMin)
+        notExpired(_deadline)
+    {
+        if (msg.sender != tx.origin) revert OnlyEOA();
+        Interval storage currInterval = intervals[lastIntervalNumber];
+
+        if (privateMode) {
+            if (!isPermissioned[msg.sender]) revert OnlyPermissionAdresses();
+        }
+
+        if (currInterval.amountBurned != 0) revert IntervalAlreadyBurned();
+
+        if (currInterval.amountAllocated > swapCap) currInterval.amountAllocated = swapCap;
+
+        currInterval.amountBurned = currInterval.amountAllocated;
+
+        uint256 incentive = wmul(currInterval.amountAllocated, INCENTIVE);
+
+        uint256 X28ToSwapAndBurn = currInterval.amountAllocated - incentive;
+
+        _swapX28ForFlare(X28ToSwapAndBurn, _amountFlareMin, _deadline);
+        uint256 balanceAfter = flare.balanceOf(address(this));
+
+        burnFlare();
+
+        X28.transfer(msg.sender, incentive);
+
+        lastBurnedInterval = lastIntervalNumber;
+
+        emit BuyAndBurn(X28ToSwapAndBurn, balanceAfter, msg.sender);
+    }
+
+    /**
+     * @notice Burns flare tokens held by the contract
+     */
+    function burnFlare() public {
+        uint256 flareToBurn = flare.balanceOf(address(this));
+
+        totalFlareBurnt = totalFlareBurnt + flareToBurn;
+        flare.burn(flareToBurn);
+    }
+
+    /**
+     * @notice Distributes X28 tokens for burning
+     * @param _amount The amount of X28 tokens
+     */
+    function distributeX28ForBurning(uint256 _amount) external {
+        ///@dev - If there are some missed intervals update the accumulated allocation before depositing new X28
+        if (Time.blockTs() > startTimeStamp && Time.blockTs() - lastBurnedIntervalStartTimestamp > INTERVAL_TIME) {
+            _intervalUpdate();
+        }
+
+        X28.transferFrom(msg.sender, address(this), _amount);
+    }
+
+    /**
+     * @notice Gets the current week day (0=Sunday, 1=Monday etc etc) wtih a cut-off hour at 2pm UTC
+     */
+    function currWeekDay() public view returns (uint8 weekDay) {
+        weekDay = Time.weekDayByT(uint32(block.timestamp));
+    }
+
+    /**
+     * @notice Gets the daily X28 allocation
+     * @param _timestamp The timestamp
+     * @return dailyWadAllocation The daily allocation in WAD
+     */
+    function getDailyTokenAllocation(uint32 _timestamp) public pure override returns (uint64 dailyWadAllocation) {
+        uint256 weekDay = Time.weekDayByT(_timestamp);
+        dailyWadAllocation = SUN_WED_BNB; // 4%
+
+        if (weekDay == 5 || weekDay == 6) {
+            dailyWadAllocation = FRI_SAT_BNB; // 15%
+        } else if (weekDay == 4) {
+            dailyWadAllocation = THUR_BNB; // 10%
+        }
+    }
+
+    /**
+     * @notice Swaps X28 tokens for Flare tokens
+     * @param _amountX28 The amount of X28 tokens
+     * @param _amountFlareMin Minimum amount of Flare tokens expected
+     */
+    function _swapX28ForFlare(uint256 _amountX28, uint256 _amountFlareMin, uint256 _deadline) private {
+        X28.approve(v2Router, _amountX28);
+
+        address[] memory path = new address[](2);
+        path[0] = address(X28);
+        path[1] = address(flare);
+
+        IUniswapV2Router02(v2Router).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+            _amountX28, _amountFlareMin, path, address(this), _deadline
+        );
+    }
+}

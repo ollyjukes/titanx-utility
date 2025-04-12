@@ -3,13 +3,46 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import { useFlareAuctionStore } from '../lib/store';
+import { useFlareAuctionState } from '../lib/auctions/flare';
 
 export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false);
+  const { setFlareAuctionDay } = useFlareAuctionStore();
+  const { startTimestamp, startLoading, getAuctionDayStatus } = useFlareAuctionState();
 
   useEffect(() => {
     setIsLoaded(true);
-  }, []);
+
+    // Initialize Flare auction state
+    if (!startLoading && startTimestamp) {
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+      const { isAuction, nextFlareAuctionStart } = getAuctionDayStatus(currentTimestamp);
+      setFlareAuctionDay(isAuction, nextFlareAuctionStart);
+
+      // Schedule daily update at 2 PM UTC
+      const scheduleNextUpdate = () => {
+        const now = new Date();
+        const next2PMUTC = new Date(Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate() + (now.getUTCHours() >= 14 ? 1 : 0),
+          14, // 2 PM UTC
+          0,
+          0
+        ));
+        const timeUntilNext = next2PMUTC - now;
+
+        setTimeout(() => {
+          const newTimestamp = Math.floor(Date.now() / 1000);
+          const { isAuction: newIsAuction, nextFlareAuctionStart: newNextStart } = getAuctionDayStatus(newTimestamp);
+          setFlareAuctionDay(newIsAuction, newNextStart);
+          scheduleNextUpdate();
+        }, timeUntilNext);
+      };
+      scheduleNextUpdate();
+    }
+  }, [startLoading, startTimestamp, setFlareAuctionDay]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">

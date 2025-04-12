@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.27;
+
+import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
+
+import {AscendantAuction} from "@core/AscendantAuction.sol";
+import {Ascendant} from "@core/Ascendant.sol";
+
+interface IAscendantBuyAndBurn {
+    function distributeTitanXForBurning(uint256 _amount) external;
+}
+
+interface IAscendantNFTMinting {
+    function claim(uint256 _tokenId, address _receiver) external;
+}
+
+interface IAscendant is IERC20 {
+    /* == ERRORS == */
+    error Ascendant__OnlyAuction();
+
+    /* == VIEW FUNCTIONS == */
+    function auction() external view returns (AscendantAuction);
+    function buyAndBurn() external view returns (IAscendantBuyAndBurn);
+    function pool() external view returns (address);
+
+    /* == EXTERNAL FUNCTIONS == */
+    function burn(uint256 amount) external;
+
+    function emitForAuction() external returns (uint256 emitted);
+
+    function emitForLp() external returns (uint256 emitted);
+}

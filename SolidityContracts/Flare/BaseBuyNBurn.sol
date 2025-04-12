@@ -1,0 +1,298 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import "../const/Constants.sol";
+import {wmul} from "../utils/Math.sol";
+import {Time} from "../utils/Time.sol";
+import {Errors} from "../utils/Errors.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20Burnable} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+
+/**
+ * @title BaseBuyAndBurn
+ * @author Decentra
+ * @notice This contract manages the buy and burn calculations/allocations
+ */
+contract BaseBuyAndBurn is Ownable, Errors {
+    /// @notice Struct to represent intervals for burning
+    struct Interval {
+        uint128 amountAllocated;
+        uint128 amountBurned;
+    }
+
+    /// @notice X28 token contract
+    IERC20 internal immutable buyingToken;
+
+    ///@notice The startTimestamp
+    uint32 public immutable startTimeStamp;
+
+    /// @notice The v2 router address
+    address immutable v2Router;
+
+    /// @notice Timestamp of the last snapshot
+    uint32 public lastSnapshotTimestamp;
+
+    /// @notice Timestamp of the last burn call
+    uint32 public lastBurnedIntervalStartTimestamp;
+
+    /// @notice Total amount of Flare tokens burnt
+    uint256 public totalFlareBurnt;
+
+    /// @notice Mapping from address to boolean to check permissions
+    mapping(address => bool) public isPermissioned;
+
+    /// @notice Mapping from interval number to Interval struct
+    mapping(uint32 interval => Interval) public intervals;
+
+    /// @notice Last interval number
+    uint32 public lastIntervalNumber;
+
+    /// @notice Last burned interval number
+    uint32 public lastBurnedInterval;
+
+    /// @notice Total X28 tokens distributed
+    uint256 public totalX28Distributed;
+
+    ///@notice - The maximum amount a swap can have for the BnB
+    uint128 public swapCap;
+
+    /// @notice True if the contract is in private mode
+    bool public privateMode;
+
+    /// @notice Event emitted when tokens are bought and burnt
+    event BuyAndBurn(uint256 indexed X28Amount, uint256 indexed flareAmount, address indexed caller);
+
+    /// @notice Error when the contract has not started yet
+    error NotStartedYet();
+
+    /// @notice Error when interval has already been called
+    error SnapshotDuration();
+
+    /// @notice Error when non permissioned caller
+    error OnlyPermissionAdresses();
+
+    /// @notice Error when some user input is considered invalid
+    error InvalidInput();
+
+    /// @notice Error when interval has already been burned
+    error IntervalAlreadyBurned();
+
+    /// @notice Error when the contract starts is not 2PM UTC
+    error MustStartAt2PMUTC();
+
+    /// @notice Error when non EOA caller
+    error OnlyEOA();
+
+    /**
+     * @notice Constructor initializes the contract
+     * @notice Constructor is payable to save gas
+     * @param _startTimestamp the start timestamp
+     * @param _v2Router the v2 router address
+     * @param _buyingToken the buying token address
+     * @param _owner the owner address
+     */
+    constructor(uint32 _startTimestamp, address _v2Router, address _buyingToken, address _owner)
+        payable
+        Ownable(_owner)
+        notExpired(_startTimestamp)
+        notAddress0(_v2Router)
+        notAddress0(_buyingToken)
+    {
+        startTimeStamp = _startTimestamp;
+        buyingToken = IERC20(_buyingToken);
+
+        v2Router = _v2Router;
+
+        isPermissioned[_owner] = true;
+
+        swapCap = type(uint128).max;
+    }
+
+    /**
+     * @notice Updates the contract state for intervals
+     */
+    modifier intervalUpdate() {
+        _intervalUpdate();
+        _;
+    }
+
+    /**
+     * @notice Toggles the private mode
+     * @param _isPrivate True if the contract is in private mode, false otherwise
+     */
+    function togglePrivateMode(bool _isPrivate) external onlyOwner {
+        privateMode = _isPrivate;
+    }
+
+    /**
+     * @notice Toggles the permissioned address
+     * @param _caller The address to toggle
+     * @param _isPermissioned True if the address is permissioned, false otherwise
+     */
+    function togglePermissionedAddress(address _caller, bool _isPermissioned) external onlyOwner notAddress0(_caller) {
+        isPermissioned[_caller] = _isPermissioned;
+    }
+
+    /**
+     * @notice Changes the swap cap
+     * @param _newSwapCap The new swap cap
+     */
+    function changeSwapCap(uint128 _newSwapCap) external onlyOwner {
+        swapCap = _newSwapCap;
+    }
+
+    /**
+     * @notice Returns the current interval
+     */
+    function getCurrentInterval()
+        public
+        view
+        returns (
+            uint32 _lastInterval,
+            uint128 _amountAllocated,
+            uint16 _missedIntervals,
+            uint32 _lastIntervalStartTimestamp,
+            uint256 beforeCurrday,
+            bool updated
+        )
+    {
+        uint32 startPoint = lastBurnedIntervalStartTimestamp == 0 ? startTimeStamp : lastBurnedIntervalStartTimestamp;
+        uint32 timeElapseSinceLastBurn = Time.blockTs() - startPoint;
+
+        if (lastBurnedIntervalStartTimestamp == 0 || timeElapseSinceLastBurn > INTERVAL_TIME) {
+            (_lastInterval, _amountAllocated, _missedIntervals, beforeCurrday) =
+                _calculateIntervals(timeElapseSinceLastBurn);
+
+            _lastIntervalStartTimestamp = startPoint;
+            _missedIntervals += timeElapseSinceLastBurn > INTERVAL_TIME && lastBurnedIntervalStartTimestamp != 0 ? 1 : 0;
+            updated = true;
+        }
+    }
+
+    function _calculateIntervals(uint256 timeElapsedSince)
+        internal
+        view
+        returns (
+            uint32 _lastIntervalNumber,
+            uint128 _totalAmountForInterval,
+            uint16 missedIntervals,
+            uint256 beforeCurrDay
+        )
+    {
+        missedIntervals = _calculateMissedIntervals(timeElapsedSince);
+
+        _lastIntervalNumber = lastIntervalNumber + missedIntervals + 1;
+
+        uint32 currentDay = Time.dayGap(startTimeStamp, Time.blockTs());
+
+        uint32 dayOfLastInterval = lastBurnedIntervalStartTimestamp == 0
+            ? currentDay
+            : Time.dayGap(startTimeStamp, lastBurnedIntervalStartTimestamp);
+
+        if (currentDay == dayOfLastInterval) {
+            uint256 dailyAllocation = wmul(totalX28Distributed, getDailyTokenAllocation(Time.blockTs()));
+
+            uint128 _amountPerInterval = uint128(dailyAllocation / INTERVALS_PER_DAY);
+
+            uint128 additionalAmount = _amountPerInterval * missedIntervals;
+
+            _totalAmountForInterval = _amountPerInterval + additionalAmount;
+        } else {
+            uint32 _lastBurnedIntervalStartTimestamp = lastBurnedIntervalStartTimestamp;
+
+            uint32 theEndOfTheDay = Time.getDayEnd(_lastBurnedIntervalStartTimestamp);
+
+            uint256 balanceOf = buyingToken.balanceOf(address(this));
+
+            while (currentDay >= dayOfLastInterval) {
+                uint32 end = uint32(Time.blockTs() < theEndOfTheDay ? Time.blockTs() : theEndOfTheDay - 1);
+
+                uint32 accumulatedIntervalsForTheDay = (end - _lastBurnedIntervalStartTimestamp) / INTERVAL_TIME;
+
+                uint256 diff = balanceOf > _totalAmountForInterval ? balanceOf - _totalAmountForInterval : 0;
+
+                //@note - If the day we are looping over the same day as the last interval's use the cached allocation, otherwise use the current balance
+                uint256 forAllocation = lastSnapshotTimestamp + 1 weeks > end
+                    ? totalX28Distributed
+                    : balanceOf >= _totalAmountForInterval + wmul(diff, getDailyTokenAllocation(end)) ? diff : 0;
+
+                uint256 dailyAllocation = wmul(forAllocation, getDailyTokenAllocation(end));
+
+                ///@notice ->  minus INTERVAL_TIME minutes since, at the end of the day the new epoch with new allocation
+                _lastBurnedIntervalStartTimestamp = theEndOfTheDay - INTERVAL_TIME;
+
+                ///@notice ->  plus INTERVAL_TIME minutes to flip into the next day
+                theEndOfTheDay = Time.getDayEnd(_lastBurnedIntervalStartTimestamp + INTERVAL_TIME);
+
+                if (dayOfLastInterval == currentDay) beforeCurrDay = _totalAmountForInterval;
+
+                _totalAmountForInterval +=
+                    uint128((dailyAllocation * accumulatedIntervalsForTheDay) / INTERVALS_PER_DAY);
+
+                dayOfLastInterval++;
+            }
+        }
+
+        Interval memory prevInt = intervals[lastIntervalNumber];
+
+        //@note - If the last interval was only updated, but not burned add its allocation to the next one.
+        uint128 additional = prevInt.amountBurned == 0 ? prevInt.amountAllocated : 0;
+
+        if (_totalAmountForInterval + additional > buyingToken.balanceOf(address(this))) {
+            _totalAmountForInterval = uint128(buyingToken.balanceOf(address(this)));
+        } else {
+            _totalAmountForInterval += additional;
+        }
+    }
+
+    function getDailyTokenAllocation(uint32 from) public pure virtual returns (uint64 dailyWadAllocation) {}
+
+    function _calculateMissedIntervals(uint256 timeElapsedSince) internal view returns (uint16 _missedIntervals) {
+        _missedIntervals = uint16(timeElapsedSince / INTERVAL_TIME);
+
+        if (lastBurnedIntervalStartTimestamp != 0) _missedIntervals--;
+    }
+
+    /**
+     * @notice Updates the snapshot
+     */
+    function _updateSnapshot(uint256 deltaAmount) internal {
+        if (Time.blockTs() < startTimeStamp || lastSnapshotTimestamp + 1 weeks > Time.blockTs()) return;
+
+        uint32 timeElapsed = uint32(Time.blockTs() - startTimeStamp);
+
+        uint32 snapshots = timeElapsed / 1 weeks;
+
+        uint256 balance = buyingToken.balanceOf(address(this));
+
+        totalX28Distributed = deltaAmount > balance ? 0 : balance - deltaAmount;
+        lastSnapshotTimestamp = startTimeStamp + (snapshots * 1 weeks);
+    }
+
+    /**
+     * @notice Updates the contract state for intervals
+     */
+    function _intervalUpdate() internal {
+        require(Time.blockTs() >= startTimeStamp, NotStartedYet());
+
+        if (lastSnapshotTimestamp == 0) _updateSnapshot(0);
+
+        (
+            uint32 _lastInterval,
+            uint128 _amountAllocated,
+            uint16 _missedIntervals,
+            uint32 _lastIntervalStartTimestamp,
+            uint256 beforeCurrentDay,
+            bool updated
+        ) = getCurrentInterval();
+
+        _updateSnapshot(beforeCurrentDay);
+
+        if (updated) {
+            lastBurnedIntervalStartTimestamp = _lastIntervalStartTimestamp + (uint32(_missedIntervals) * INTERVAL_TIME);
+            intervals[_lastInterval] = Interval({amountAllocated: _amountAllocated, amountBurned: 0});
+            lastIntervalNumber = _lastInterval;
+        }
+    }
+}
