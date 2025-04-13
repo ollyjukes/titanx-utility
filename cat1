@@ -1,0 +1,2 @@
+clear
+cat project_summary.txt character_counts.txt project_contents_part1.txt

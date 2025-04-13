@@ -5,14 +5,16 @@ STRUCTURE_FILE="project_structure.txt"
 CONTENT_FILE="project_contents.txt"
 SOLIDITY_DIR="solidity_contracts"
 SUMMARY_FILE="project_summary.txt"
+CHAR_COUNT_FILE="character_counts.txt"
 
 # Create directories if they don't exist
 mkdir -p "$SOLIDITY_DIR"
 
 # Clean up previous output files
-rm -f "$STRUCTURE_FILE" "$CONTENT_FILE" "$SUMMARY_FILE"
+rm -f "$STRUCTURE_FILE" "$CONTENT_FILE" "$SUMMARY_FILE" "$CHAR_COUNT_FILE"
 rm -rf "$SOLIDITY_DIR"/* # Clear previous Solidity outputs
-rm -f project_*_solidity.sol # Clear previous concatenated Solidity files
+rm -f project_*_solidity.sol sol_project_*_solidity.sol # Clear previous concatenated Solidity files
+rm -f project_contents_part*.txt # Clear previous split content files
 
 # Step 1: Generate directory structure
 echo "Generating directory structure..." >&2
@@ -35,31 +37,7 @@ echo "Directory structure saved to $STRUCTURE_FILE" >&2
 echo "Dumping file contents..." >&2
 > "$CONTENT_FILE"
 
-# Process Solidity files
-find ./SolidityContracts -type f -name "*.sol" 2>/dev/null | while IFS= read -r file; do
-  file=$(echo "$file" | sed 's|^\./||')
-  if [[ -f "$file" ]]; then
-    echo "-e " >> "$CONTENT_FILE"
-    echo "---" >> "$CONTENT_FILE"
-    echo "File: ./$file" >> "$CONTENT_FILE"
-    contract_name=$(basename "$file" .sol)
-    subdir=$(dirname "$file" | sed 's|SolidityContracts/||')
-    if [[ "$subdir" == "$file" || "$subdir" == "SolidityContracts" ]]; then
-      subdir="Root"
-    fi
-    solidity_output="$SOLIDITY_DIR/${subdir}_${contract_name}_contract.txt"
-    echo "Contract: $contract_name" > "$solidity_output"
-    echo "Subdirectory: $subdir" >> "$solidity_output"
-    echo "Path: ./$file" >> "$solidity_output"
-    echo "Contents:" >> "$solidity_output"
-    cat "$file" >> "$solidity_output" 2>/dev/null
-    echo "Solidity file saved to $solidity_output" >> "$CONTENT_FILE"
-    echo "-e " >> "$CONTENT_FILE"
-    echo "---" >> "$CONTENT_FILE"
-  fi
-done
-
-# Process non-Solidity files
+# Process non-Solidity files, excluding sol_project_*.sol
 find . -type f \
   -not -path "./node_modules/*" \
   -not -path "./public/*" \
@@ -69,16 +47,32 @@ find . -type f \
   -not -name "package-lock.json" \
   -not -name "*.log" \
   -not -name "*.sol" \
+  -not -name "sol_project_*.sol" \
   \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.mjs" -o -name "*.json" -o -name "*.md" -o -name ".env*" -o -name ".gitignore" \) \
   -exec sh -c 'file "{}" | grep -q "text" && echo "{}"' \; | while IFS= read -r file; do
   file=$(echo "$file" | sed 's|^\./||')
   if [[ -f "$file" ]]; then
-    echo "-e " >> "$CONTENT_FILE"
-    echo "---" >> "$CONTENT_FILE"
-    echo "File: ./$file" >> "$CONTENT_FILE"
-    cat "$file" >> "$CONTENT_FILE" 2>/dev/null
-    echo "-e " >> "$CONTENT_FILE"
-    echo "---" >> "$CONTENT_FILE"
+    if [[ "$file" == "app/token_contracts.js" ]]; then
+      # Save app/token_contracts.js to a separate backup file
+      backup_file="token_contracts_backup.js"
+      echo "File: ./$file" > "$backup_file"
+      echo "Contents:" >> "$backup_file"
+      cat "$file" >> "$backup_file" 2>/dev/null
+      echo "-e" >> "$CONTENT_FILE"
+      echo "---" >> "$CONTENT_FILE"
+      echo "Backup: ./$file to $backup_file" >> "$CONTENT_FILE"
+      echo "-e" >> "$CONTENT_FILE"
+      echo "---" >> "$CONTENT_FILE"
+    fi
+    if [[ "$file" != "token_contracts_backup.js" ]]; then
+      echo "-e" >> "$CONTENT_FILE"
+      echo "---" >> "$CONTENT_FILE"
+      echo "File: ./$file" >> "$CONTENT_FILE"
+      cat "$file" >> "$CONTENT_FILE" 2>/dev/null
+      echo "Dumped ./$file to $CONTENT_FILE, size: $(stat -f %z "$file") bytes" >> "$SUMMARY_FILE"
+      echo "-e" >> "$CONTENT_FILE"
+      echo "---" >> "$CONTENT_FILE"
+    fi
   fi
 done
 if [ $? -ne 0 ]; then
@@ -86,9 +80,12 @@ if [ $? -ne 0 ]; then
 fi
 echo "File contents saved to $CONTENT_FILE (not displayed due to size)" >&2
 
+# Log first few lines of project_contents.txt for debugging
+echo -e "\nFirst 20 lines of project_contents.txt for debugging:" >> "$SUMMARY_FILE"
+head -n 20 "$CONTENT_FILE" >> "$SUMMARY_FILE"
+
 # Step 3: Concatenate Solidity files by subdirectory
 echo "Concatenating Solidity files by subdirectory..." >&2
-# Find all subdirectories under SolidityContracts
 find ./SolidityContracts -type d -maxdepth 1 -not -path "./SolidityContracts" | while IFS= read -r dir; do
   subdir=$(basename "$dir")
   concat_file="sol_project_${subdir}_solidity.sol"
@@ -127,9 +124,9 @@ fi
 if [ -f "package.json" ]; then
   echo -e "\nDependencies from package.json:" >> "$SUMMARY_FILE"
   if command -v jq >/dev/null 2>&1; then
-    jq -r '.dependencies | keys[]' "package.json" 2>/dev/null | sed 's/^/  - /' >> "$SUMMARY_FILE"
+    jq -r '.dependencies // {} | keys[]' "package.json" 2>/dev/null | sort | sed 's/^/  - /' >> "$SUMMARY_FILE" || echo "  (Error parsing dependencies)" >> "$SUMMARY_FILE"
     echo -e "\nDev Dependencies from package.json:" >> "$SUMMARY_FILE"
-    jq -r '.devDependencies | keys[]' "package.json" 2>/dev/null | sed 's/^/  - /' >> "$SUMMARY_FILE"
+    jq -r '.devDependencies // {} | keys[]' "package.json" 2>/dev/null | sort | sed 's/^/  - /' >> "$SUMMARY_FILE" || echo "  (Error parsing devDependencies)" >> "$SUMMARY_FILE"
   else
     echo "  (Install 'jq' with 'brew install jq' to parse package.json)" >> "$SUMMARY_FILE"
   fi
@@ -156,13 +153,268 @@ REFERENCED_FILES=(
 )
 
 for file in "${REFERENCED_FILES[@]}"; do
-  if ! grep -q "$file" "$STRUCTURE_FILE" 2>/dev/null; then
+  # Escape special characters and match file path in structure file
+  escaped_file=$(echo "$file" | sed 's/[.[\*^$()+?{|]/\\&/g')
+  if ! grep -q "[[:space:]]${escaped_file}$" "$STRUCTURE_FILE" 2>/dev/null; then
     echo "- $file (Referenced but not found in project structure)" >> "$SUMMARY_FILE"
   fi
 done
 echo "Project summary saved to $SUMMARY_FILE" >&2
 
-# Step 5: Output results to terminal
+# Step 5: Split project_contents.txt into parts under 100,000 characters, keeping source files whole
+echo "Splitting project_contents.txt into parts..." >&2
+echo -e "\nSplitting project_contents.txt into parts under 100,000 characters:" >> "$SUMMARY_FILE"
+
+# Remove previous split files
+rm -f project_contents_part*.txt
+
+# Initialize first part file
+part_num=1
+current_file="project_contents_part${part_num}.txt"
+> "$current_file"
+char_count=0
+block_count=0
+
+# Parse blocks and write to part files
+awk -v summary_file="$SUMMARY_FILE" -v max_chars=100000 '
+BEGIN {
+  block_num = 0;
+  buffer = "";
+  char_count = 0;
+  part_num = 1;
+  output_file = "project_contents_part1.txt";
+  in_block = 0;
+  line_num = 0;
+  non_block_count = 0;
+}
+{
+  line_num++;
+  # Handle line endings and whitespace
+  sub(/[ \t\r]*$/, "");
+  # Log first few -e lines for debugging
+  if ($0 == "-e" && line_num <= 20) {
+    print "Found -e at line " line_num >> summary_file;
+  }
+}
+/^-e$/ {
+  if (in_block && buffer != "") {
+    # End of block
+    block_chars = length(buffer) + length("\n-e\n");
+    if (char_count + block_chars > max_chars && char_count > 0) {
+      # Start new part
+      part_num++;
+      output_file = "project_contents_part" part_num ".txt";
+      system("> " output_file);
+      char_count = 0;
+      print "Created " output_file " for block " block_num " at line " line_num >> summary_file;
+    }
+    printf("%s\n-e\n", buffer) >> output_file;
+    close(output_file);
+    char_count += block_chars;
+    print "Block " block_num ": " block_chars " chars, wrote to " output_file " at line " line_num >> summary_file;
+    block_num++;
+    buffer = "";
+    in_block = 0;
+  } else {
+    # Start of block
+    in_block = 1;
+    buffer = "-e\n";
+  }
+}
+in_block && !/^-e$/ {
+  buffer = buffer $0 "\n";
+}
+!in_block && !/^-e$/ {
+  # Accumulate non-block, flush if too large
+  buffer = buffer $0 "\n";
+  if (non_block_count < 10) {
+    print "Non-block line " line_num ": " substr($0, 1, 50) "..." >> summary_file;
+    non_block_count++;
+  }
+  if (non_block_count == 10) {
+    print "Further non-block lines omitted..." >> summary_file;
+    non_block_count++;
+  }
+  # Flush buffer if it grows too large without -e
+  if (length(buffer) > max_chars) {
+    block_chars = length(buffer);
+    if (char_count + block_chars > max_chars && char_count > 0) {
+      part_num++;
+      output_file = "project_contents_part" part_num ".txt";
+      system("> " output_file);
+      char_count = 0;
+      print "Created " output_file " for large non-block " block_num " at line " line_num >> summary_file;
+    }
+    printf("%s", buffer) >> output_file;
+    close(output_file);
+    char_count += block_chars;
+    print "Non-block " block_num ": " block_chars " chars, wrote to " output_file " at line " line_num >> summary_file;
+    block_num++;
+    buffer = "";
+  }
+}
+END {
+  if (buffer != "") {
+    block_chars = length(buffer);
+    if (in_block) {
+      block_chars += length("\n-e\n");
+      buffer = buffer "\n-e\n";
+    }
+    if (char_count + block_chars > max_chars && char_count > 0) {
+      part_num++;
+      output_file = "project_contents_part" part_num ".txt";
+      system("> " output_file);
+      char_count = 0;
+      print "Created " output_file " for final block " block_num " at line " line_num >> summary_file;
+    }
+    printf("%s", buffer) >> output_file;
+    close(output_file);
+    char_count += block_chars;
+    print "Final block " block_num ": " block_chars " chars, wrote to " output_file " at line " line_num >> summary_file;
+    block_num++;
+  }
+  print "Total blocks created: " block_num >> summary_file;
+  print "Split complete: created " block_num " blocks across project_contents_part1.txt to project_contents_part" part_num ".txt" >> summary_file;
+}' "$CONTENT_FILE"
+
+# Check if awk succeeded
+if [ $? -ne 0 ]; then
+  echo "Error: awk parsing failed in block splitting" >> "$SUMMARY_FILE"
+fi
+
+# Verify part files
+for part_file in project_contents_part*.txt; do
+  if [ -f "$part_file" ]; then
+    part_size=$(wc -m < "$part_file" | tr -d '[:space:]')
+    echo "Part file $part_file: $part_size characters" >> "$SUMMARY_FILE"
+    if [ "$part_size" -gt 100000 ]; then
+      echo "Warning: $part_file exceeds 100,000 characters ($part_size)" >> "$SUMMARY_FILE"
+    fi
+  fi
+done
+
+# Fallback: If splitting failed or parts are empty/oversized
+total_parts=$(ls project_contents_part*.txt 2>/dev/null | wc -l | tr -d '[:space:]')
+if [ "$total_parts" -eq 0 ] || { [ "$total_parts" -ge 1 ] && { [ "$(wc -m < project_contents_part1.txt 2>/dev/null | tr -d '[:space:]')" -eq 0 ] || [ "$(wc -m < project_contents_part1.txt 2>/dev/null | tr -d '[:space:]')" -gt 100000 ]; }; }; then
+  echo "Warning: Block splitting failed or produced empty/oversized file(s), falling back to boundary-based split" >> "$SUMMARY_FILE"
+  rm -f project_contents_part*.txt
+  part_num=1
+  char_count=0
+  current_file="project_contents_part${part_num}.txt"
+  > "$current_file"
+  block_buffer=""
+  block_chars=0
+  in_block=0
+  line_num=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line_num=$((line_num + 1))
+    # Clean line for -e detection
+    clean_line=$(echo "$line" | sed 's/[ \t\r]*$//')
+    line_chars=$(echo -n "$line" | wc -m)
+    line_chars=$((line_chars + 1)) # Include newline
+    block_buffer="$block_buffer$line\n"
+    block_chars=$((block_chars + line_chars))
+    if [ "$clean_line" = "-e" ]; then
+      if [ $in_block -eq 1 ]; then
+        # End of block
+        if [ $((char_count + block_chars)) -gt 100000 ] && [ $char_count -gt 0 ]; then
+          part_num=$((part_num + 1))
+          current_file="project_contents_part${part_num}.txt"
+          > "$current_file"
+          char_count=0
+          echo "Fallback: Created $current_file, total chars: $char_count at line $line_num" >> "$SUMMARY_FILE"
+        fi
+        printf "%s" "$block_buffer" >> "$current_file"
+        char_count=$((char_count + block_chars))
+        echo "Fallback: Wrote $block_chars chars to $current_file, total: $char_count at line $line_num" >> "$SUMMARY_FILE"
+        block_buffer=""
+        block_chars=0
+      fi
+      in_block=$((1 - in_block)) # Toggle in_block
+    fi
+    # Fallback split if buffer too large
+    if [ $block_chars -gt 100000 ] && [ $in_block -eq 0 ]; then
+      if [ $((char_count + block_chars)) -gt 100000 ] && [ $char_count -gt 0 ]; then
+        part_num=$((part_num + 1))
+        current_file="project_contents_part${part_num}.txt"
+        > "$current_file"
+        char_count=0
+        echo "Fallback: Created $current_file for large non-block at line $line_num" >> "$SUMMARY_FILE"
+      fi
+      printf "%s" "$block_buffer" >> "$current_file"
+      char_count=$((char_count + block_chars))
+      echo "Fallback: Wrote $block_chars chars to $current_file, total: $char_count at line $line_num" >> "$SUMMARY_FILE"
+      block_buffer=""
+      block_chars=0
+    fi
+  done < "$CONTENT_FILE"
+  # Write remaining buffer
+  if [ -n "$block_buffer" ]; then
+    if [ $((char_count + block_chars)) -gt 100000 ] && [ $char_count -gt 0 ]; then
+      part_num=$((part_num + 1))
+      current_file="project_contents_part${part_num}.txt"
+      > "$current_file"
+      char_count=0
+      echo "Fallback: Created $current_file, total chars: $char_count at line $line_num" >> "$SUMMARY_FILE"
+    fi
+    printf "%s" "$block_buffer" >> "$current_file"
+    char_count=$((char_count + block_chars))
+    echo "Fallback: Wrote $block_chars chars to $current_file, total: $char_count at line $line_num" >> "$SUMMARY_FILE"
+  fi
+  block_count=$part_num
+fi
+
+echo "Project contents split into project_contents_part*.txt files" >&2
+
+# Step 6: Generate character counts for output files
+echo "Generating character counts..." >&2
+> "$CHAR_COUNT_FILE"
+echo "Character Counts for Output Files" >> "$CHAR_COUNT_FILE"
+echo "================================" >> "$CHAR_COUNT_FILE"
+
+# Function to add character count
+add_char_count() {
+  local file="$1"
+  local label="$2"
+  if [ -f "$file" ]; then
+    char_count=$(wc -m < "$file" | tr -d '[:space:]')
+    echo "$label: $char_count characters" >> "$CHAR_COUNT_FILE"
+  else
+    echo "$label: Not found or empty" >> "$CHAR_COUNT_FILE"
+  fi
+}
+
+# Fixed output files
+add_char_count "$STRUCTURE_FILE" "Project Structure ($STRUCTURE_FILE)"
+add_char_count "$CONTENT_FILE" "Project Contents ($CONTENT_FILE)"
+add_char_count "$SUMMARY_FILE" "Project Summary ($SUMMARY_FILE)"
+
+# Split content files
+for part_file in project_contents_part*.txt; do
+  if [ -f "$part_file" ]; then
+    add_char_count "$part_file" "Split Content ($part_file)"
+  fi
+done
+
+# Solidity files
+for sol_file in sol_project_*_solidity.sol; do
+  if [ -f "$sol_file" ]; then
+    add_char_count "$sol_file" "Solidity File ($sol_file)"
+  fi
+done
+
+# Solidity contract files
+if [ -d "$SOLIDITY_DIR" ]; then
+  for contract_file in "$SOLIDITY_DIR"/*_contract.txt; do
+    if [ -f "$contract_file" ]; then
+      add_char_count "$contract_file" "Solidity Contract ($contract_file)"
+    fi
+  done
+fi
+
+echo "Character counts saved to $CHAR_COUNT_FILE" >&2
+
+# Step 7: Output results to terminal
 clear
 echo "Project Directory Structure:"
 echo "============================"
@@ -182,8 +434,9 @@ fi
 
 echo -e "\nOutput complete."
 echo "File structure saved to $STRUCTURE_FILE"
-echo "Non-Solidity file contents saved to $CONTENT_FILE"
-echo "Solidity contracts saved to $SOLIDITY_DIR/*_contract.txt"
-echo "Concatenated Solidity files saved to project_*_solidity.sol"
+echo "Non-Solidity file contents saved to project_contents_part*.txt"
+echo "Solidity contracts saved to $SOLIDITY_DIR/*"
+echo "Concatenated Solidity files saved to sol_project_*_solidity.sol"
 echo "Summary saved to $SUMMARY_FILE"
-echo "Please share $STRUCTURE_FILE, $CONTENT_FILE, $SOLIDITY_DIR/*, project_*_solidity.sol, and $SUMMARY_FILE as needed." >&2 
+echo "Character counts saved to $CHAR_COUNT_FILE"
+echo "Please share $STRUCTURE_FILE, project_contents_part*.txt, $SOLIDITY_DIR/*, sol_project_*_solidity.sol, $SUMMARY_FILE, and $CHAR_COUNT_FILE as needed." >&2

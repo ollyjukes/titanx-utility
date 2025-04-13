@@ -1,166 +1,4 @@
--e 
----
-File: ./SolidityContracts/Ascendant/SwapActions.sol
-Solidity file saved to solidity_contracts/Ascendant_SwapActions_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/IWETH.sol
-Solidity file saved to solidity_contracts/Ascendant_IWETH_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/Ascendant.sol
-Solidity file saved to solidity_contracts/Ascendant_Ascendant_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/AscendantPride.sol
-Solidity file saved to solidity_contracts/Ascendant_AscendantPride_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/Constants.sol
-Solidity file saved to solidity_contracts/Ascendant_Constants_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/AscendantNFTMarketplace.sol
-Solidity file saved to solidity_contracts/Ascendant_AscendantNFTMarketplace_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/AscendantAuction.sol
-Solidity file saved to solidity_contracts/Ascendant_AscendantAuction_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/AscendantBuyAndBurn.sol
-Solidity file saved to solidity_contracts/Ascendant_AscendantBuyAndBurn_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/OracleLibrary.sol
-Solidity file saved to solidity_contracts/Ascendant_OracleLibrary_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/IAscendant.sol
-Solidity file saved to solidity_contracts/Ascendant_IAscendant_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Ascendant/AscendantNFTMinting.sol
-Solidity file saved to solidity_contracts/Ascendant_AscendantNFTMinting_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/Time.sol
-Solidity file saved to solidity_contracts/Flare_Time_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/FlareMinting.sol
-Solidity file saved to solidity_contracts/Flare_FlareMinting_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/Constant.sol
-Solidity file saved to solidity_contracts/Flare_Constant_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/Errors.sol
-Solidity file saved to solidity_contracts/Flare_Errors_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/FlareBuyNBurn.sol
-Solidity file saved to solidity_contracts/Flare_FlareBuyNBurn_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/SwapActions.sol
-Solidity file saved to solidity_contracts/Flare_SwapActions_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/IX28.sol
-Solidity file saved to solidity_contracts/Flare_IX28_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/BaseBuyNBurn.sol
-Solidity file saved to solidity_contracts/Flare_BaseBuyNBurn_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/IWETH.sol
-Solidity file saved to solidity_contracts/Flare_IWETH_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/PoolAddress.sol
-Solidity file saved to solidity_contracts/Flare_PoolAddress_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/FlareAuctionTreasury.sol
-Solidity file saved to solidity_contracts/Flare_FlareAuctionTreasury_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/Math.sol
-Solidity file saved to solidity_contracts/Flare_Math_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/OracleLibrary.sol
-Solidity file saved to solidity_contracts/Flare_OracleLibrary_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/FlareAuction.sol
-Solidity file saved to solidity_contracts/Flare_FlareAuction_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/Flare.sol
-Solidity file saved to solidity_contracts/Flare_Flare_contract.txt
--e 
----
--e 
----
-File: ./SolidityContracts/Flare/FlareAuctionBuy.sol
-Solidity file saved to solidity_contracts/Flare_FlareAuctionBuy_contract.txt
--e 
----
--e 
+
 ---
 File: ./tailwind.config.js
 /** @type {import('tailwindcss').Config} */
@@ -173,15 +11,15 @@ module.exports = {
     extend: {},
   },
   plugins: [],
-};-e 
+};
 ---
--e 
+
 ---
 File: ./.env.local
 NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=1dd2a69d54ac94fdefad918243183710
-NEXT_PUBLIC_ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI-e 
+NEXT_PUBLIC_ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI
 ---
--e 
+
 ---
 File: ./app/layout.js
 // app/layout.js
@@ -207,9 +45,9 @@ export default function RootLayout({ children }) {
       </body>
     </html>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/page.js
 // app/page.js
@@ -298,9 +136,9 @@ export default function Home() {
       </main>
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft/layout.js
 // app/nft/layout.js
@@ -608,9 +446,9 @@ export default function NFTLayout({ children }) {
       <div className="w-full max-w-6xl">{children}</div>
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft/page.js
 // app/nft/page.js
@@ -620,9 +458,9 @@ export default function NFTOverview() {
       <p className="text-lg">Select a collection above to view details.</p>
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft/ETH/Stax/page.js
 // app/nft/ETH/Stax/page.js
@@ -630,9 +468,9 @@ import NFTPage from '@/components/NFTPage';
 
 export default function StaxPage() {
   return <NFTPage contractKey="staxNFT" />;
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft/ETH/Element280/page.js
 // app/nft/ETH/Element280/page.js
@@ -640,18 +478,18 @@ import NFTPage from '@/components/NFTPage';
 
 export default function Element280Page() {
   return <NFTPage contractKey="element280" />;
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft/ETH/Element369/page.js
 // app/nft/ETH/Element369/page.js
 import NFTPage from '@/components/NFTPage';
 export default function Element369Page() {
   return <NFTPage contractKey="element369" />;
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft/ETH/Ascendant/page.js
 // app/nft/ETH/Ascendant/page.js
@@ -659,9 +497,9 @@ import NFTPage from '@/components/NFTPage';
 
 export default function AscendantPage() {
   return <NFTPage contractKey="ascendantNFT" />;
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft/BASE/E280/page.js
 // app/nft/BASE/E280/page.js
@@ -669,9 +507,14 @@ import NFTPage from '@/components/NFTPage';
 
 export default function E280Page() {
   return <NFTPage contractKey="e280" />;
-}-e 
+}
 ---
--e 
+
+---
+Backup: ./app/token_contracts.js to token_contracts_backup.js
+
+---
+
 ---
 File: ./app/token_contracts.js
 // app/token_contracts.js
@@ -1563,9 +1406,9 @@ export const uniswapV2PoolABI = [
     outputs: [{ name: '', type: 'address' }],
     stateMutability: 'view',
   },
-];-e 
+];
 ---
--e 
+
 ---
 File: ./app/store.js
 // app/store.js
@@ -1601,9 +1444,9 @@ export const useNFTStore = create((set, get) => ({
     console.log(`[NFTStore] Returning cached data for ${contractKey}: ${cachedEntry.data.holders.length} holders`);
     return cachedEntry.data;
   },
-}));-e 
+}));
 ---
--e 
+
 ---
 File: ./app/about/page.js
 // app/about/page.js
@@ -1634,9 +1477,9 @@ export default function AboutPage() {
       </div>
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/mining/page.js
 // app/mining/page.js
@@ -1725,9 +1568,9 @@ export default function Mining() {
       )}
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/holders/Stax/route.js
 // app/api/holders/Stax/route.js
@@ -1901,9 +1744,9 @@ export async function GET(request) {
     console.error(`[PROD_ERROR] StaxNFT API error: ${error.message}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/holders/E280/route.js
 // app/api/holders/E280/route.js
@@ -1913,9 +1756,9 @@ import { log } from '../../utils';
 export async function GET(request) {
   log('GET /api/holders/E280: Data not available yet');
   return NextResponse.json({ message: 'E280 data will go live after deployment' });
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/holders/Element280/route.js
 // app/api/holders/Element280/route.js
@@ -2179,9 +2022,9 @@ export async function GET(request) {
     log(`Error in GET /api/holders/Element280: ${error.message}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/holders/Element369/route.js
 // app/api/holders/Element369/route.js
@@ -2355,9 +2198,9 @@ export async function GET(request) {
     console.error(`[PROD_ERROR] Element369 API error: ${error.message}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/holders/Ascendant/route.js
 // app/api/holders/Ascendant/route.js
@@ -2595,9 +2438,9 @@ export async function GET(request) {
     console.error(`[PROD_ERROR] AscendantNFT API error: ${error.message}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/holders/Ascendant/route copy.js
 // app/api/holders/Ascendant/route.js
@@ -2835,9 +2678,9 @@ export async function GET(request) {
     console.error(`[PROD_ERROR] AscendantNFT API error: ${error.message}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/utils.js
 // app/api/utils.js
@@ -2892,9 +2735,9 @@ export async function batchMulticall(calls, batchSize = 50) {
   }
   log(`batchMulticall: Completed with ${results.length} results`);
   return results;
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/api/auctions/flare/route.js
 // app/api/auctions/flare/route.js
@@ -3055,9 +2898,9 @@ export async function GET() {
       { status: 500 }
     );
   }
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/layout.css
 /* app/layout.css */
@@ -3079,9 +2922,9 @@ File: ./app/layout.css
   font-weight: 600;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   transition: background-color 0.3s ease;
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/auctions/page.js
 // app/auctions/page.js
@@ -3251,9 +3094,9 @@ export default function Auctions() {
       )}
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/nft-contracts.js
 // app/nft-contracts.js
@@ -3396,9 +3239,9 @@ export const contractDetails = {
 
 export function getContractDetails(contractName) {
   return nftContracts[contractName] || null;
-}-e 
+}
 ---
--e 
+
 ---
 File: ./app/ClientProvider.js
 // app/ClientProvider.js
@@ -3429,9 +3272,9 @@ export default function ClientProvider({ children }) {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </WagmiProvider>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./postcss.config.mjs
 // This file is used to configure PostCSS, a tool for transforming CSS with JavaScript.
@@ -3439,27 +3282,27 @@ File: ./postcss.config.mjs
 const config = {
   plugins: ["tailwindcss"],
 };
-export default config;-e 
+export default config;
 ---
--e 
+
 ---
 File: ./next.config.mjs
 /** @type {import('next').NextConfig} */
 const nextConfig = {};
 
 export default nextConfig;
--e 
+
 ---
--e 
+
 ---
 File: ./utils/Math.js
 // app/utils/Math.js
 export function wdiv(a, b) {
     if (BigInt(b) === 0n) return 0n; // Prevent division by zero
     return (BigInt(a) * 10n ** 18n) / BigInt(b);
-  }-e 
+  }
 ---
--e 
+
 ---
 File: ./README.md
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
@@ -3498,9 +3341,9 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
--e 
+
 ---
--e 
+
 ---
 File: ./components/HolderTable.js
 // components/HolderTable.js
@@ -3681,9 +3524,9 @@ function HolderTable({ holders, contract, loading, totalShares }) {
 }
 
 // Export as memoized component to reduce unnecessary re-renders
-export default memo(HolderTable);-e 
+export default memo(HolderTable);
 ---
--e 
+
 ---
 File: ./components/AuctionCard.js
 // components/AuctionCard.js
@@ -3838,9 +3681,9 @@ export default function AuctionCard({ name, url, roiData, onClick }) {
       )}
     </>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./components/LoadingIndicator.js
 // app/components/LoadingIndicator.js
@@ -3867,9 +3710,9 @@ export default function LoadingIndicator({ status }) {
       <p className="text-sm sm:text-base text-gray-300">{status}</p>
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./components/NFTPage.js
 // components/NFTPage.js
@@ -4065,9 +3908,9 @@ export default function NFTPage({ contractKey }) {
       )}
     </div>
   );
-}-e 
+}
 ---
--e 
+
 ---
 File: ./components/SearchResultsModal.js
 // components/SearchResultsModal.js
@@ -4136,9 +3979,9 @@ const contractDetails = {
   staxNFT: { name: 'Stax' },
   ascendantNFT: { name: 'Ascendant' },
   e280: { name: 'E280' },
-};-e 
+};
 ---
--e 
+
 ---
 File: ./components/Navbar.jsx
 // components/Navbar.jsx
@@ -4393,9 +4236,9 @@ function Navbar() {
   );
 }
 
-export default Navbar;-e 
+export default Navbar;
 ---
--e 
+
 ---
 File: ./.gitignore
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
@@ -4441,9 +4284,9 @@ yarn-error.log*
 
 # typescript (optional if no TS)
 *.tsbuildinfo
-next-env.d.ts-e 
+next-env.d.ts
 ---
--e 
+
 ---
 File: ./scripts/testFlareMinting.js
 // scripts/testFlareMinting.js
@@ -4485,9 +4328,9 @@ async function testFlareMinting() {
   }
 }
 
-testFlareMinting();-e 
+testFlareMinting();
 ---
--e 
+
 ---
 File: ./lib/wagmi.js
 // @/lib/wagmi.js
@@ -4499,9 +4342,9 @@ export const config = createConfig({
   transports: {
     [mainnet.id]: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`),
   },
-});-e 
+});
 ---
--e 
+
 ---
 File: ./lib/store.js
 // lib/store.js
@@ -4513,9 +4356,9 @@ export const useFlareAuctionStore = create((set) => ({
   nextFlareAuctionStart: null,
   setFlareAuctionDay: (isFlareAuctionDay, nextFlareAuctionStart) =>
     set({ isFlareAuctionDay, nextFlareAuctionStart }),
-}));-e 
+}));
 ---
--e 
+
 ---
 File: ./lib/auctions/flare.js
 // lib/auctions/flare.js
@@ -4684,9 +4527,9 @@ export function useFlareROI() {
     hasError,
     status,
   };
-}-e 
+}
 ---
--e 
+
 ---
 File: ./lib/auctions/ascendant.js
 // lib/auctions/ascendant.js
@@ -4841,9 +4684,9 @@ export function useAscendantROI() {
     hasError,
     status,
   };
-}-e 
+}
 ---
--e 
+
 ---
 File: ./eslint.config.mjs
 import { dirname } from "path";
@@ -4860,5 +4703,5 @@ const compat = new FlatCompat({
 const eslintConfig = [...compat.extends("next/core-web-vitals")];
 
 export default eslintConfig;
--e 
+
 ---

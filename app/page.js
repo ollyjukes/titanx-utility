@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useFlareAuctionStore } from '../lib/store';
-import { useFlareAuctionState } from '../lib/auctions/flare';
+import { useFlareAuctionState } from '../lib/auctions/protocols/flare';
 
 export default function Home() {
   const [isLoaded, setIsLoaded] = useState(false);

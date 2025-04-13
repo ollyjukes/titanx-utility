@@ -1,0 +1,9 @@
+Character Counts for Output Files
+================================
+Project Structure (project_structure.txt): 6096 characters
+Project Contents (project_contents.txt): 164308 characters
+Project Summary (project_summary.txt): 1906 characters
+Split Content (project_contents_part1.txt): 103151 characters
+Split Content (project_contents_part2.txt): 65864 characters
+Solidity File (sol_project_Ascendant_solidity.sol): 120244 characters
+Solidity File (sol_project_Flare_solidity.sol): 118587 characters

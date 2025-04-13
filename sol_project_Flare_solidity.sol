@@ -1,5 +1,5 @@
 // Concatenated Solidity source for Flare contracts
-// Generated on Sat 12 Apr 2025 18:57:12 BST
+// Generated on Sat 12 Apr 2025 21:04:49 BST
 
 // Source: ./SolidityContracts/Flare/BaseBuyNBurn.sol
 // SPDX-License-Identifier: MIT
