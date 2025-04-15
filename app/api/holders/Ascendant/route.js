@@ -197,7 +197,8 @@ async function getAllHolders(page = 0, pageSize = 1000) {
     holder.displayMultiplierSum = holder.multiplierSum;
   });
 
-  holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+ // holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+  holders.sort((a, b) => b.shares - a.shares || b.multiplierSum - a.multiplierSum || b.total - a.total);
   holders.forEach((holder, index) => (holder.rank = index + 1));
   log(`Final holders count: ${holders.length}`);
 

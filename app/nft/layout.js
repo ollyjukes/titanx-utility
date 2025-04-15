@@ -101,11 +101,18 @@ export default function NFTLayout({ children }) {
       console.log(`[NFTLayout] Total Unique ${contractKey} Holders: ${uniqueHolders.length}`);
 
       const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
-      uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
-      uniqueHolders.forEach((holder, index) => {
-        holder.rank = index + 1;
-        holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-      });
+      if (contractKey === 'ascendantNFT') {
+        uniqueHolders.forEach((holder, index) => {
+          holder.rank = index + 1; // Retain API rank
+          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+        });
+      } else {
+        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
+        uniqueHolders.forEach((holder, index) => {
+          holder.rank = index + 1;
+          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+        });
+      }
 
       const result = {
         holders: uniqueHolders,
