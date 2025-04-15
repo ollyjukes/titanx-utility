@@ -1,172 +1,187 @@
 // app/api/holders/Stax/route.js
 import { NextResponse } from 'next/server';
-import { Alchemy, Network } from 'alchemy-sdk';
-import { createPublicClient, http, parseAbi } from 'viem';
-import { mainnet } from 'viem/chains';
-import { contractAddresses, contractTiers } from '@/app/nft-contracts';
+import { contractDetails, nftContracts } from '../../../nft-contracts';
+import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, staxNFTAbi, staxVaultAbi } from '../../utils';
 
-const settings = {
-  apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
-  network: Network.ETH_MAINNET,
-};
-const alchemy = new Alchemy(settings);
-
-const client = createPublicClient({
-  chain: mainnet,
-  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`),
-});
-
-const nftAbi = parseAbi([
-  "function ownerOf(uint256 tokenId) view returns (address)",
-  "function getNftTier(uint256 tokenId) view returns (uint8)",
-]);
-
-function log(message) {
-  console.log(`[PROD_DEBUG] staxNFT - ${message}`);
-}
-
-async function batchMulticall(calls, batchSize = 50) {
-  log(`batchMulticall: Processing ${calls.length} calls`);
-  const results = [];
-  for (let i = 0; i < calls.length; i += batchSize) {
-    const batch = calls.slice(i, i + batchSize);
-    const batchResults = await client.multicall({ contracts: batch });
-    results.push(...batchResults);
-  }
-  return results;
-}
-
-async function getAllHolders(page = 0, pageSize = 1000) {
-  const contractAddress = contractAddresses.staxNFT;
-  const tiers = contractTiers.staxNFT;
-  log(`Fetching holders, page=${page}, pageSize=${pageSize}`);
-
-  if (!process.env.NEXT_PUBLIC_ALCHEMY_API_KEY) {
-    log("Missing NEXT_PUBLIC_ALCHEMY_API_KEY");
-    throw new Error("Server configuration error: Missing Alchemy API key");
-  }
-  if (!contractAddress) {
-    log("Missing contract address");
-    throw new Error("Contract address not found");
-  }
-  if (!tiers) {
-    log("Missing tiers configuration");
-    throw new Error("Tiers configuration not found");
-  }
-
-  log(`Using contract address: ${contractAddress}`);
-  const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
-    block: 'latest', // Dynamic supply
-    withTokenBalances: true,
-  });
-  const burnAddress = '0x0000000000000000000000000000000000000000';
-  const filteredOwners = ownersResponse.owners.filter(
-    owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
-  );
-  log(`Filtered live owners count: ${filteredOwners.length}`);
-
-  const tokenOwnerMap = new Map();
-  let totalTokens = 0;
-  filteredOwners.forEach(owner => {
-    const wallet = owner.ownerAddress.toLowerCase();
-    owner.tokenBalances.forEach(tb => {
-      const tokenId = BigInt(tb.tokenId);
-      tokenOwnerMap.set(tokenId, wallet);
-      totalTokens++;
-    });
-  });
-  log(`Total tokens checked: ${totalTokens}`);
-
-  const allTokenIds = Array.from(tokenOwnerMap.keys());
-  const start = page * pageSize;
-  const end = Math.min(start + pageSize, allTokenIds.length);
-  const paginatedTokenIds = allTokenIds.slice(start, end);
-  log(`Paginated token IDs: ${paginatedTokenIds.length} (start=${start}, end=${end})`);
-
-  const ownerOfCalls = paginatedTokenIds.map(tokenId => ({
-    address: contractAddress,
-    abi: nftAbi,
-    functionName: 'ownerOf',
-    args: [tokenId],
-  }));
-
-  const ownerOfResults = await batchMulticall(ownerOfCalls);
-  const validTokenIds = paginatedTokenIds.filter((tokenId, i) => {
-    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
-    return owner && owner !== burnAddress;
-  });
-  log(`Valid token IDs: ${validTokenIds.length}`);
-
-  if (validTokenIds.length === 0) {
-    return { holders: [], totalTokens, page, pageSize, totalPages: Math.ceil(totalTokens / pageSize) };
-  }
-
-  const tierCalls = validTokenIds.map(tokenId => ({
-    address: contractAddress,
-    abi: nftAbi,
-    functionName: 'getNftTier',
-    args: [tokenId],
-  }));
-
-  const tierResults = await batchMulticall(tierCalls);
-  const maxTier = Math.max(...Object.keys(tiers).map(Number));
-  const holdersMap = new Map();
-
-  tierResults.forEach((result, i) => {
-    if (result?.status === 'success') {
-      const tokenId = validTokenIds[i];
-      const wallet = tokenOwnerMap.get(tokenId);
-      const tier = Number(result.result);
-
-      if (tier >= 1 && tier <= maxTier) {
-        if (!holdersMap.has(wallet)) {
-          holdersMap.set(wallet, {
-            wallet,
-            total: 0,
-            multiplierSum: 0,
-            tiers: Array(maxTier + 1).fill(0),
-          });
-        }
-        const holder = holdersMap.get(wallet);
-        holder.total += 1;
-        holder.multiplierSum += tiers[tier].multiplier || 0;
-        holder.tiers[tier] += 1;
-      }
-    }
-  });
-
-  const holders = Array.from(holdersMap.values());
-  const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
-  holders.forEach(holder => {
-    holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-    holder.rank = 0;
-    holder.displayMultiplierSum = holder.multiplierSum; // No division for Stax
-  });
-
-  holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-  holders.forEach((holder, index) => (holder.rank = index + 1));
-  log(`Final holders count: ${holders.length}`);
-
-  return {
-    holders,
-    totalTokens,
-    page,
-    pageSize,
-    totalPages: Math.ceil(totalTokens / pageSize),
-  };
-}
+const contractAddress = nftContracts.staxNFT.address;
+const vaultAddress = nftContracts.staxNFT.vaultAddress;
+const tiersConfig = nftContracts.staxNFT.tiers;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '0', 10);
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
-  log(`Received request: page=${page}, pageSize=${pageSize}`);
+  const page = parseInt(searchParams.get('page') || '0');
+  const pageSize = parseInt(searchParams.get('pageSize') || '1000');
+  const wallet = searchParams.get('wallet');
+
+  log(`[Stax] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
 
   try {
-    const result = await getAllHolders(page, pageSize);
-    return NextResponse.json(result);
+    if (!contractAddress || !vaultAddress) {
+      throw new Error('Stax contract or vault address missing');
+    }
+
+    const cacheKey = `stax_holders_${page}_${pageSize}_${wallet || 'all'}`;
+    if (cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < CACHE_TTL) {
+      log(`[Stax] Cache hit: ${cacheKey}`);
+      return NextResponse.json(cache[cacheKey].data);
+    }
+    log(`[Stax] Cache miss: ${cacheKey}`);
+
+    // Fetch owners
+    const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
+      block: 'latest',
+      withTokenBalances: true,
+    });
+    log(`[Stax] Owners fetched: ${ownersResponse.owners.length}`);
+
+    const burnAddresses = [
+      '0x0000000000000000000000000000000000000000',
+      '0x000000000000000000000000000000000000dead',
+    ];
+    const filteredOwners = ownersResponse.owners.filter(
+      owner => !burnAddresses.includes(owner.ownerAddress.toLowerCase()) && owner.tokenBalances.length > 0
+    );
+    log(`[Stax] Live owners: ${filteredOwners.length}`);
+
+    // Build token-to-owner map
+    const tokenOwnerMap = new Map();
+    const ownerTokens = new Map();
+    let totalTokens = 0;
+    filteredOwners.forEach(owner => {
+      const wallet = owner.ownerAddress.toLowerCase();
+      const tokenIds = owner.tokenBalances.map(tb => BigInt(tb.tokenId));
+      tokenIds.forEach(tokenId => {
+        tokenOwnerMap.set(tokenId, wallet);
+        totalTokens++;
+      });
+      ownerTokens.set(wallet, tokenIds);
+    });
+    log(`[Stax] Total tokens: ${totalTokens}`);
+
+    // Paginate
+    const allTokenIds = Array.from(tokenOwnerMap.keys());
+    const start = page * pageSize;
+    const end = Math.min(start + pageSize, allTokenIds.length);
+    const paginatedTokenIds = allTokenIds.slice(start, end);
+    log(`[Stax] Paginated tokens: ${paginatedTokenIds.length}`);
+
+    // Fetch tiers
+    const tierCalls = paginatedTokenIds.map(tokenId => ({
+      address: contractAddress,
+      abi: staxNFTAbi,
+      functionName: 'getNftTier',
+      args: [tokenId],
+    }));
+    const tierResults = await batchMulticall(tierCalls);
+    log(`[Stax] Tiers fetched for ${tierResults.length} tokens`);
+
+    // Build holders
+    const maxTier = Math.max(...Object.keys(tiersConfig).map(Number));
+    const holdersMap = new Map();
+
+    tierResults.forEach((result, i) => {
+      if (result?.status === 'success') {
+        const tokenId = paginatedTokenIds[i];
+        const wallet = tokenOwnerMap.get(tokenId);
+        const tier = Number(result.result);
+
+        if (tier >= 1 && tier <= maxTier && wallet) {
+          if (!holdersMap.has(wallet)) {
+            holdersMap.set(wallet, {
+              wallet,
+              total: 0,
+              multiplierSum: 0,
+              tiers: Array(maxTier + 1).fill(0),
+              claimableRewards: 0,
+            });
+          }
+          const holder = holdersMap.get(wallet);
+          holder.total += 1;
+          holder.multiplierSum += tiersConfig[tier]?.multiplier || 0;
+          holder.tiers[tier] += 1;
+        } else {
+          log(`[Stax] Invalid tier ${tier} for token ${tokenId}`);
+        }
+      } else {
+        log(`[Stax] Tier fetch failed for token ${paginatedTokenIds[i]}: ${result?.error || 'Unknown'}`);
+      }
+    });
+
+    // Fetch rewards
+    const holders = Array.from(holdersMap.values());
+    const rewardCalls = holders.map(holder => {
+      const tokenIds = ownerTokens.get(holder.wallet) || [];
+      return {
+        address: vaultAddress,
+        abi: staxVaultAbi,
+        functionName: 'getRewards',
+        args: [tokenIds, holder.wallet],
+      };
+    });
+
+    const totalRewardPoolCall = {
+      address: vaultAddress,
+      abi: staxVaultAbi,
+      functionName: 'totalRewardPool',
+      args: [],
+    };
+
+    log(`[Stax] Fetching rewards for ${holders.length} holders`);
+    const [rewardResults, totalRewardPoolResult] = await Promise.all([
+      rewardCalls.length ? batchMulticall(rewardCalls) : [],
+      batchMulticall([totalRewardPoolCall]),
+    ]);
+
+    const totalRewardPool = totalRewardPoolResult[0]?.status === 'success'
+      ? Number(totalRewardPoolResult[0].result) / 1e18
+      : 0;
+
+    holders.forEach((holder, i) => {
+      if (rewardResults[i]?.status === 'success' && rewardResults[i].result) {
+        const [, totalPayout] = rewardResults[i].result;
+        holder.claimableRewards = Number(totalPayout) / 1e18;
+        log(
+          `[Stax] Rewards for ${holder.wallet.slice(0, 6)}...: ` +
+          `Claimable=${holder.claimableRewards.toFixed(4)}, ` +
+          `Tokens=${ownerTokens.get(holder.wallet).length}`
+        );
+        if (holder.claimableRewards === 0) {
+          log(`[Stax] Zero rewards for ${holder.wallet}: Tokens=${ownerTokens.get(holder.wallet).join(',')}`);
+        }
+      } else {
+        holder.claimableRewards = 0;
+        log(`[Stax] Reward fetch failed for ${holder.wallet.slice(0, 6)}...: ${rewardResults[i]?.error || 'Unknown'}`);
+      }
+      holder.percentage = totalRewardPool ? (holder.claimableRewards / totalRewardPool) * 100 : 0;
+      holder.rank = 0;
+    });
+
+    // Calculate ranks
+    holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+    holders.forEach((holder, index) => {
+      holder.rank = index + 1;
+    });
+
+    const response = {
+      holders,
+      totalTokens,
+      page,
+      pageSize,
+      totalPages: Math.ceil(totalTokens / pageSize),
+    };
+    cache[cacheKey] = { data: response, timestamp: Date.now() };
+    log(`[Stax] Success: ${holders.length} holders`);
+
+    return NextResponse.json(response);
   } catch (error) {
-    console.error(`[PROD_ERROR] StaxNFT API error: ${error.message}`);
-    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
+    log(`[Stax] Error: ${error.message}`);
+    console.error('[Stax] Error stack:', error.stack);
+    let status = 500;
+    let message = 'Failed to fetch Stax data';
+    if (error.message.includes('Rate limit')) {
+      status = 429;
+      message = 'Alchemy rate limit exceeded';
+    }
+    return NextResponse.json({ error: message, details: error.message }, { status });
   }
 }

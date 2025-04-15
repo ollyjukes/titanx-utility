@@ -1,5 +1,15 @@
 -e 
 ---
+File: ./jsconfig.json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./*"]
+    }
+  }
+}
+-e 
+---
 File: ./tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 module.exports = {
@@ -203,11 +213,18 @@ export default function NFTLayout({ children }) {
       console.log(`[NFTLayout] Total Unique ${contractKey} Holders: ${uniqueHolders.length}`);
 
       const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
-      uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
-      uniqueHolders.forEach((holder, index) => {
-        holder.rank = index + 1;
-        holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-      });
+      if (contractKey === 'ascendantNFT') {
+        uniqueHolders.forEach((holder, index) => {
+          holder.rank = index + 1; // Retain API rank
+          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+        });
+      } else {
+        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
+        uniqueHolders.forEach((holder, index) => {
+          holder.rank = index + 1;
+          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+        });
+      }
 
       const result = {
         holders: uniqueHolders,
@@ -615,174 +632,223 @@ export default function Mining() {
 File: ./app/api/holders/Stax/route.js
 // app/api/holders/Stax/route.js
 import { NextResponse } from 'next/server';
-import { Alchemy, Network } from 'alchemy-sdk';
-import { createPublicClient, http, parseAbi } from 'viem';
-import { mainnet } from 'viem/chains';
-import { contractAddresses, contractTiers } from '@/app/nft-contracts';
+import { contractDetails, nftContracts } from '../../../nft-contracts';
+import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, staxNFTAbi, staxVaultAbi } from '../../utils';
 
-const settings = {
-  apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
-  network: Network.ETH_MAINNET,
-};
-const alchemy = new Alchemy(settings);
-
-const client = createPublicClient({
-  chain: mainnet,
-  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`),
-});
-
-const nftAbi = parseAbi([
-  "function ownerOf(uint256 tokenId) view returns (address)",
-  "function getNftTier(uint256 tokenId) view returns (uint8)",
-]);
-
-function log(message) {
-  console.log(`[PROD_DEBUG] staxNFT - ${message}`);
-}
-
-async function batchMulticall(calls, batchSize = 50) {
-  log(`batchMulticall: Processing ${calls.length} calls`);
-  const results = [];
-  for (let i = 0; i < calls.length; i += batchSize) {
-    const batch = calls.slice(i, i + batchSize);
-    const batchResults = await client.multicall({ contracts: batch });
-    results.push(...batchResults);
-  }
-  return results;
-}
-
-async function getAllHolders(page = 0, pageSize = 1000) {
-  const contractAddress = contractAddresses.staxNFT;
-  const tiers = contractTiers.staxNFT;
-  log(`Fetching holders, page=${page}, pageSize=${pageSize}`);
-
-  if (!process.env.NEXT_PUBLIC_ALCHEMY_API_KEY) {
-    log("Missing NEXT_PUBLIC_ALCHEMY_API_KEY");
-    throw new Error("Server configuration error: Missing Alchemy API key");
-  }
-  if (!contractAddress) {
-    log("Missing contract address");
-    throw new Error("Contract address not found");
-  }
-  if (!tiers) {
-    log("Missing tiers configuration");
-    throw new Error("Tiers configuration not found");
-  }
-
-  log(`Using contract address: ${contractAddress}`);
-  const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
-    block: 'latest', // Dynamic supply
-    withTokenBalances: true,
-  });
-  const burnAddress = '0x0000000000000000000000000000000000000000';
-  const filteredOwners = ownersResponse.owners.filter(
-    owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
-  );
-  log(`Filtered live owners count: ${filteredOwners.length}`);
-
-  const tokenOwnerMap = new Map();
-  let totalTokens = 0;
-  filteredOwners.forEach(owner => {
-    const wallet = owner.ownerAddress.toLowerCase();
-    owner.tokenBalances.forEach(tb => {
-      const tokenId = BigInt(tb.tokenId);
-      tokenOwnerMap.set(tokenId, wallet);
-      totalTokens++;
-    });
-  });
-  log(`Total tokens checked: ${totalTokens}`);
-
-  const allTokenIds = Array.from(tokenOwnerMap.keys());
-  const start = page * pageSize;
-  const end = Math.min(start + pageSize, allTokenIds.length);
-  const paginatedTokenIds = allTokenIds.slice(start, end);
-  log(`Paginated token IDs: ${paginatedTokenIds.length} (start=${start}, end=${end})`);
-
-  const ownerOfCalls = paginatedTokenIds.map(tokenId => ({
-    address: contractAddress,
-    abi: nftAbi,
-    functionName: 'ownerOf',
-    args: [tokenId],
-  }));
-
-  const ownerOfResults = await batchMulticall(ownerOfCalls);
-  const validTokenIds = paginatedTokenIds.filter((tokenId, i) => {
-    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
-    return owner && owner !== burnAddress;
-  });
-  log(`Valid token IDs: ${validTokenIds.length}`);
-
-  if (validTokenIds.length === 0) {
-    return { holders: [], totalTokens, page, pageSize, totalPages: Math.ceil(totalTokens / pageSize) };
-  }
-
-  const tierCalls = validTokenIds.map(tokenId => ({
-    address: contractAddress,
-    abi: nftAbi,
-    functionName: 'getNftTier',
-    args: [tokenId],
-  }));
-
-  const tierResults = await batchMulticall(tierCalls);
-  const maxTier = Math.max(...Object.keys(tiers).map(Number));
-  const holdersMap = new Map();
-
-  tierResults.forEach((result, i) => {
-    if (result?.status === 'success') {
-      const tokenId = validTokenIds[i];
-      const wallet = tokenOwnerMap.get(tokenId);
-      const tier = Number(result.result);
-
-      if (tier >= 1 && tier <= maxTier) {
-        if (!holdersMap.has(wallet)) {
-          holdersMap.set(wallet, {
-            wallet,
-            total: 0,
-            multiplierSum: 0,
-            tiers: Array(maxTier + 1).fill(0),
-          });
-        }
-        const holder = holdersMap.get(wallet);
-        holder.total += 1;
-        holder.multiplierSum += tiers[tier].multiplier || 0;
-        holder.tiers[tier] += 1;
-      }
-    }
-  });
-
-  const holders = Array.from(holdersMap.values());
-  const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
-  holders.forEach(holder => {
-    holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-    holder.rank = 0;
-    holder.displayMultiplierSum = holder.multiplierSum; // No division for Stax
-  });
-
-  holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-  holders.forEach((holder, index) => (holder.rank = index + 1));
-  log(`Final holders count: ${holders.length}`);
-
-  return {
-    holders,
-    totalTokens,
-    page,
-    pageSize,
-    totalPages: Math.ceil(totalTokens / pageSize),
-  };
-}
+const contractAddress = nftContracts.staxNFT?.address;
+const vaultAddress = nftContracts.staxNFT?.vaultAddress;
+const tiersConfig = nftContracts.staxNFT?.tiers || {};
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '0', 10);
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
-  log(`Received request: page=${page}, pageSize=${pageSize}`);
+  const page = parseInt(searchParams.get('page') || '0');
+  const pageSize = parseInt(searchParams.get('pageSize') || '1000');
+  const wallet = searchParams.get('wallet');
+
+  log(`[Stax] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
 
   try {
-    const result = await getAllHolders(page, pageSize);
-    return NextResponse.json(result);
+    if (!contractAddress || !vaultAddress) {
+      log(`[Stax] Error: Missing contractAddress=${contractAddress}, vaultAddress=${vaultAddress}`);
+      throw new Error('Contract or vault address missing');
+    }
+
+    log(`[Stax] Using contractAddress=${contractAddress}, vaultAddress=${vaultAddress}`);
+
+    const cacheKey = `stax_holders_${page}_${pageSize}_${wallet || 'all'}`;
+    if (cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < CACHE_TTL) {
+      log(`[Stax] Cache hit for ${cacheKey}, holders=${cache[cacheKey].data.holders.length}`);
+      return NextResponse.json(cache[cacheKey].data);
+    }
+    log(`[Stax] Cache miss for ${cacheKey}`);
+
+    // Fetch token-owner map
+    const tokenCacheKey = 'stax_token_owners';
+    let tokenOwners = cache[tokenCacheKey]?.data;
+    let totalTokens = 0;
+    if (!tokenOwners) {
+      log(`[Stax] Fetching NFTs for contract ${contractAddress}`);
+      const nfts = [];
+      let pageKey = undefined;
+      do {
+        const response = await alchemy.nft.getNftsForContract(contractAddress, {
+          pageKey,
+          pageSize: 100,
+        });
+        nfts.push(...response.nfts);
+        pageKey = response.pageKey;
+        log(`[Stax] Fetched ${response.nfts.length} NFTs, pageKey=${pageKey}`);
+      } while (pageKey);
+
+      if (!nfts.length) {
+        log(`[Stax] Warning: No NFTs found for contract ${contractAddress}`);
+      }
+
+      tokenOwners = {};
+      const burnAddress = '0x000000000000000000000000000000000000dead';
+      nfts.forEach(nft => {
+        const owner = nft.owner?.toLowerCase();
+        if (owner && owner !== burnAddress) {
+          const tokenId = parseInt(nft.tokenId);
+          tokenOwners[tokenId] = owner;
+          totalTokens++;
+        }
+      });
+
+      cache[tokenCacheKey] = { data: tokenOwners, timestamp: Date.now() };
+      log(`[Stax] Cached ${totalTokens} tokens to memory`);
+    } else {
+      totalTokens = Object.keys(tokenOwners).length;
+      log(`[Stax] Loaded ${totalTokens} tokens from memory cache`);
+    }
+
+    if (!totalTokens) {
+      log(`[Stax] No valid tokens found, returning empty response`);
+      const response = {
+        holders: [],
+        totalTokens: 0,
+        totalHolders: 0,
+        totalPages: 0,
+        page,
+        pageSize,
+      };
+      cache[cacheKey] = { data: response, timestamp: Date.now() };
+      return NextResponse.json(response);
+    }
+
+    // Group tokens by owner
+    const ownerTokens = {};
+    Object.entries(tokenOwners).forEach(([tokenId, owner]) => {
+      ownerTokens[owner] = ownerTokens[owner] || [];
+      ownerTokens[owner].push(parseInt(tokenId));
+    });
+
+    // Filter owners
+    let owners = Object.keys(ownerTokens);
+    if (wallet) {
+      owners = owners.filter(owner => owner === wallet.toLowerCase());
+    }
+    log(`[Stax] Total owners: ${owners.length}`);
+
+    // Paginate owners
+    const start = page * pageSize;
+    const paginatedOwners = owners.slice(start, start + pageSize);
+    log(`[Stax] Paginated owners: ${paginatedOwners.length}`);
+
+    // Fetch tiers
+    const allTokenIds = paginatedOwners.flatMap(owner => ownerTokens[owner] || []);
+    const tierCalls = allTokenIds.map(id => ({
+      address: contractAddress,
+      abi: staxNFTAbi,
+      functionName: 'getNftTier',
+      args: [BigInt(id)],
+    }));
+
+    log(`[Stax] Fetching tiers for ${tierCalls.length} tokens`);
+    const tierResults = tierCalls.length ? await batchMulticall(tierCalls) : [];
+
+    const tokens = allTokenIds.map((id, idx) => {
+      const tier = tierResults[idx]?.status === 'success' ? Number(tierResults[idx].result) : 0;
+      const multiplier = tier > 0 && tiersConfig[tier] ? tiersConfig[tier].multiplier : 0;
+      return { id, tier, multiplier };
+    });
+    log(`[Stax] Processed tokens: ${tokens.length}`);
+
+    // Fetch vault reward pool
+    let totalRewardPool = 0;
+    try {
+      totalRewardPool = await client.readContract({
+        address: vaultAddress,
+        abi: staxVaultAbi,
+        functionName: 'totalRewardPool',
+      });
+      log(`[Stax] Total reward pool: ${totalRewardPool / 1e18}`);
+    } catch (error) {
+      log(`[Stax] totalRewardPool error: ${error.message}`);
+    }
+
+    // Batch fetch rewards
+    const rewardCalls = paginatedOwners.map(owner => ({
+      address: vaultAddress,
+      abi: staxVaultAbi,
+      functionName: 'getRewards',
+      args: [(ownerTokens[owner] || []).map(id => BigInt(id)), owner],
+    }));
+
+    log(`[Stax] Fetching rewards for ${rewardCalls.length} owners`);
+    const rewardResults = rewardCalls.length ? await batchMulticall(rewardCalls) : [];
+
+    // Process holders
+    const holders = [];
+    const maxTier = tiersConfig ? Math.max(...Object.keys(tiersConfig).map(Number)) : 0;
+    let rewardIndex = 0;
+    for (const owner of paginatedOwners) {
+      const ownerTokenIds = ownerTokens[owner] || [];
+      if (!ownerTokenIds.length) {
+        log(`[Stax] Skipping ${owner}: No tokens`);
+        continue;
+      }
+
+      let claimableRewards = 0;
+      const rewardResult = rewardResults[rewardIndex++];
+      if (rewardResult?.status === 'success' && rewardResult.result) {
+        const [, totalPayout] = rewardResult.result;
+        claimableRewards = Number(totalPayout) / 1e18;
+        log(`[Stax] Rewards for ${owner.slice(0, 6)}...: ${claimableRewards}`);
+      } else {
+        log(`[Stax] Reward fetch failed for ${owner}: ${rewardResult?.error || 'Invalid result'}`);
+      }
+
+      const tierCounts = maxTier ? Array(maxTier + 1).fill(0) : [];
+      let multiplierSum = 0;
+      const ownerTokensData = tokens.filter(t => ownerTokenIds.includes(t.id));
+      ownerTokensData.forEach(t => {
+        if (t.tier >= 1 && t.tier <= maxTier) {
+          tierCounts[t.tier]++;
+          multiplierSum += t.multiplier;
+        }
+      });
+
+      holders.push({
+        wallet: owner,
+        total: ownerTokenIds.length,
+        tiers: tierCounts,
+        multiplierSum,
+        displayMultiplierSum: multiplierSum,
+        claimableRewards,
+        percentage: 0,
+        rank: 0,
+      });
+    }
+
+    log(`[Stax] Processed ${holders.length} holders`);
+
+    // Calculate percentages and ranks
+    const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+    holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+    holders.forEach((holder, index) => {
+      holder.rank = index + 1;
+      holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+      holder.displayMultiplierSum = holder.multiplierSum;
+    });
+
+    const response = {
+      holders,
+      totalTokens,
+      totalHolders: owners.length,
+      totalPages: Math.ceil(owners.length / pageSize),
+      page,
+      pageSize,
+    };
+
+    cache[cacheKey] = { data: response, timestamp: Date.now() };
+    log(`[Stax] Success: ${holders.length} holders, cached to memory`);
+
+    return NextResponse.json(response);
   } catch (error) {
-    console.error(`[PROD_ERROR] StaxNFT API error: ${error.message}`);
-    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
+    log(`[Stax] Error: ${error.message}`);
+    console.error('[Stax] Error stack:', error.stack);
+    return NextResponse.json({ error: 'Failed to fetch Stax data', details: error.message }, { status: 500 });
   }
 }-e 
 ---
@@ -799,8 +865,9 @@ export async function GET(request) {
 File: ./app/api/holders/Element280/route.js
 // app/api/holders/Element280/route.js
 import { NextResponse } from 'next/server';
-import { alchemy, client, nftAbi, CACHE_TTL, log, batchMulticall } from '../../utils';
-import { contractAddresses, contractTiers } from '@/app/nft-contracts';
+import { alchemy, client, nftAbi, element280VaultAbi, CACHE_TTL, log, batchMulticall } from '../../utils';
+import { contractAddresses, contractTiers, vaultAddresses } from '@/app/nft-contracts';
+
 let cache = {};
 let tokenCache = new Map();
 
@@ -901,6 +968,7 @@ async function getAllHolders(contractAddress, tiers, page = 0, pageSize = 1000) 
             total: 0,
             multiplierSum: 0,
             tiers: Array(maxTier + 1).fill(0),
+            claimableRewards: 0,
           });
         }
 
@@ -918,12 +986,30 @@ async function getAllHolders(contractAddress, tiers, page = 0, pageSize = 1000) 
   });
   log(`${contractName} - Total NFTs held after tier check: ${totalNftsHeld}`);
 
+  // Fetch claimable rewards from vault
   const holders = Array.from(holdersMap.values());
+  const rewardCalls = holders.map(holder => ({
+    address: vaultAddresses.element280,
+    abi: element280VaultAbi,
+    functionName: 'claimableReward',
+    args: [holder.wallet],
+  }));
+
+  const rewardResults = await batchMulticall(rewardCalls);
+  holders.forEach((holder, i) => {
+    if (rewardResults[i]?.status === 'success') {
+      holder.claimableRewards = Number(rewardResults[i].result);
+    } else {
+      holder.claimableRewards = 0;
+      log(`${contractName} - Failed to fetch rewards for ${holder.wallet}`);
+    }
+  });
+
   const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
   holders.forEach(holder => {
     holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
     holder.rank = 0;
-    holder.displayMultiplierSum = holder.multiplierSum / 10; // Element280 specific adjustment
+    holder.displayMultiplierSum = holder.multiplierSum / 10;
   });
 
   const sortFn = (a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total;
@@ -1015,6 +1101,14 @@ async function getHolderData(contractAddress, wallet, tiers) {
   });
   log(`${contractAddress} - Total NFTs for ${wallet} after tier check: ${total}`);
 
+  const rewardResult = await client.readContract({
+    address: vaultAddresses.element280,
+    abi: element280VaultAbi,
+    functionName: 'claimableReward',
+    args: [walletLower],
+  });
+  const claimableRewards = Number(rewardResult) || 0;
+
   const allHolders = await getAllHolders(contractAddress, tiers, 0, 1000);
   const totalMultiplierSum = allHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
   const percentage = totalMultiplierSum > 0 ? (multiplierSum / totalMultiplierSum) * 100 : 0;
@@ -1025,13 +1119,14 @@ async function getHolderData(contractAddress, wallet, tiers) {
     rank: holder.rank,
     total,
     multiplierSum,
-    displayMultiplierSum: multiplierSum / 10, // Element280 specific adjustment
+    displayMultiplierSum: multiplierSum / 10,
     percentage,
     tiers: tiersArray,
+    claimableRewards,
   };
 
   cache[cacheKey] = { timestamp: now, data: result };
-  log(`${contractAddress} - Final data for ${wallet}: total=${total}, multiplierSum=${multiplierSum}`);
+  log(`${contractAddress} - Final data for ${wallet}: total=${total}, multiplierSum=${multiplierSum}, claimableRewards=${claimableRewards}`);
   return result;
 }
 
@@ -1041,7 +1136,7 @@ export async function GET(request) {
   const page = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
   const pageSize = Math.max(1, Math.min(1000, parseInt(searchParams.get('pageSize') || '1000', 10)));
 
-  const address = contractAddresses['element280']; // Hardcoded for this endpoint
+  const address = contractAddresses['element280'];
   if (!address) {
     return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
   }
@@ -1063,174 +1158,194 @@ export async function GET(request) {
 File: ./app/api/holders/Element369/route.js
 // app/api/holders/Element369/route.js
 import { NextResponse } from 'next/server';
-import { Alchemy, Network } from 'alchemy-sdk';
-import { createPublicClient, http, parseAbi } from 'viem';
-import { mainnet } from 'viem/chains';
-import { contractAddresses, contractTiers } from '@/app/nft-contracts';
+import { contractDetails, nftContracts } from '../../../nft-contracts';
+import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, element369VaultAbi, element369Abi } from '../../utils';
 
-const settings = {
-  apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
-  network: Network.ETH_MAINNET,
-};
-const alchemy = new Alchemy(settings);
-
-const client = createPublicClient({
-  chain: mainnet,
-  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`),
-});
-
-const nftAbi = parseAbi([
-  "function ownerOf(uint256 tokenId) view returns (address)",
-  "function getNftTier(uint256 tokenId) view returns (uint8)",
-]);
-
-function log(message) {
-  console.log(`[PROD_DEBUG] element369 - ${message}`);
-}
-
-async function batchMulticall(calls, batchSize = 50) {
-  log(`batchMulticall: Processing ${calls.length} calls`);
-  const results = [];
-  for (let i = 0; i < calls.length; i += batchSize) {
-    const batch = calls.slice(i, i + batchSize);
-    const batchResults = await client.multicall({ contracts: batch });
-    results.push(...batchResults);
-  }
-  return results;
-}
-
-async function getAllHolders(page = 0, pageSize = 1000) {
-  const contractAddress = contractAddresses.element369;
-  const tiers = contractTiers.element369;
-  log(`Fetching holders, page=${page}, pageSize=${pageSize}`);
-
-  if (!process.env.NEXT_PUBLIC_ALCHEMY_API_KEY) {
-    log("Missing NEXT_PUBLIC_ALCHEMY_API_KEY");
-    throw new Error("Server configuration error: Missing Alchemy API key");
-  }
-  if (!contractAddress) {
-    log("Missing contract address");
-    throw new Error("Contract address not found");
-  }
-  if (!tiers) {
-    log("Missing tiers configuration");
-    throw new Error("Tiers configuration not found");
-  }
-
-  log(`Using contract address: ${contractAddress}`);
-  const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
-    block: 'latest',
-    withTokenBalances: true,
-  });
-  const burnAddress = '0x0000000000000000000000000000000000000000';
-  const filteredOwners = ownersResponse.owners.filter(
-    owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
-  );
-  log(`Filtered live owners count: ${filteredOwners.length}`);
-
-  const tokenOwnerMap = new Map();
-  let totalTokens = 0;
-  filteredOwners.forEach(owner => {
-    const wallet = owner.ownerAddress.toLowerCase();
-    owner.tokenBalances.forEach(tb => {
-      const tokenId = BigInt(tb.tokenId);
-      tokenOwnerMap.set(tokenId, wallet);
-      totalTokens++;
-    });
-  });
-  log(`Total tokens checked: ${totalTokens}`);
-
-  const allTokenIds = Array.from(tokenOwnerMap.keys());
-  const start = page * pageSize;
-  const end = Math.min(start + pageSize, allTokenIds.length);
-  const paginatedTokenIds = allTokenIds.slice(start, end);
-  log(`Paginated token IDs: ${paginatedTokenIds.length} (start=${start}, end=${end})`);
-
-  const ownerOfCalls = paginatedTokenIds.map(tokenId => ({
-    address: contractAddress,
-    abi: nftAbi,
-    functionName: 'ownerOf',
-    args: [tokenId],
-  }));
-
-  const ownerOfResults = await batchMulticall(ownerOfCalls);
-  const validTokenIds = paginatedTokenIds.filter((tokenId, i) => {
-    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
-    return owner && owner !== burnAddress;
-  });
-  log(`Valid token IDs: ${validTokenIds.length}`);
-
-  if (validTokenIds.length === 0) {
-    return { holders: [], totalTokens, page, pageSize, totalPages: Math.ceil(totalTokens / pageSize) };
-  }
-
-  const tierCalls = validTokenIds.map(tokenId => ({
-    address: contractAddress,
-    abi: nftAbi,
-    functionName: 'getNftTier',
-    args: [tokenId],
-  }));
-
-  const tierResults = await batchMulticall(tierCalls);
-  const maxTier = Math.max(...Object.keys(tiers).map(Number));
-  const holdersMap = new Map();
-
-  tierResults.forEach((result, i) => {
-    if (result?.status === 'success') {
-      const tokenId = validTokenIds[i];
-      const wallet = tokenOwnerMap.get(tokenId);
-      const tier = Number(result.result);
-
-      if (tier >= 1 && tier <= maxTier) {
-        if (!holdersMap.has(wallet)) {
-          holdersMap.set(wallet, {
-            wallet,
-            total: 0,
-            multiplierSum: 0,
-            tiers: Array(maxTier + 1).fill(0),
-          });
-        }
-        const holder = holdersMap.get(wallet);
-        holder.total += 1;
-        holder.multiplierSum += tiers[tier].multiplier || 0;
-        holder.tiers[tier] += 1;
-      }
-    }
-  });
-
-  const holders = Array.from(holdersMap.values());
-  const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
-  holders.forEach(holder => {
-    holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-    holder.rank = 0;
-    holder.displayMultiplierSum = holder.multiplierSum;
-  });
-
-  holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-  holders.forEach((holder, index) => (holder.rank = index + 1));
-  log(`Final holders count: ${holders.length}`);
-
-  return {
-    holders,
-    totalTokens,
-    page,
-    pageSize,
-    totalPages: Math.ceil(totalTokens / pageSize),
-  };
-}
+const contractAddress = nftContracts.element369.address;
+const vaultAddress = nftContracts.element369.vaultAddress;
+const tiersConfig = nftContracts.element369.tiers;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '0', 10);
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
-  log(`Received request: page=${page}, pageSize=${pageSize}`);
+  const page = parseInt(searchParams.get('page') || '0');
+  const pageSize = parseInt(searchParams.get('pageSize') || '1000');
+  const wallet = searchParams.get('wallet');
+
+  log(`[Element369] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
 
   try {
-    const result = await getAllHolders(page, pageSize);
-    return NextResponse.json(result);
+    if (!contractAddress || !vaultAddress) {
+      throw new Error('Element369 contract or vault address missing');
+    }
+
+    const cacheKey = `element369_holders_${page}_${pageSize}_${wallet || 'all'}`;
+    if (cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < CACHE_TTL) {
+      log(`[Element369] Cache hit: ${cacheKey}`);
+      return NextResponse.json(cache[cacheKey].data);
+    }
+    log(`[Element369] Cache miss: ${cacheKey}`);
+
+    // Fetch owners
+    const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
+      block: 'latest',
+      withTokenBalances: true,
+    });
+    log(`[Element369] Owners fetched: ${ownersResponse.owners.length}`);
+
+    const burnAddress = '0x0000000000000000000000000000000000000000';
+    const filteredOwners = ownersResponse.owners.filter(
+      owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
+    );
+    log(`[Element369] Live owners: ${filteredOwners.length}`);
+
+    // Build token-to-owner map
+    const tokenOwnerMap = new Map();
+    const ownerTokens = new Map();
+    let totalTokens = 0;
+    filteredOwners.forEach(owner => {
+      const wallet = owner.ownerAddress.toLowerCase();
+      const tokenIds = owner.tokenBalances.map(tb => BigInt(tb.tokenId));
+      tokenIds.forEach(tokenId => {
+        tokenOwnerMap.set(tokenId, wallet);
+        totalTokens++;
+      });
+      ownerTokens.set(wallet, tokenIds);
+    });
+    log(`[Element369] Total tokens: ${totalTokens}`);
+
+    // Paginate
+    const allTokenIds = Array.from(tokenOwnerMap.keys());
+    const start = page * pageSize;
+    const end = Math.min(start + pageSize, allTokenIds.length);
+    const paginatedTokenIds = allTokenIds.slice(start, end);
+    log(`[Element369] Paginated tokens: ${paginatedTokenIds.length}`);
+
+    // Fetch tiers
+    const tierCalls = paginatedTokenIds.map(tokenId => ({
+      address: contractAddress,
+      abi: element369Abi,
+      functionName: 'getNftTier',
+      args: [tokenId],
+    }));
+    const tierResults = await batchMulticall(tierCalls);
+    log(`[Element369] Tiers fetched for ${tierResults.length} tokens`);
+
+    // Build holders
+    const maxTier = Math.max(...Object.keys(tiersConfig).map(Number));
+    const holdersMap = new Map();
+
+    tierResults.forEach((result, i) => {
+      if (result?.status === 'success') {
+        const tokenId = paginatedTokenIds[i];
+        const wallet = tokenOwnerMap.get(tokenId);
+        const tier = Number(result.result);
+
+        if (tier >= 1 && tier <= maxTier && wallet) {
+          if (!holdersMap.has(wallet)) {
+            holdersMap.set(wallet, {
+              wallet,
+              total: 0,
+              multiplierSum: 0,
+              tiers: Array(maxTier + 1).fill(0),
+              infernoRewards: 0,
+              fluxRewards: 0,
+              e280Rewards: 0,
+            });
+          }
+          const holder = holdersMap.get(wallet);
+          holder.total += 1;
+          holder.multiplierSum += tiersConfig[tier]?.multiplier || 0;
+          holder.tiers[tier] += 1;
+        } else {
+          log(`[Element369] Invalid tier ${tier} for token ${tokenId}`);
+        }
+      } else {
+        log(`[Element369] Tier fetch failed for token ${paginatedTokenIds[i]}: ${result?.error || 'Unknown'}`);
+      }
+    });
+
+    // Fetch current cycle for debugging
+    let currentCycle = 0;
+    try {
+      currentCycle = await client.readContract({
+        address: vaultAddress,
+        abi: element369VaultAbi,
+        functionName: 'getCurrentE369Cycle',
+      });
+      log(`[Element369] Current cycle: ${currentCycle}`);
+    } catch (error) {
+      log(`[Element369] Error fetching cycle: ${error.message}`);
+    }
+
+    // Fetch rewards
+    const holders = Array.from(holdersMap.values());
+    const rewardCalls = holders.map(holder => {
+      const tokenIds = ownerTokens.get(holder.wallet) || [];
+      return {
+        address: vaultAddress,
+        abi: element369VaultAbi,
+        functionName: 'getRewards',
+        args: [tokenIds, holder.wallet, false], // isBacking: false for claimable rewards
+      };
+    });
+
+    log(`[Element369] Fetching rewards for ${holders.length} holders`);
+    const rewardsResults = await batchMulticall(rewardCalls);
+
+    holders.forEach((holder, i) => {
+      if (rewardsResults[i]?.status === 'success' && rewardsResults[i].result) {
+        const [availability, burned, infernoPool, fluxPool, e280Pool] = rewardsResults[i].result;
+        holder.infernoRewards = Number(infernoPool) / 1e18;
+        holder.fluxRewards = Number(fluxPool) / 1e18;
+        holder.e280Rewards = Number(e280Pool) / 1e18;
+        log(
+          `[Element369] Rewards for ${holder.wallet.slice(0, 6)}...: ` +
+          `Inferno=${holder.infernoRewards.toFixed(4)}, ` +
+          `Flux=${holder.fluxRewards.toFixed(4)}, ` +
+          `E280=${holder.e280Rewards.toFixed(4)}, ` +
+          `Tokens=${availability.length}, Burned=${burned.filter(b => b).length}, ` +
+          `Availability=${availability.join(',')}`
+        );
+        if (holder.infernoRewards === 0 && holder.fluxRewards === 0 && holder.e280Rewards === 0) {
+          log(`[Element369] Zero rewards for ${holder.wallet}: Tokens=${ownerTokens.get(holder.wallet).join(',')}`);
+        }
+      } else {
+        holder.infernoRewards = 0;
+        holder.fluxRewards = 0;
+        holder.e280Rewards = 0;
+        log(`[Element369] Reward fetch failed for ${holder.wallet.slice(0, 6)}...: ${rewardsResults[i]?.error || 'Unknown'}`);
+      }
+      holder.displayMultiplierSum = holder.multiplierSum;
+      holder.percentage = 0;
+      holder.rank = 0;
+    });
+
+    // Calculate percentages and ranks
+    const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+    holders.forEach((holder, index) => {
+      holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+      holder.rank = index + 1;
+      holder.displayMultiplierSum = holder.multiplierSum;
+    });
+
+    // Sort holders
+    holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+
+    const response = {
+      holders,
+      totalTokens,
+      page,
+      pageSize,
+      totalPages: Math.ceil(totalTokens / pageSize),
+    };
+    cache[cacheKey] = { data: response, timestamp: Date.now() };
+    log(`[Element369] Success: ${holders.length} holders`);
+
+    return NextResponse.json(response);
   } catch (error) {
-    console.error(`[PROD_ERROR] Element369 API error: ${error.message}`);
-    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
+    log(`[Element369] Error: ${error.message}`);
+    console.error('[Element369] Error stack:', error.stack);
+    return NextResponse.json({ error: 'Failed to fetch Element369 data' }, { status: 500 });
   }
 }-e 
 ---
@@ -1402,6 +1517,7 @@ async function getAllHolders(page = 0, pageSize = 1000) {
             pendingDay8: 0,
             pendingDay28: 0,
             pendingDay90: 0,
+            claimableRewards: 0,
           });
         }
         const holder = holdersMap.get(wallet);
@@ -1411,12 +1527,12 @@ async function getAllHolders(page = 0, pageSize = 1000) {
         holder.shares += shares;
         holder.lockedAscendant += lockedAscendant;
         holder.rewardDebt += rewardDebt;
+        holder.claimableRewards += shares * rewardPerShare - rewardDebt;
         totalLockedAscendant += lockedAscendant;
       }
     }
   });
 
-  // Calculate pending rewards per wallet
   const holders = Array.from(holdersMap.values());
   const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
   const pendingRewardPerShareDay8 = totalShares > 0 ? toDistributeDay8 / totalShares : 0;
@@ -1424,8 +1540,6 @@ async function getAllHolders(page = 0, pageSize = 1000) {
   const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
 
   holders.forEach(holder => {
-    const currentRewardPerShare = rewardPerShare + pendingRewardPerShareDay8 + pendingRewardPerShareDay28 + pendingRewardPerShareDay90;
-    const totalPending = holder.shares * (currentRewardPerShare - holder.rewardDebt / holder.total);
     holder.pendingDay8 = holder.shares * pendingRewardPerShareDay8;
     holder.pendingDay28 = holder.shares * pendingRewardPerShareDay28;
     holder.pendingDay90 = holder.shares * pendingRewardPerShareDay90;
@@ -1434,7 +1548,6 @@ async function getAllHolders(page = 0, pageSize = 1000) {
     holder.displayMultiplierSum = holder.multiplierSum;
   });
 
- // holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
   holders.sort((a, b) => b.shares - a.shares || b.multiplierSum - a.multiplierSum || b.total - a.total);
   holders.forEach((holder, index) => (holder.rank = index + 1));
   log(`Final holders count: ${holders.length}`);
@@ -1458,13 +1571,141 @@ async function getAllHolders(page = 0, pageSize = 1000) {
   return result;
 }
 
+async function getHolderData(wallet) {
+  const contractAddress = contractAddresses.ascendantNFT;
+  const tiers = contractTiers.ascendantNFT;
+  const contractName = 'ascendantNFT';
+  const cacheKey = `${contractAddress}-${wallet}`;
+  const now = Date.now();
+
+  if (cache[cacheKey] && (now - cache[cacheKey].timestamp) < CACHE_TTL) {
+    log(`Returning cached data for ${cacheKey}`);
+    return cache[cacheKey].data;
+  }
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    throw new Error('Invalid wallet address');
+  }
+
+  log(`getHolderData start: wallet=${wallet}, contract=${contractAddress}`);
+  const nfts = await alchemy.nft.getNftsForOwner(wallet, { contractAddresses: [contractAddress] });
+  log(`${contractAddress} - Initial NFTs for ${wallet}: ${nfts.totalCount}`);
+
+  if (nfts.totalCount === 0) return null;
+
+  const walletLower = wallet.toLowerCase();
+  const tokenIds = nfts.ownedNfts.map(nft => BigInt(nft.tokenId));
+  const ownerOfCalls = tokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'ownerOf',
+    args: [tokenId],
+  }));
+
+  const ownerOfResults = await batchMulticall(ownerOfCalls);
+  const validTokenIds = tokenIds.filter((tokenId, i) => {
+    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const cacheKey = `${contractAddress}-${tokenId}-owner`;
+    tokenCache.set(cacheKey, owner);
+    return owner === walletLower;
+  });
+  log(`${contractAddress} - Valid token IDs for ${wallet}: ${validTokenIds.length}`);
+
+  if (validTokenIds.length === 0) return null;
+
+  const tierCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'getNFTAttribute',
+    args: [tokenId],
+  }));
+  const recordCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'userRecords',
+    args: [tokenId],
+  }));
+
+  const [tierResults, recordResults] = await Promise.all([
+    batchMulticall(tierCalls),
+    batchMulticall(recordCalls),
+  ]);
+
+  const rewardPerShare = Number(await client.readContract({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'rewardPerShare',
+  }));
+  const maxTier = Math.max(...Object.keys(tiers).map(Number));
+  const tiersArray = Array(maxTier + 1).fill(0);
+  let total = 0;
+  let multiplierSum = 0;
+  let shares = 0;
+  let lockedAscendant = 0;
+  let claimableRewards = 0;
+
+  tierResults.forEach((result, i) => {
+    if (result?.status === 'success') {
+      const tier = Number(result.result[1]);
+      const record = recordResults[i]?.status === 'success' ? recordResults[i].result : [0, 0, 0, 0, 0];
+      const tokenShares = Number(record[0]);
+      const tokenLockedAscendant = Number(record[1]);
+      const rewardDebt = Number(record[2]);
+
+      if (tier >= 1 && tier <= maxTier) {
+        tiersArray[tier] += 1;
+        total += 1;
+        multiplierSum += tiers[tier]?.multiplier || 0;
+        shares += tokenShares;
+        lockedAscendant += tokenLockedAscendant;
+        claimableRewards += tokenShares * rewardPerShare - rewardDebt;
+      }
+    }
+  });
+
+  const allHolders = await getAllHolders(0, 1000);
+  const totalMultiplierSum = allHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+  const percentage = totalMultiplierSum > 0 ? (multiplierSum / totalMultiplierSum) * 100 : 0;
+  const holder = allHolders.holders.find(h => h.wallet === walletLower) || { rank: allHolders.holders.length + 1 };
+
+  const pendingRewardPerShareDay8 = allHolders.totalShares > 0 ? allHolders.toDistributeDay8 / allHolders.totalShares : 0;
+  const pendingRewardPerShareDay28 = allHolders.totalShares > 0 ? allHolders.toDistributeDay28 / allHolders.totalShares : 0;
+  const pendingRewardPerShareDay90 = allHolders.totalShares > 0 ? allHolders.toDistributeDay90 / allHolders.totalShares : 0;
+
+  const result = {
+    wallet: walletLower,
+    rank: holder.rank,
+    total,
+    multiplierSum,
+    displayMultiplierSum: multiplierSum,
+    percentage,
+    tiers: tiersArray,
+    shares,
+    lockedAscendant,
+    pendingDay8: shares * pendingRewardPerShareDay8,
+    pendingDay28: shares * pendingRewardPerShareDay28,
+    pendingDay90: shares * pendingRewardPerShareDay90,
+    claimableRewards,
+  };
+
+  cache[cacheKey] = { timestamp: now, data: result };
+  log(`${contractAddress} - Final data for ${wallet}: total=${total}, shares=${shares}, claimableRewards=${claimableRewards}`);
+  return result;
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
+  const wallet = searchParams.get('wallet');
   const page = parseInt(searchParams.get('page') || '0', 10);
   const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
-  log(`Received request: page=${page}, pageSize=${pageSize}`);
+  log(`Received request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
 
   try {
+    if (wallet) {
+      const holderData = await getHolderData(wallet);
+      return NextResponse.json({ holders: holderData ? [holderData] : [] });
+    }
+
     const result = await getAllHolders(page, pageSize);
     return NextResponse.json(result);
   } catch (error) {
@@ -1479,6 +1720,18 @@ import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
 import { Alchemy, Network } from 'alchemy-sdk';
 
+// Shared cache for routes that import it
+export const cache = {};
+
+// Import all ABI JSON files using @ notation
+import staxNFTAbi from '@/abi/staxNFT.json';
+import element369Abi from '@/abi/element369.json';
+import element369VaultAbi from '@/abi/element369Vault.json';
+import staxVaultAbi from '@/abi/staxVault.json';
+import ascendantNFTAbi from '@/abi/ascendantNFT.json';
+import element280Abi from '@/abi/element280.json';
+import element280VaultAbi from '@/abi/element280Vault.json';
+
 export const alchemy = new Alchemy({
   apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || (() => { throw new Error('Alchemy API key missing'); })(),
   network: Network.ETH_MAINNET,
@@ -1486,23 +1739,39 @@ export const alchemy = new Alchemy({
 
 export const client = createPublicClient({
   chain: mainnet,
-  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`),
+  transport: http(
+    process.env.ETH_RPC_URL ||
+    `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`
+  ),
 });
 
+// Generic NFT ABI for common functions
 export const nftAbi = parseAbi([
-  "function ownerOf(uint256 tokenId) view returns (address)",
-  "function getNftTier(uint256 tokenId) view returns (uint8)",
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function getNftTier(uint256 tokenId) view returns (uint8)',
 ]);
 
+// Ascendant NFT ABI with specific functions
 export const ascendantAbi = parseAbi([
-  "function ownerOf(uint256 tokenId) view returns (address)",
-  "function getNFTAttribute(uint256 tokenId) view returns (uint256 rarityNumber, uint8 tier, uint8 rarity)",
-  "function userRecords(uint256 tokenId) view returns (uint256 shares, uint256 lockedAscendant, uint256 rewardDebt, uint32 startTime, uint32 endTime)",
-  "function totalShares() view returns (uint256)",
-  "function toDistribute(uint8 pool) view returns (uint256)",
-  "function rewardPerShare() view returns (uint256)",
-  "error NonExistentToken(uint256 tokenId)"
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function getNFTAttribute(uint256 tokenId) view returns (uint256 rarityNumber, uint8 tier, uint8 rarity)',
+  'function userRecords(uint256 tokenId) view returns (uint256 shares, uint256 lockedAscendant, uint256 rewardDebt, uint32 startTime, uint32 endTime)',
+  'function totalShares() view returns (uint256)',
+  'function toDistribute(uint8 pool) view returns (uint256)',
+  'function rewardPerShare() view returns (uint256)',
+  'error NonExistentToken(uint256 tokenId)',
 ]);
+
+// Export all ABIs
+export {
+  staxNFTAbi,
+  element369Abi,
+  element369VaultAbi,
+  staxVaultAbi,
+  ascendantNFTAbi,
+  element280Abi,
+  element280VaultAbi,
+};
 
 export const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
@@ -1650,6 +1919,7 @@ export const nftContracts = {
     name: "Element 280",
     symbol: "ELMNT",
     address: "0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9",
+    vaultAddress: "0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97",
     deploymentBlock: "20945304",
     tiers: {
       1: { name: "Common", multiplier: 10, allocation: "100000000000000000000000000" },
@@ -1666,6 +1936,7 @@ export const nftContracts = {
     name: "Element 369",
     symbol: "E369",
     address: "0x024D64E2F65747d8bB02dFb852702D588A062575",
+    vaultAddress: "0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5",
     deploymentBlock: "21224418",
     tiers: {
       1: { name: "Common", multiplier: 1, price: "100000000000000000000000000" },
@@ -1679,6 +1950,7 @@ export const nftContracts = {
     name: "Stax",
     symbol: "STAX",
     address: "0x74270Ca3a274B4dbf26be319A55188690CACE6E1",
+    vaultAddress: "0x5D27813C32dD705404d1A78c9444dAb523331717",
     deploymentBlock: "21452667",
     tiers: {
       1: { name: "Common", multiplier: 1, price: "100000000000000000000000000" },
@@ -1718,9 +1990,9 @@ export const nftContracts = {
   e280: {
     name: "E280",
     symbol: "E280",
-    address: null, // Not deployed yet
+    address: null,
     deploymentBlock: null,
-    tiers: {}, // Define if applicable
+    tiers: {},
     description: "E280 NFTs on BASE chain. Contract not yet deployed.",
   },
 };
@@ -1731,6 +2003,13 @@ export const contractAddresses = {
   staxNFT: nftContracts.staxNFT.address,
   ascendantNFT: nftContracts.ascendantNFT.address,
   e280: nftContracts.e280.address,
+};
+
+export const vaultAddresses = {
+  element280: nftContracts.element280.vaultAddress,
+  element369: nftContracts.element369.vaultAddress,
+  staxNFT: nftContracts.staxNFT.vaultAddress,
+  e280: null,
 };
 
 export const deploymentBlocks = {
@@ -1752,33 +2031,37 @@ export const contractTiers = {
 export const contractDetails = {
   element280: {
     name: nftContracts.element280.name,
-    totalTokens: 8209, // Update with actual value if needed
+    totalTokens: 8209,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Element280',
+    rewardToken: 'ELMNT',
   },
   element369: {
     name: nftContracts.element369.name,
-    totalTokens: 0, // Update with actual value
+    totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Element369',
   },
   staxNFT: {
     name: nftContracts.staxNFT.name,
-    totalTokens: 0, // Update with actual value
+    totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Stax',
+    rewardToken: 'X28',
   },
   ascendantNFT: {
     name: nftContracts.ascendantNFT.name,
-    totalTokens: 0, // Update with actual value
+    totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Ascendant',
+    rewardToken: 'DRAGONX',
   },
   e280: {
     name: nftContracts.e280.name,
     totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/E280',
+    rewardToken: 'E280',
   },
 };
 
@@ -1818,6 +2101,9 @@ const nextConfig = {};
 
 export default nextConfig;
 -e 
+---
+File: ./element369.json
+{"holders":[{"wallet":"0x074ade052e2a8eed3db1df9e6717dd869f65c396","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x07df2bb35b3030681e6f9fb97113a83d250556bc","total":4,"tier1":2,"tier2":2,"tier3":0,"multiplierSum":22,"claimableRewards":46292138.40829844},{"wallet":"0x08b30ade63c9c1ec3f64a5a84d040eb6823e6870","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x0b73c8ed83f333963e5c6604226fd38ee97a90da","total":2,"tier1":1,"tier2":1,"tier3":0,"multiplierSum":11,"claimableRewards":7090397.3025417505},{"wallet":"0x1184fa9a6f73a5789c0f0d0618c31e0fe7ef459b","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":3251599.1256541354},{"wallet":"0x1279acc327ed3faf54e7d781714a6a8817561ca8","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x1488bad8ad5e0127b0eb1e027b29fdaca36effb8","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x15702443110894b26911b913b17ea4931f803b02","total":9,"tier1":0,"tier2":9,"tier3":0,"multiplierSum":90,"claimableRewards":58012341.56625068},{"wallet":"0x15918cee59ba7a0eba6682eb196d012a53ff5c67","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":1289163.145916682},{"wallet":"0x15e5b9b9adf208cc7ca3ae1e6a49506eb5f397dd","total":15,"tier1":0,"tier2":0,"tier3":15,"multiplierSum":1500,"claimableRewards":3597998988.4106555},{"wallet":"0x16b2e0235ddd6392c89eca4f46a49ef31c45c5e6","total":10,"tier1":10,"tier2":0,"tier3":0,"multiplierSum":10,"claimableRewards":23986659.922737703},{"wallet":"0x1797078687b258264d74158cacfafafc71fc69a3","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x18c7217ed83aa7b90a31e89b9f09396b6b643791","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":4502854.101741881},{"wallet":"0x18cb4b36f62f850130a8f2fea97ae7ae3c063f04","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":1289163.145916682},{"wallet":"0x19bd6fd9350a7cb5f125c7794ecd7f8bff2f9e08","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x1de5546abef2c1defa935e2805abbdde28e0284d","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":325159.9125654135},{"wallet":"0x2000b50a35b4eeb93b5b917cbf9dc39a5c12ab0a","total":20,"tier1":20,"tier2":0,"tier3":0,"multiplierSum":20,"claimableRewards":51481537.37620102},{"wallet":"0x201f12fb8ec9267f117fb9cd96edf5926343e6d7","total":5,"tier1":0,"tier2":5,"tier3":0,"multiplierSum":50,"claimableRewards":0},{"wallet":"0x207d757dfa34dc4351359c207ef1c7b005de4304","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x2131558f15fdc7311f170f57fcbdfe4508557d3b","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x23c5669195333480e932dee3ef839b44dbb1acea","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x24fa1c5c8b5a760ea5de41f8f24f915e5c09ea44","total":4,"tier1":0,"tier2":4,"tier3":0,"multiplierSum":40,"claimableRewards":25783262.91833364},{"wallet":"0x24fe402b9acbaf6e55435175b5293a3cafb04389","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2398665.9922737703},{"wallet":"0x280bd4e997041c2f36882bdf96dbe732b4eab595","total":4,"tier1":4,"tier2":0,"tier3":0,"multiplierSum":4,"claimableRewards":10296307.475240204},{"wallet":"0x29562ff51bee7f8aaf65a75c0a1e0d49554b2bc8","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":3251599.1256541354},{"wallet":"0x29ad2d067e4caa2bc9d77b34cd28ff5a9f62ff29","total":1,"tier1":0,"tier2":0,"tier3":1,"multiplierSum":100,"claimableRewards":32515991.256541356},{"wallet":"0x2b7961940b7d0ad43063da152a5b0723e259a048","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x2c7ea35e9345b9a0ac44a83f62e205dcf5d0fd6a","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x2cd85dafb0cd6f875fac1493f25e643e93e69447","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":4208376.218936222},{"wallet":"0x2d0df0d6d1109dfb2a162b2c7033c5691a755873","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":4797331.984547541},{"wallet":"0x33c6eeb8aabf6c06daa23a5dbb67e92a4f2d9e0a","total":2,"tier1":1,"tier2":1,"tier3":0,"multiplierSum":11,"claimableRewards":28314845.556910563},{"wallet":"0x36a28f814ded9260de31115ffd72c6f05b8d9fc3","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":21041881.094681107},{"wallet":"0x3b71c69a41620dcb22ed6d082ed0fd89d496b976","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x3b754dfae801a9576ff17e231b76aeaecc06c0fa","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x3c0ac3432ab66815ec48ee010e4957121c15b2eb","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x3ec874cfd9c65a407bf5d5a8a56beb3b7f04f823","total":2,"tier1":0,"tier2":0,"tier3":2,"multiplierSum":200,"claimableRewards":128916314.59166819},{"wallet":"0x4523fa431d98e96c7e3d13801f15725c27715f41","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x46b8fb50d0c3f611ed387d0d590a63b504c6e245","total":5,"tier1":5,"tier2":0,"tier3":0,"multiplierSum":5,"claimableRewards":12870384.344050255},{"wallet":"0x47755ba9cbeacf6540973b8500110ee2805a016e","total":2,"tier1":1,"tier2":1,"tier3":0,"multiplierSum":11,"claimableRewards":23146069.20414922},{"wallet":"0x4b653ad55051fab223b8d319ce70e45e7fa3ab9b","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x4cf6468958b88ce3bd2ddf5151e05cf62411503f","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x4fdb40c2f44f008e7364a1838421a50d356e6621","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x50ef162381f8ae276774d71b4afb18dcee7e33b2","total":10,"tier1":8,"tier2":2,"tier3":0,"multiplierSum":28,"claimableRewards":58917267.06510711},{"wallet":"0x54e762b675d1af95f1942a6674a71252ea8330bd","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x5626eb3647a9ec3e401565077d702f43f42910ac","total":2,"tier1":0,"tier2":2,"tier3":0,"multiplierSum":20,"claimableRewards":47973319.845475405},{"wallet":"0x59494c2a49cd0cdda00249111c9dd75537879cf7","total":18,"tier1":16,"tier2":2,"tier3":0,"multiplierSum":36,"claimableRewards":86351975.72185573},{"wallet":"0x598761631c4988dcc0bdffcacb0c9d1126a80efa","total":7,"tier1":7,"tier2":0,"tier3":0,"multiplierSum":7,"claimableRewards":11591208.873329371},{"wallet":"0x5d23a593503d4c1a35f096eb78a02ecba40a0fee","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x5d58c390def5a94296cabc757af8ac1ccb772adc","total":1,"tier1":0,"tier2":0,"tier3":1,"multiplierSum":100,"claimableRewards":32515991.256541356},{"wallet":"0x5e8604ff72d33389c57a9468e44f81bde23f7c94","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x5f57c8a32bc5777a206415155755afa73580c0e4","total":10,"tier1":0,"tier2":10,"tier3":0,"multiplierSum":100,"claimableRewards":257407686.8810051},{"wallet":"0x62eb3e90696d302f80c48d859943f0e244823436","total":5,"tier1":5,"tier2":0,"tier3":0,"multiplierSum":5,"claimableRewards":12870384.344050255},{"wallet":"0x64091bd5d902cb53a2e55fdc154507dd8c709f82","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":325159.9125654135},{"wallet":"0x64cbecbe87b47183e4dba6069f0e0aa4b723f255","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":644581.572958341},{"wallet":"0x665643ac490d23906b23c75f834950f22b9c45f3","total":10,"tier1":10,"tier2":0,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x665d4026156e916dd31f620fd6fb60a6ef5848e8","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":6445815.72958341},{"wallet":"0x675009487742d62303903b0f4fb13ee284ba5037","total":5,"tier1":5,"tier2":0,"tier3":0,"multiplierSum":5,"claimableRewards":10520940.547340553},{"wallet":"0x67c9e7a2fc4d7840b7bf8e25b2640888a47f429e","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x6821860c20de7cf4f295b80df598d6e679dd8efc","total":3,"tier1":0,"tier2":3,"tier3":0,"multiplierSum":30,"claimableRewards":9754797.376962405},{"wallet":"0x689dcb6c727a18c60c42635f99c78bef67367ff0","total":6,"tier1":0,"tier2":6,"tier3":0,"multiplierSum":60,"claimableRewards":126251286.56808665},{"wallet":"0x69da7529ac98d70c0658d24f54417c7af6a9cc40","total":3,"tier1":0,"tier2":3,"tier3":0,"multiplierSum":30,"claimableRewards":63125643.28404333},{"wallet":"0x6a23a4b38915d6d7788bb81bd22ad84c5e3004de","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x6a88c1f502978fedec1defee9cf54b1bdb3e698a","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x6bda870f3fb123851d1e25cac281e5f688736a99","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":21041881.094681107},{"wallet":"0x6be39541d91d87a14f09f3df5aa5ba6155a363e0","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x6fd2cd66a7e30ab28b8b000e3283d6c544098c14","total":2,"tier1":1,"tier2":1,"tier3":0,"multiplierSum":11,"claimableRewards":28314845.556910563},{"wallet":"0x702cf959881819191f847b2f059a28320dd50e7a","total":3,"tier1":3,"tier2":0,"tier3":0,"multiplierSum":3,"claimableRewards":7722230.606430153},{"wallet":"0x7094072f97d04c0784ffb95677c52c605254152d","total":3,"tier1":3,"tier2":0,"tier3":0,"multiplierSum":3,"claimableRewards":7546819.729893872},{"wallet":"0x7220febb3a3646764ca4785b5027656e61b18c45","total":5,"tier1":5,"tier2":0,"tier3":0,"multiplierSum":5,"claimableRewards":3222907.864791705},{"wallet":"0x75c26b2b971ac740d2029575384e82017ecf9062","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":650319.825130827},{"wallet":"0x76d946a2484c3aac891cc0a7dd45cc0dac37250b","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x788de1d847807aae0f252bffb5ab5d523b5f9346","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x7ad04d23bd7dcf336ad10bcf3ea0287147faab0c","total":10,"tier1":6,"tier2":4,"tier3":0,"multiplierSum":46,"claimableRewards":118407535.96526234},{"wallet":"0x7afd8c5ba9f879883a25b89ad3d789f7d0ecf755","total":4,"tier1":4,"tier2":0,"tier3":0,"multiplierSum":4,"claimableRewards":10296307.475240204},{"wallet":"0x7b75ec8a8ca7305fb8da026090c23ad9c59c2c16","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x7bd36fe9dbff09192fca6f58d5c59d40918564b0","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x7eb49ad9f25b65d855f54e1d6d1606819efa2c69","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x840cbb88524e20d03ccdfacc733feb3264ef488d","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":325159.9125654135},{"wallet":"0x849290aa3e6d094592eaf2fac5eb2b2f02d0baea","total":5,"tier1":0,"tier2":5,"tier3":0,"multiplierSum":50,"claimableRewards":32229078.647917047},{"wallet":"0x862412dd2d38f649041828e19aa2546f3e4d5ddf","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2104188.109468111},{"wallet":"0x86b1f6bde3578f7c588566b3cd88f2eab3bd61a9","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0x88ba35dfd256572e16883fd560d19dbbd8dcce1a","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x8974b7db7c46be6268a673e3cb56d94885d8119e","total":4,"tier1":2,"tier2":2,"tier3":0,"multiplierSum":22,"claimableRewards":14180794.605083501},{"wallet":"0x8bd442a100994dd97b3be7ad70bf61ccdbcbadc0","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0x9504e8488576bce17332e831a4e4a1521e1fcdca","total":5,"tier1":5,"tier2":0,"tier3":0,"multiplierSum":5,"claimableRewards":12870384.344050255},{"wallet":"0x95e8331343cfb7b3eb2e0113b6277dac040adf73","total":5,"tier1":5,"tier2":0,"tier3":0,"multiplierSum":5,"claimableRewards":10520940.547340553},{"wallet":"0x965dfc3694c1bafec7cef645d7a17167c9a5f0f4","total":6,"tier1":5,"tier2":1,"tier3":0,"multiplierSum":15,"claimableRewards":38611153.03215077},{"wallet":"0x96701f02ed9e694cc6d68d234402b058e75b0b85","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":325159.9125654135},{"wallet":"0x9731a290bbe838791241ad52a446113b86d9d613","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x9809aa9a91436a33cf7872614515d1385577bd9a","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":3251599.1256541354},{"wallet":"0x988a7057c33702127174ae3671a87d9c0c9fdf50","total":3,"tier1":0,"tier2":3,"tier3":0,"multiplierSum":30,"claimableRewards":19337447.188750226},{"wallet":"0x989b0536bdd5b3c899f2d584f7f28221f8117607","total":10,"tier1":10,"tier2":0,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0x994493864b3d7f4f91f836ec9cf78c1e08e824b5","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":6445815.72958341},{"wallet":"0x9a5e3cd9c92c455a1fcf4acd52068f1dd3ec3998","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":23986659.922737703},{"wallet":"0x9b6dd6c69f56170ea58323a9f4529c90d1d44c75","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":4208376.218936222},{"wallet":"0x9c725f41e1732198e5f5066cb09185229a5de0a0","total":8,"tier1":8,"tier2":0,"tier3":0,"multiplierSum":8,"claimableRewards":19189327.938190162},{"wallet":"0x9f54598363ada26717656c11dcc66a96bf856b5a","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":21041881.094681107},{"wallet":"0x9f99dc994579ff651da914d6537fa8075da4b4ae","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xa1f02d0d3d61e13b03acda31d866181563d50b59","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":21041881.094681107},{"wallet":"0xa2aa01003994cc5f14ad6aec263b7258553616c7","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0xa2e4c81fb652f3808a0dbe4cede5a8695d47043e","total":1,"tier1":0,"tier2":0,"tier3":1,"multiplierSum":100,"claimableRewards":257407686.8810051},{"wallet":"0xac4ae84fbea2273d6975f7490138b28553436457","total":3,"tier1":3,"tier2":0,"tier3":0,"multiplierSum":3,"claimableRewards":6312564.3284043325},{"wallet":"0xb0d8213af23697e0618629e35f5104ff3e8a9a67","total":10,"tier1":10,"tier2":0,"tier3":0,"multiplierSum":10,"claimableRewards":25740768.68810051},{"wallet":"0xb18c4a028dbedadf06e9e43ee7721f29a3b3ba92","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":23986659.922737703},{"wallet":"0xb24f7dd5ae191fc5a820f5f13e144a132267552f","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":6445815.72958341},{"wallet":"0xb3f59a0f954287789836cab5823c79b66920c309","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2398665.9922737703},{"wallet":"0xb5935d95c4af1fcf55cf76ed92dd0b11f6887148","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":21041881.094681107},{"wallet":"0xb73c95ca93126cc12b79ccc46b3c0cd4ba099edf","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xbd4713eab86029180770da858df526c7f2a51d2b","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2104188.109468111},{"wallet":"0xc2394863c15a59a22f5cede33ff80cd63fc2931a","total":12,"tier1":11,"tier2":1,"tier3":0,"multiplierSum":21,"claimableRewards":13536213.032125158},{"wallet":"0xc4ed347542a610b05f428aeebd60e8414a44a530","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xc64bf6400fcc7c936d50909540f5492a57e50849","total":2,"tier1":1,"tier2":1,"tier3":0,"multiplierSum":11,"claimableRewards":26385325.915011473},{"wallet":"0xc72c0ca472b0f9cba977a8cfe7ddced82a5b860e","total":2,"tier1":0,"tier2":2,"tier3":0,"multiplierSum":20,"claimableRewards":51481537.37620102},{"wallet":"0xc790c7562b900099299bd7f55ea1459f7ac53aa9","total":3,"tier1":3,"tier2":0,"tier3":0,"multiplierSum":3,"claimableRewards":1933744.7188750228},{"wallet":"0xca77c25fd53e21e35c4bc9cf90a66df624b3f0ca","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":6445815.72958341},{"wallet":"0xca8e2b82dc328afe6bc6aef78bc04a20b9cc9f33","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":325159.9125654135},{"wallet":"0xcbd34554e073075ebbfa351c2861481b94e0a931","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xcca784a4e59e9cf4553dc817f106ce118eab7933","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xce173b5b683e4360137bed8a317ba4dece6118f8","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xcfed607e64e7ac5b7094b670984ccbed2110842e","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xd05d5cfa1c0343374063da83a979ac8a31afe731","total":8,"tier1":8,"tier2":0,"tier3":0,"multiplierSum":8,"claimableRewards":20592614.95048041},{"wallet":"0xd742d93f3bedd4cce9eec48336e16944d0dac0da","total":3,"tier1":3,"tier2":0,"tier3":0,"multiplierSum":3,"claimableRewards":7195997.97682131},{"wallet":"0xd7c8d0f774b696c4bfb12cc8e97b232deeeede18","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":21041881.094681107},{"wallet":"0xdaddabbfda8de64c97a3f57d825d26700008020d","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0xdc5ffb80c482a2d9b15905f71a1d348c2a6e0efe","total":9,"tier1":6,"tier2":3,"tier3":0,"multiplierSum":36,"claimableRewards":86351975.72185573},{"wallet":"0xdd70bb443b234f22a233f5f5a0bced5039d1d44b","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":0},{"wallet":"0xe18ff21f1edea06b7af475a1b7a81baeef8ffc25","total":1,"tier1":0,"tier2":0,"tier3":1,"multiplierSum":100,"claimableRewards":257407686.8810051},{"wallet":"0xe3ac7ff8156091b17b6609467d20d1f7979d1d77","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":644581.572958341},{"wallet":"0xe40d6b27456eff65fa4cb34d948365a5fba356ea","total":1,"tier1":0,"tier2":1,"tier3":0,"multiplierSum":10,"claimableRewards":23986659.922737703},{"wallet":"0xeb19ccbbba733b739f310db4d0f5354183cfe5f9","total":3,"tier1":3,"tier2":0,"tier3":0,"multiplierSum":3,"claimableRewards":7722230.606430153},{"wallet":"0xeff28fb26fea5e543b112fbd78852499ab16cee7","total":2,"tier1":2,"tier2":0,"tier3":0,"multiplierSum":2,"claimableRewards":5148153.737620102},{"wallet":"0xf11682da4d21cea7435b0e0fa8f1152ccaef373a","total":8,"tier1":8,"tier2":0,"tier3":0,"multiplierSum":8,"claimableRewards":18663119.654628698},{"wallet":"0xf419f10bcd7137382284ebc7ae59243e29f4a909","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051},{"wallet":"0xf84cd420b3472f8bec338a9028c58e796fd563c1","total":1,"tier1":0,"tier2":0,"tier3":1,"multiplierSum":100,"claimableRewards":210418810.9468111},{"wallet":"0xf97d9cd83963c27a52a081a8d2e1f1701e4d546d","total":12,"tier1":2,"tier2":10,"tier3":0,"multiplierSum":102,"claimableRewards":65747320.44175077},{"wallet":"0xfe310fd984bfea016e2eff725005b2b6f37057ff","total":1,"tier1":1,"tier2":0,"tier3":0,"multiplierSum":1,"claimableRewards":2574076.868810051}],"totalTokens":415,"totalMultiplierSum":3610,"page":0,"pageSize":1000,"totalPages":1}-e 
 ---
 File: ./README.md
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
@@ -1860,7 +2146,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 ---
 File: ./components/HolderTable.js
 // components/HolderTable.js
-import { memo } from 'react'; // Add memo import
+import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { contractTiers } from "@/app/nft-contracts";
 
@@ -1870,9 +2156,10 @@ const rowVariants = {
 };
 
 function HolderTable({ holders, contract, loading, totalShares }) {
-  // Filter out null/undefined holders and those without a wallet property
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
   const isAscendant = contract === 'ascendantNFT';
+  const isElement369 = contract === 'element369';
+  const isStax = contract === 'staxNFT';
 
   if (!safeHolders.length) {
     if (loading) {
@@ -1884,6 +2171,15 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
+                {isElement369 ? (
+                  <>
+                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
+                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
+                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
+                  </>
+                ) : (
+                  <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+                )}
                 {isAscendant ? (
                   <>
                     <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
@@ -1919,13 +2215,22 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  {isElement369 ? (
+                    <>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                    </>
+                  ) : (
+                    <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  )}
                   {isAscendant ? (
                     <>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md}px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                     </>
                   ) : (
                     <>
@@ -1959,6 +2264,15 @@ function HolderTable({ holders, contract, loading, totalShares }) {
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
+            {isElement369 ? (
+              <>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
+              </>
+            ) : (
+              <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+            )}
             {isAscendant ? (
               <>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
@@ -2005,20 +2319,40 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                 </a>
               </td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total}</td>
+              {isElement369 ? (
+                <>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                    {Math.floor(holder.infernoRewards).toLocaleString()}
+                  </td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                    {Math.floor(holder.fluxRewards).toLocaleString()}
+                  </td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                    {Math.floor(holder.e280Rewards).toLocaleString()}
+                  </td>
+                </>
+              ) : (
+                <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                  {(isStax || isAscendant
+                    ? Math.floor(holder.claimableRewards)
+                    : holder.claimableRewards.toFixed(2)
+                  ).toLocaleString()}
+                </td>
+              )}
               {isAscendant ? (
                 <>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                    {totalShares ? ((holder.shares / totalShares) * 100).toFixed(2) : 'N/A'}%
+                    {totalShares ? ((holder.shares / totalShares) * 100).toFixed(2) : '0.00'}%
                   </td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.shares / 1e18).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.pendingDay8 / 1e18).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.pendingDay28 / 1e18).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.pendingDay90 / 1e18).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.shares).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay8).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay28).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay90).toLocaleString()}</td>
                 </>
               ) : (
                 <>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.percentage.toFixed(2)}%</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.displayMultiplierSum.toFixed(2)}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.multiplierSum.toFixed(2)}</td>
                   {Object.keys(tiers)
                     .sort((a, b) => b - a)
                     .map(tier => (
@@ -2036,7 +2370,6 @@ function HolderTable({ holders, contract, loading, totalShares }) {
   );
 }
 
-// Export as memoized component to reduce unnecessary re-renders
 export default memo(HolderTable);-e 
 ---
 File: ./components/LoadingIndicator.js
@@ -2080,13 +2413,22 @@ export default function NFTPage({ contractKey }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const { name, apiEndpoint } = contractDetails[contractKey] || {};
+  const { name, apiEndpoint, rewardToken } = contractDetails[contractKey] || {};
   const { getCache, setCache } = useNFTStore();
+  const isElement369 = contractKey === 'element369';
+  const isStax = contractKey === 'staxNFT';
 
   useEffect(() => {
     async function fetchAllHolders() {
       if (!apiEndpoint) {
         setError('Invalid contract configuration');
+        setLoading(false);
+        return;
+      }
+
+      if (contractKey === 'e280') {
+        setData({ holders: [], totalTokens: 0, message: 'E280 data not available yet' });
+        setCache(contractKey, { holders: [], totalTokens: 0, message: 'E280 data not available yet' });
         setLoading(false);
         return;
       }
@@ -2109,6 +2451,10 @@ export default function NFTPage({ contractKey }) {
         let toDistributeDay28 = 0;
         let toDistributeDay90 = 0;
         let pendingRewards = 0;
+        let totalClaimableRewards = 0;
+        let totalInfernoRewards = 0;
+        let totalFluxRewards = 0;
+        let totalE280Rewards = 0;
         let page = 0;
         let totalPages = Infinity;
         const pageSize = 1000;
@@ -2165,15 +2511,29 @@ export default function NFTPage({ contractKey }) {
         console.log(`[NFTPage] Total Unique ${contractKey} Holders: ${uniqueHolders.length}`);
 
         const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
+        if (isElement369) {
+          totalInfernoRewards = uniqueHolders.reduce((sum, h) => sum + (h.infernoRewards || 0), 0);
+          totalFluxRewards = uniqueHolders.reduce((sum, h) => sum + (h.fluxRewards || 0), 0);
+          totalE280Rewards = uniqueHolders.reduce((sum, h) => sum + (h.e280Rewards || 0), 0);
+        } else {
+          totalClaimableRewards = uniqueHolders.reduce((sum, h) => sum + (h.claimableRewards || 0), 0);
+        }
         if (!totalTokens && uniqueHolders.length > 0) {
           totalTokens = uniqueHolders.reduce((sum, h) => sum + (h.total || 0), 0);
         }
 
-        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
-        uniqueHolders.forEach((holder, index) => {
-          holder.rank = index + 1;
-          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-        });
+        if (contractKey === 'ascendantNFT') {
+          uniqueHolders.forEach((holder, index) => {
+            holder.rank = index + 1;
+            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+          });
+        } else {
+          uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
+          uniqueHolders.forEach((holder, index) => {
+            holder.rank = index + 1;
+            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+          });
+        }
 
         const fetchedData = {
           holders: uniqueHolders,
@@ -2185,6 +2545,10 @@ export default function NFTPage({ contractKey }) {
           toDistributeDay90,
           pendingRewards,
           totalMultiplierSum,
+          totalClaimableRewards,
+          totalInfernoRewards,
+          totalFluxRewards,
+          totalE280Rewards,
         };
 
         setCache(contractKey, fetchedData);
@@ -2205,6 +2569,10 @@ export default function NFTPage({ contractKey }) {
 
     const totalMultiplierSum = data.totalMultiplierSum || 0;
     const totalTokens = data.totalTokens || 0;
+    const totalClaimableRewards = data.totalClaimableRewards || 0;
+    const totalInfernoRewards = data.totalInfernoRewards || 0;
+    const totalFluxRewards = data.totalFluxRewards || 0;
+    const totalE280Rewards = data.totalE280Rewards || 0;
 
     if (contractKey === 'ascendantNFT') {
       return (
@@ -2212,12 +2580,25 @@ export default function NFTPage({ contractKey }) {
           <h2 className="text-2xl font-semibold mb-2">Summary</h2>
           <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
           <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
-          <p>Total Locked Ascendant: <span className="font-bold">{(data.totalLockedAscendant / 1e18 || 0).toLocaleString()}</span></p>
-          <p>Total Shares: <span className="font-bold">{(data.totalShares / 1e18 || 0).toLocaleString()}</span></p>
-          <p>Total Pending DragonX Rewards: <span className="font-bold">{(data.pendingRewards / 1e18 || 0).toLocaleString()}</span></p>
-          <p>Pending DAY8 Rewards: <span className="font-bold">{(data.toDistributeDay8 / 1e18 || 0).toLocaleString()}</span></p>
-          <p>Pending DAY28 Rewards: <span className="font-bold">{(data.toDistributeDay28 / 1e18 || 0).toLocaleString()}</span></p>
-          <p>Pending DAY90 Rewards: <span className="font-bold">{(data.toDistributeDay90 / 1e18 || 0).toLocaleString()}</span></p>
+          <p>Total Locked Ascendant: <span className="font-bold">{(data.totalLockedAscendant || 0).toLocaleString()}</span></p>
+          <p>Total Shares: <span className="font-bold">{(data.totalShares || 0).toLocaleString()}</span></p>
+          <p>Total Claimable Rewards: <span className="font-bold">{Math.floor(totalClaimableRewards).toLocaleString()} DRAGONX</span></p>
+          <p>Total Pending DragonX Rewards: <span className="font-bold">{(data.pendingRewards || 0).toLocaleString()}</span></p>
+          <p>Pending DAY8 Rewards: <span className="font-bold">{(data.toDistributeDay8 || 0).toLocaleString()}</span></p>
+          <p>Pending DAY28 Rewards: <span className="font-bold">{(data.toDistributeDay28 || 0).toLocaleString()}</span></p>
+          <p>Pending DAY90 Rewards: <span className="font-bold">{(data.toDistributeDay90 || 0).toLocaleString()}</span></p>
+        </>
+      );
+    } else if (isElement369) {
+      return (
+        <>
+          <h2 className="text-2xl font-semibold mb-2">Summary</h2>
+          <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
+          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
+          <p>Total Multiplier Sum: <span className="font-bold">{totalMultiplierSum.toLocaleString()}</span></p>
+          <p>Total Claimable Inferno Rewards: <span className="font-bold">{Math.floor(totalInfernoRewards).toLocaleString()}</span></p>
+          <p>Total Claimable Flux Rewards: <span className="font-bold">{Math.floor(totalFluxRewards).toLocaleString()}</span></p>
+          <p>Total Claimable E280 Rewards: <span className="font-bold">{Math.floor(totalE280Rewards).toLocaleString()}</span></p>
         </>
       );
     } else {
@@ -2227,6 +2608,12 @@ export default function NFTPage({ contractKey }) {
           <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
           <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
           <p>Total Multiplier Sum: <span className="font-bold">{totalMultiplierSum.toLocaleString()}</span></p>
+          <p>
+            Total Claimable Rewards:{' '}
+            <span className="font-bold">
+              {Math.floor(totalClaimableRewards).toLocaleString()} {rewardToken || ''}
+            </span>
+          </p>
         </>
       );
     }
@@ -2241,6 +2628,8 @@ export default function NFTPage({ contractKey }) {
         <p className="text-red-500 text-lg">Error: {error}</p>
       ) : !data ? (
         <p className="text-gray-400 text-lg">No data available for {name || 'this contract'}.</p>
+      ) : data.message ? (
+        <p className="text-gray-400 text-lg">{data.message}</p>
       ) : (
         <div className="w-full max-w-6xl">
           <div className="mb-6 p-4 bg-gray-800 rounded-lg shadow">{renderSummary()}</div>
@@ -2632,6 +3021,44 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts-e 
 ---
+File: ./package.json
+{
+  "name": "titanx-utility",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.72.1",
+    "@wagmi/connectors": "^5.7.11",
+    "alchemy-sdk": "^3.5.6",
+    "dotenv": "^16.5.0",
+    "ethers": "^6.13.5",
+    "framer-motion": "^12.6.3",
+    "next": "14.2.15",
+    "pino-pretty": "^13.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-virtualized": "^9.22.6",
+    "viem": "^2.24.3",
+    "wagmi": "^2.14.15",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9",
+    "eslint-config-next": "15.2.4",
+    "tailwindcss": "^3.4.17"
+  }
+}
+-e 
+---
 File: ./scripts/verifyContracts.js
 // scripts/verifyContracts.js
 import { tokenContracts } from '../app/token_contracts.js';
@@ -2639,6 +3066,32 @@ import { tokenContracts } from '../app/token_contracts.js';
 Object.entries(tokenContracts).forEach(([key, config]) => {
   console.log(`${key}: ${config.address}`);
 });-e 
+---
+File: ./scripts/checkTokens.js
+// scripts/checkTokens.js
+import { Alchemy, Network } from 'alchemy-sdk';
+import dotenv from 'dotenv';
+
+dotenv.config({ path: '.env.local' });
+
+const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || 'rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI';
+const NFT_ADDRESS = '0xC1bD0B0E4bC6a3F3e439eE4D0fD69267c29F4180';
+const WALLET = '0x15702443110894B26911B913b17ea4931F803B02';
+
+async function check() {
+  const alchemy = new Alchemy({ apiKey: ALCHEMY_API_KEY, network: Network.ETH_MAINNET });
+  try {
+    const nfts = await alchemy.nft.getNftsForOwner(WALLET, {
+      contractAddresses: [NFT_ADDRESS],
+    });
+    console.log('Total NFTs:', nfts.totalCount);
+    console.log('Token IDs:', nfts.ownedNfts.map(nft => Number(nft.tokenId)));
+  } catch (e) {
+    console.error('Error:', e.message);
+  }
+}
+
+check().catch(console.error);-e 
 ---
 File: ./scripts/again.js
 import { getAddress } from 'viem';
@@ -2775,6 +3228,124 @@ async function test() {
 }
 
 test();-e 
+---
+File: ./scripts/testElement369Vault.js
+// scripts/testElement369Vault.js
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import { Alchemy, Network } from 'alchemy-sdk';
+import dotenv from 'dotenv';
+
+dotenv.config({ path: '.env.local' });
+
+// Configuration
+const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || 'rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI';
+const NFT_ADDRESS = '0x024D64E2F65747d8bB02dFb852702D588A062575'; // Element369 NFT
+const VAULT_ADDRESS = '0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5';
+const TEST_WALLET = '0x15702443110894B26911B913b17ea4931F803B02';
+
+// Minimal ABI
+const VAULT_ABI = [
+  {
+    name: 'getRewards',
+    inputs: [
+      { type: 'uint256[]' },
+      { type: 'address' },
+      { type: 'bool' },
+    ],
+    outputs: [
+      { type: 'bool[]' },
+      { type: 'bool[]' },
+      { type: 'uint256' },
+      { type: 'uint256' },
+      { type: 'uint256' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+];
+
+async function getTokenIds(wallet) {
+  const settings = {
+    apiKey: ALCHEMY_API_KEY,
+    network: Network.ETH_MAINNET,
+  };
+  const alchemy = new Alchemy(settings);
+  try {
+    console.log('Querying getNftsForOwner for contract:', NFT_ADDRESS, 'wallet:', wallet);
+    const nfts = await alchemy.nft.getNftsForOwner(wallet, {
+      contractAddresses: [NFT_ADDRESS],
+    });
+    console.log('Total NFTs:', nfts.totalCount);
+    const tokenIds = nfts.ownedNfts.map(nft => Number(nft.tokenId));
+    if (tokenIds.length > 0) {
+      console.log('Found tokens:', tokenIds);
+      return tokenIds;
+    }
+
+    console.log('getNftsForOwner returned empty; trying getOwnersForContract');
+    const owners = await alchemy.nft.getOwnersForContract(NFT_ADDRESS, {
+      withTokenBalances: true,
+    });
+    const walletData = owners.owners.find(
+      owner => owner.ownerAddress.toLowerCase() === wallet.toLowerCase()
+    );
+    const ownerTokens = walletData ? walletData.tokenBalances.map(tb => Number(tb.tokenId)) : [];
+    console.log('getOwnersForContract tokens:', ownerTokens);
+    return ownerTokens;
+  } catch (e) {
+    console.error('Token fetch failed:', e.message);
+    return [];
+  }
+}
+
+async function test() {
+  // Initialize client
+  const client = createPublicClient({
+    chain: mainnet,
+    transport: http(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`),
+  });
+
+  // Fetch token IDs
+  let tokenIds = [];
+  try {
+    console.log('Fetching token IDs for wallet:', TEST_WALLET);
+    tokenIds = await getTokenIds(TEST_WALLET);
+    console.log('Final Token IDs:', tokenIds);
+    if (tokenIds.length === 0) {
+      console.log('No tokens found; using sample IDs: [101, 102]');
+      tokenIds = [101, 102];
+    } else {
+      tokenIds = tokenIds.slice(0, 2); // Use up to 2 tokens
+    }
+  } catch (e) {
+    console.error('Failed to fetch token IDs:', e.message);
+    console.log('Using sample IDs: [101, 102]');
+    tokenIds = [101, 102];
+  }
+
+  // Test getRewards
+  try {
+    console.log('\nTesting getRewards with token IDs:', tokenIds);
+    const result = await client.readContract({
+      address: VAULT_ADDRESS,
+      abi: VAULT_ABI,
+      functionName: 'getRewards',
+      args: [tokenIds, TEST_WALLET, false],
+    });
+    console.log('getRewards Result:', {
+      availability: result[0],
+      burned: result[1],
+      infernoPool: Number(result[2]) / 1e18,
+      fluxPool: Number(result[3]) / 1e18,
+      e280Pool: Number(result[4]) / 1e18,
+    });
+  } catch (e) {
+    console.error('getRewards failed:', e.message);
+  }
+}
+
+test().catch(console.error);-e 
 ---
 File: ./scripts/testAscendantOrder.js
 // scripts/testAscendantWallet.js

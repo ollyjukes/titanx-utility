@@ -4,6 +4,7 @@ export const nftContracts = {
     name: "Element 280",
     symbol: "ELMNT",
     address: "0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9",
+    vaultAddress: "0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97",
     deploymentBlock: "20945304",
     tiers: {
       1: { name: "Common", multiplier: 10, allocation: "100000000000000000000000000" },
@@ -20,6 +21,7 @@ export const nftContracts = {
     name: "Element 369",
     symbol: "E369",
     address: "0x024D64E2F65747d8bB02dFb852702D588A062575",
+    vaultAddress: "0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5",
     deploymentBlock: "21224418",
     tiers: {
       1: { name: "Common", multiplier: 1, price: "100000000000000000000000000" },
@@ -33,6 +35,7 @@ export const nftContracts = {
     name: "Stax",
     symbol: "STAX",
     address: "0x74270Ca3a274B4dbf26be319A55188690CACE6E1",
+    vaultAddress: "0x5D27813C32dD705404d1A78c9444dAb523331717",
     deploymentBlock: "21452667",
     tiers: {
       1: { name: "Common", multiplier: 1, price: "100000000000000000000000000" },
@@ -72,9 +75,9 @@ export const nftContracts = {
   e280: {
     name: "E280",
     symbol: "E280",
-    address: null, // Not deployed yet
+    address: null,
     deploymentBlock: null,
-    tiers: {}, // Define if applicable
+    tiers: {},
     description: "E280 NFTs on BASE chain. Contract not yet deployed.",
   },
 };
@@ -85,6 +88,13 @@ export const contractAddresses = {
   staxNFT: nftContracts.staxNFT.address,
   ascendantNFT: nftContracts.ascendantNFT.address,
   e280: nftContracts.e280.address,
+};
+
+export const vaultAddresses = {
+  element280: nftContracts.element280.vaultAddress,
+  element369: nftContracts.element369.vaultAddress,
+  staxNFT: nftContracts.staxNFT.vaultAddress,
+  e280: null,
 };
 
 export const deploymentBlocks = {
@@ -106,33 +116,37 @@ export const contractTiers = {
 export const contractDetails = {
   element280: {
     name: nftContracts.element280.name,
-    totalTokens: 8209, // Update with actual value if needed
+    totalTokens: 8209,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Element280',
+    rewardToken: 'ELMNT',
   },
   element369: {
     name: nftContracts.element369.name,
-    totalTokens: 0, // Update with actual value
+    totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Element369',
   },
   staxNFT: {
     name: nftContracts.staxNFT.name,
-    totalTokens: 0, // Update with actual value
+    totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Stax',
+    rewardToken: 'X28',
   },
   ascendantNFT: {
     name: nftContracts.ascendantNFT.name,
-    totalTokens: 0, // Update with actual value
+    totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/Ascendant',
+    rewardToken: 'DRAGONX',
   },
   e280: {
     name: nftContracts.e280.name,
     totalTokens: 0,
     pageSize: 1000,
     apiEndpoint: '/api/holders/E280',
+    rewardToken: 'E280',
   },
 };
 

@@ -1,7 +1,8 @@
 // app/api/holders/Element280/route.js
 import { NextResponse } from 'next/server';
-import { alchemy, client, nftAbi, CACHE_TTL, log, batchMulticall } from '../../utils';
-import { contractAddresses, contractTiers } from '@/app/nft-contracts';
+import { alchemy, client, nftAbi, element280VaultAbi, CACHE_TTL, log, batchMulticall } from '../../utils';
+import { contractAddresses, contractTiers, vaultAddresses } from '@/app/nft-contracts';
+
 let cache = {};
 let tokenCache = new Map();
 
@@ -102,6 +103,7 @@ async function getAllHolders(contractAddress, tiers, page = 0, pageSize = 1000) 
             total: 0,
             multiplierSum: 0,
             tiers: Array(maxTier + 1).fill(0),
+            claimableRewards: 0,
           });
         }
 
@@ -119,12 +121,30 @@ async function getAllHolders(contractAddress, tiers, page = 0, pageSize = 1000) 
   });
   log(`${contractName} - Total NFTs held after tier check: ${totalNftsHeld}`);
 
+  // Fetch claimable rewards from vault
   const holders = Array.from(holdersMap.values());
+  const rewardCalls = holders.map(holder => ({
+    address: vaultAddresses.element280,
+    abi: element280VaultAbi,
+    functionName: 'claimableReward',
+    args: [holder.wallet],
+  }));
+
+  const rewardResults = await batchMulticall(rewardCalls);
+  holders.forEach((holder, i) => {
+    if (rewardResults[i]?.status === 'success') {
+      holder.claimableRewards = Number(rewardResults[i].result);
+    } else {
+      holder.claimableRewards = 0;
+      log(`${contractName} - Failed to fetch rewards for ${holder.wallet}`);
+    }
+  });
+
   const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
   holders.forEach(holder => {
     holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
     holder.rank = 0;
-    holder.displayMultiplierSum = holder.multiplierSum / 10; // Element280 specific adjustment
+    holder.displayMultiplierSum = holder.multiplierSum / 10;
   });
 
   const sortFn = (a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total;
@@ -216,6 +236,14 @@ async function getHolderData(contractAddress, wallet, tiers) {
   });
   log(`${contractAddress} - Total NFTs for ${wallet} after tier check: ${total}`);
 
+  const rewardResult = await client.readContract({
+    address: vaultAddresses.element280,
+    abi: element280VaultAbi,
+    functionName: 'claimableReward',
+    args: [walletLower],
+  });
+  const claimableRewards = Number(rewardResult) || 0;
+
   const allHolders = await getAllHolders(contractAddress, tiers, 0, 1000);
   const totalMultiplierSum = allHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
   const percentage = totalMultiplierSum > 0 ? (multiplierSum / totalMultiplierSum) * 100 : 0;
@@ -226,13 +254,14 @@ async function getHolderData(contractAddress, wallet, tiers) {
     rank: holder.rank,
     total,
     multiplierSum,
-    displayMultiplierSum: multiplierSum / 10, // Element280 specific adjustment
+    displayMultiplierSum: multiplierSum / 10,
     percentage,
     tiers: tiersArray,
+    claimableRewards,
   };
 
   cache[cacheKey] = { timestamp: now, data: result };
-  log(`${contractAddress} - Final data for ${wallet}: total=${total}, multiplierSum=${multiplierSum}`);
+  log(`${contractAddress} - Final data for ${wallet}: total=${total}, multiplierSum=${multiplierSum}, claimableRewards=${claimableRewards}`);
   return result;
 }
 
@@ -242,7 +271,7 @@ export async function GET(request) {
   const page = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
   const pageSize = Math.max(1, Math.min(1000, parseInt(searchParams.get('pageSize') || '1000', 10)));
 
-  const address = contractAddresses['element280']; // Hardcoded for this endpoint
+  const address = contractAddresses['element280'];
   if (!address) {
     return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
   }

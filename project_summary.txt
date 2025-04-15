@@ -7,6 +7,8 @@ Dependencies from package.json:
   - @tanstack/react-query
   - @wagmi/connectors
   - alchemy-sdk
+  - dotenv
+  - ethers
   - framer-motion
   - next
   - pino-pretty
