@@ -165,6 +165,7 @@ async function getAllHolders(page = 0, pageSize = 1000) {
             pendingDay8: 0,
             pendingDay28: 0,
             pendingDay90: 0,
+            claimableRewards: 0,
           });
         }
         const holder = holdersMap.get(wallet);
@@ -174,12 +175,12 @@ async function getAllHolders(page = 0, pageSize = 1000) {
         holder.shares += shares;
         holder.lockedAscendant += lockedAscendant;
         holder.rewardDebt += rewardDebt;
+        holder.claimableRewards += shares * rewardPerShare - rewardDebt;
         totalLockedAscendant += lockedAscendant;
       }
     }
   });
 
-  // Calculate pending rewards per wallet
   const holders = Array.from(holdersMap.values());
   const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
   const pendingRewardPerShareDay8 = totalShares > 0 ? toDistributeDay8 / totalShares : 0;
@@ -187,8 +188,6 @@ async function getAllHolders(page = 0, pageSize = 1000) {
   const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
 
   holders.forEach(holder => {
-    const currentRewardPerShare = rewardPerShare + pendingRewardPerShareDay8 + pendingRewardPerShareDay28 + pendingRewardPerShareDay90;
-    const totalPending = holder.shares * (currentRewardPerShare - holder.rewardDebt / holder.total);
     holder.pendingDay8 = holder.shares * pendingRewardPerShareDay8;
     holder.pendingDay28 = holder.shares * pendingRewardPerShareDay28;
     holder.pendingDay90 = holder.shares * pendingRewardPerShareDay90;
@@ -197,7 +196,6 @@ async function getAllHolders(page = 0, pageSize = 1000) {
     holder.displayMultiplierSum = holder.multiplierSum;
   });
 
- // holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
   holders.sort((a, b) => b.shares - a.shares || b.multiplierSum - a.multiplierSum || b.total - a.total);
   holders.forEach((holder, index) => (holder.rank = index + 1));
   log(`Final holders count: ${holders.length}`);
@@ -221,13 +219,141 @@ async function getAllHolders(page = 0, pageSize = 1000) {
   return result;
 }
 
+async function getHolderData(wallet) {
+  const contractAddress = contractAddresses.ascendantNFT;
+  const tiers = contractTiers.ascendantNFT;
+  const contractName = 'ascendantNFT';
+  const cacheKey = `${contractAddress}-${wallet}`;
+  const now = Date.now();
+
+  if (cache[cacheKey] && (now - cache[cacheKey].timestamp) < CACHE_TTL) {
+    log(`Returning cached data for ${cacheKey}`);
+    return cache[cacheKey].data;
+  }
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    throw new Error('Invalid wallet address');
+  }
+
+  log(`getHolderData start: wallet=${wallet}, contract=${contractAddress}`);
+  const nfts = await alchemy.nft.getNftsForOwner(wallet, { contractAddresses: [contractAddress] });
+  log(`${contractAddress} - Initial NFTs for ${wallet}: ${nfts.totalCount}`);
+
+  if (nfts.totalCount === 0) return null;
+
+  const walletLower = wallet.toLowerCase();
+  const tokenIds = nfts.ownedNfts.map(nft => BigInt(nft.tokenId));
+  const ownerOfCalls = tokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'ownerOf',
+    args: [tokenId],
+  }));
+
+  const ownerOfResults = await batchMulticall(ownerOfCalls);
+  const validTokenIds = tokenIds.filter((tokenId, i) => {
+    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const cacheKey = `${contractAddress}-${tokenId}-owner`;
+    tokenCache.set(cacheKey, owner);
+    return owner === walletLower;
+  });
+  log(`${contractAddress} - Valid token IDs for ${wallet}: ${validTokenIds.length}`);
+
+  if (validTokenIds.length === 0) return null;
+
+  const tierCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'getNFTAttribute',
+    args: [tokenId],
+  }));
+  const recordCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'userRecords',
+    args: [tokenId],
+  }));
+
+  const [tierResults, recordResults] = await Promise.all([
+    batchMulticall(tierCalls),
+    batchMulticall(recordCalls),
+  ]);
+
+  const rewardPerShare = Number(await client.readContract({
+    address: contractAddress,
+    abi: ascendantAbi,
+    functionName: 'rewardPerShare',
+  }));
+  const maxTier = Math.max(...Object.keys(tiers).map(Number));
+  const tiersArray = Array(maxTier + 1).fill(0);
+  let total = 0;
+  let multiplierSum = 0;
+  let shares = 0;
+  let lockedAscendant = 0;
+  let claimableRewards = 0;
+
+  tierResults.forEach((result, i) => {
+    if (result?.status === 'success') {
+      const tier = Number(result.result[1]);
+      const record = recordResults[i]?.status === 'success' ? recordResults[i].result : [0, 0, 0, 0, 0];
+      const tokenShares = Number(record[0]);
+      const tokenLockedAscendant = Number(record[1]);
+      const rewardDebt = Number(record[2]);
+
+      if (tier >= 1 && tier <= maxTier) {
+        tiersArray[tier] += 1;
+        total += 1;
+        multiplierSum += tiers[tier]?.multiplier || 0;
+        shares += tokenShares;
+        lockedAscendant += tokenLockedAscendant;
+        claimableRewards += tokenShares * rewardPerShare - rewardDebt;
+      }
+    }
+  });
+
+  const allHolders = await getAllHolders(0, 1000);
+  const totalMultiplierSum = allHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+  const percentage = totalMultiplierSum > 0 ? (multiplierSum / totalMultiplierSum) * 100 : 0;
+  const holder = allHolders.holders.find(h => h.wallet === walletLower) || { rank: allHolders.holders.length + 1 };
+
+  const pendingRewardPerShareDay8 = allHolders.totalShares > 0 ? allHolders.toDistributeDay8 / allHolders.totalShares : 0;
+  const pendingRewardPerShareDay28 = allHolders.totalShares > 0 ? allHolders.toDistributeDay28 / allHolders.totalShares : 0;
+  const pendingRewardPerShareDay90 = allHolders.totalShares > 0 ? allHolders.toDistributeDay90 / allHolders.totalShares : 0;
+
+  const result = {
+    wallet: walletLower,
+    rank: holder.rank,
+    total,
+    multiplierSum,
+    displayMultiplierSum: multiplierSum,
+    percentage,
+    tiers: tiersArray,
+    shares,
+    lockedAscendant,
+    pendingDay8: shares * pendingRewardPerShareDay8,
+    pendingDay28: shares * pendingRewardPerShareDay28,
+    pendingDay90: shares * pendingRewardPerShareDay90,
+    claimableRewards,
+  };
+
+  cache[cacheKey] = { timestamp: now, data: result };
+  log(`${contractAddress} - Final data for ${wallet}: total=${total}, shares=${shares}, claimableRewards=${claimableRewards}`);
+  return result;
+}
+
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
+  const wallet = searchParams.get('wallet');
   const page = parseInt(searchParams.get('page') || '0', 10);
   const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
-  log(`Received request: page=${page}, pageSize=${pageSize}`);
+  log(`Received request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
 
   try {
+    if (wallet) {
+      const holderData = await getHolderData(wallet);
+      return NextResponse.json({ holders: holderData ? [holderData] : [] });
+    }
+
     const result = await getAllHolders(page, pageSize);
     return NextResponse.json(result);
   } catch (error) {

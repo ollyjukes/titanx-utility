@@ -6,10 +6,11 @@ clear
 # Define output files
 STRUCTURE_FILE="project_dir_structure.txt"
 CONTENT_FILE="project_text_files.txt"
+ABI_CONTENT_FILE="abi_project_code.txt"
 SUMMARY_FILE="project_summary.txt"
 
 # Clean up previous output files
-rm -f "$STRUCTURE_FILE" "$CONTENT_FILE" "$SUMMARY_FILE"
+rm -f "$STRUCTURE_FILE" "$CONTENT_FILE" "$ABI_CONTENT_FILE" "$SUMMARY_FILE"
 
 # Step 1: Generate directory structure with timestamps
 echo "Generating directory structure..." >&2
@@ -21,29 +22,59 @@ find . -type f \
   -not -name "package-lock.json" \
   -not -name "*.log" \
   \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.mjs" -o -name "*.json" -o -name "*.md" -o -name ".env*" -o -name ".gitignore" \) \
-  -exec sh -c 'file "{}" | grep -q "text" && ls -lrt "{}"' \; > "$STRUCTURE_FILE" 2>> "$SUMMARY_FILE"
+  -exec ls -lrt "{}" \; > "$STRUCTURE_FILE" 2>> "$SUMMARY_FILE"
 if [ $? -ne 0 ]; then
   echo "Error: Failed to generate directory structure" >> "$SUMMARY_FILE"
 fi
+# Explicitly include abi/*.json files in structure
+echo -e "\n--- ABI Directory Files ---" >> "$STRUCTURE_FILE"
+if [ -d "./abi" ]; then
+  find ./abi -type f -name "*.json" -exec ls -lrt "{}" \; >> "$STRUCTURE_FILE" 2>> "$SUMMARY_FILE"
+  if [ $? -eq 0 ] && [ -n "$(find ./abi -type f -name "*.json")" ]; then
+    echo "Successfully included abi/*.json files in structure" >> "$SUMMARY_FILE"
+  else
+    echo "Warning: No .json files found in abi/ or error occurred" >> "$SUMMARY_FILE"
+  fi
+else
+  echo "Error: abi/ directory not found" >> "$SUMMARY_FILE"
+fi
 echo "Directory structure saved to $STRUCTURE_FILE" >&2
 
-# Step 2: Dump file contents (to file only)
-echo "Dumping file contents..." >&2
+# Step 2: Dump non-ABI file contents
+echo "Dumping non-ABI file contents..." >&2
 find . -type f \
   -not -path "./node_modules/*" \
   -not -path "./public/*" \
   -not -path "./.git/*" \
   -not -path "./.next/*" \
+  -not -path "./abi/*" \
   -not -name "package-lock.json" \
   -not -name "*.log" \
   \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.mjs" -o -name "*.json" -o -name "*.md" -o -name ".env*" -o -name ".gitignore" \) \
-  -exec sh -c 'file "{}" | grep -q "text" && echo -e "\n---\nFile: {}" && cat "{}"' \; > "$CONTENT_FILE" 2>> "$SUMMARY_FILE"
-if [ $? -ne 0 ]; then
-  echo "Error: Failed to dump file contents" >> "$SUMMARY_FILE"
+  -exec sh -c 'echo -e "\n---\nFile: {}" && cat "{}"' \; > "$CONTENT_FILE" 2>> "$SUMMARY_FILE"
+if [ $? -eq 0 ] && [ -s "$CONTENT_FILE" ]; then
+  echo "Successfully dumped non-ABI file contents to $CONTENT_FILE" >> "$SUMMARY_FILE"
+else
+  echo "Warning: No non-ABI files found or error occurred" >> "$SUMMARY_FILE"
 fi
-echo "File contents saved to $CONTENT_FILE (not displayed due to size)" >&2
+echo "Non-ABI file contents saved to $CONTENT_FILE" >&2
 
-# Step 3: Generate a project summary
+# Step 3: Dump ABI file contents
+echo "Dumping ABI file contents..." >&2
+echo -e "--- ABI Directory Contents ---" > "$ABI_CONTENT_FILE"
+if [ -d "./abi" ]; then
+  find ./abi -type f -name "*.json" -exec sh -c 'echo -e "\n---\nFile: {}" && cat "{}"' \; >> "$ABI_CONTENT_FILE" 2>> "$SUMMARY_FILE"
+  if [ $? -eq 0 ] && [ -n "$(find ./abi -type f -name "*.json")" ]; then
+    echo "Successfully dumped ABI file contents to $ABI_CONTENT_FILE" >> "$SUMMARY_FILE"
+  else
+    echo "Warning: No .json files found in abi/ or error occurred" >> "$SUMMARY_FILE"
+  fi
+else
+  echo "Error: abi/ directory not found" >> "$SUMMARY_FILE"
+fi
+echo "ABI file contents saved to $ABI_CONTENT_FILE" >&2
+
+# Step 4: Generate a project summary
 echo "Generating project summary..." >&2
 echo "Project Summary" > "$SUMMARY_FILE"
 echo "==============" >> "$SUMMARY_FILE"
@@ -95,7 +126,7 @@ for file in "${REFERENCED_FILES[@]}"; do
 done
 echo "Project summary saved to $SUMMARY_FILE" >&2
 
-# Step 4: Output results to terminal (structure and summary only)
+# Step 5: Output results to terminal (structure and summary only)
 clear
 echo "Project Directory Structure:"
 echo "============================"
@@ -113,6 +144,6 @@ else
   echo "Summary generation failed. Check for errors above." >&2
 fi
 
-echo -e "\nOutput complete. File contents are in $CONTENT_FILE (not shown in terminal due to size)." >&2
-echo "Please share $STRUCTURE_FILE, $CONTENT_FILE, and $SUMMARY_FILE (e.g., 'cat *.txt' or attach files)." >&2
-
+echo -e "\nOutput complete." >&2
+echo "File contents are in $CONTENT_FILE (non-ABI files) and $ABI_CONTENT_FILE (ABI files)." >&2
+echo "Please share $STRUCTURE_FILE, $CONTENT_FILE, $ABI_CONTENT_FILE, and $SUMMARY_FILE (e.g., 'cat *.txt' or attach files)." >&2

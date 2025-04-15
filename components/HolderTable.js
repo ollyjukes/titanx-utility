@@ -1,5 +1,5 @@
 // components/HolderTable.js
-import { memo } from 'react'; // Add memo import
+import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { contractTiers } from "@/app/nft-contracts";
 
@@ -9,9 +9,10 @@ const rowVariants = {
 };
 
 function HolderTable({ holders, contract, loading, totalShares }) {
-  // Filter out null/undefined holders and those without a wallet property
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
   const isAscendant = contract === 'ascendantNFT';
+  const isElement369 = contract === 'element369';
+  const isStax = contract === 'staxNFT';
 
   if (!safeHolders.length) {
     if (loading) {
@@ -23,6 +24,15 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
+                {isElement369 ? (
+                  <>
+                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
+                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
+                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
+                  </>
+                ) : (
+                  <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+                )}
                 {isAscendant ? (
                   <>
                     <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
@@ -58,13 +68,22 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  {isElement369 ? (
+                    <>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                    </>
+                  ) : (
+                    <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  )}
                   {isAscendant ? (
                     <>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                       <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md}px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                     </>
                   ) : (
                     <>
@@ -98,6 +117,15 @@ function HolderTable({ holders, contract, loading, totalShares }) {
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
+            {isElement369 ? (
+              <>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
+              </>
+            ) : (
+              <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+            )}
             {isAscendant ? (
               <>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
@@ -144,20 +172,40 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                 </a>
               </td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total}</td>
+              {isElement369 ? (
+                <>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                    {Math.floor(holder.infernoRewards).toLocaleString()}
+                  </td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                    {Math.floor(holder.fluxRewards).toLocaleString()}
+                  </td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                    {Math.floor(holder.e280Rewards).toLocaleString()}
+                  </td>
+                </>
+              ) : (
+                <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                  {(isStax || isAscendant
+                    ? Math.floor(holder.claimableRewards)
+                    : holder.claimableRewards.toFixed(2)
+                  ).toLocaleString()}
+                </td>
+              )}
               {isAscendant ? (
                 <>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                    {totalShares ? ((holder.shares / totalShares) * 100).toFixed(2) : 'N/A'}%
+                    {totalShares ? ((holder.shares / totalShares) * 100).toFixed(2) : '0.00'}%
                   </td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.shares / 1e18).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.pendingDay8 / 1e18).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.pendingDay28 / 1e18).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{(holder.pendingDay90 / 1e18).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.shares).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay8).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay28).toLocaleString()}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay90).toLocaleString()}</td>
                 </>
               ) : (
                 <>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.percentage.toFixed(2)}%</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.displayMultiplierSum.toFixed(2)}</td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.multiplierSum.toFixed(2)}</td>
                   {Object.keys(tiers)
                     .sort((a, b) => b - a)
                     .map(tier => (
@@ -175,5 +223,4 @@ function HolderTable({ holders, contract, loading, totalShares }) {
   );
 }
 
-// Export as memoized component to reduce unnecessary re-renders
 export default memo(HolderTable);
