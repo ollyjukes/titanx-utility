@@ -100,11 +100,20 @@ export default function NFTPage({ contractKey }) {
           totalTokens = uniqueHolders.reduce((sum, h) => sum + (h.total || 0), 0);
         }
 
-        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
-        uniqueHolders.forEach((holder, index) => {
-          holder.rank = index + 1;
-          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-        });
+        if (contractKey === 'ascendantNFT') {
+          // Preserve API's shares-based sorting
+          uniqueHolders.forEach((holder, index) => {
+            holder.rank = index + 1; // Retain API rank, though not strictly necessary
+            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+          });
+        } else {
+          // Sort by multiplierSum for other contracts
+          uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
+          uniqueHolders.forEach((holder, index) => {
+            holder.rank = index + 1;
+            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+          });
+        }
 
         const fetchedData = {
           holders: uniqueHolders,

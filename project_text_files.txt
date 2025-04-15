@@ -612,22 +612,6 @@ export default function Mining() {
   );
 }-e 
 ---
-File: ./app/moonmath/page.js
-// app/moonmath/page.js
-
-export default function MoonMath() {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16 text-center">
-          <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight">TitanX MoonMath</h1>
-          <p className="mt-4 text-lg sm:text-xl text-gray-300">
-            This page is under construction. Stay tuned for more about the TitanX Moon Math fun
-          </p>
-        </main>
-      </div>
-    );
-  }-e 
----
 File: ./app/api/holders/Stax/route.js
 // app/api/holders/Stax/route.js
 import { NextResponse } from 'next/server';
@@ -1450,7 +1434,8 @@ async function getAllHolders(page = 0, pageSize = 1000) {
     holder.displayMultiplierSum = holder.multiplierSum;
   });
 
-  holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+ // holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+  holders.sort((a, b) => b.shares - a.shares || b.multiplierSum - a.multiplierSum || b.total - a.total);
   holders.forEach((holder, index) => (holder.rank = index + 1));
   log(`Final holders count: ${holders.length}`);
 
@@ -2081,142 +2066,6 @@ export default function LoadingIndicator({ status }) {
   );
 }-e 
 ---
-File: ./components/useNFTHolders.js
-"use client";
-import { useState, useEffect, useCallback } from "react";
-import { contractAddresses } from "../app/nft-contracts";
-
-export default function useNFTHolders(dataCache) {
-  const [holders, setHolders] = useState(dataCache);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [searchAddress, setSearchAddress] = useState("");
-  const [searchResult, setSearchResult] = useState(null);
-  const [activeTab, setActiveTab] = useState("element280");
-  const [isModalOpen, setIsModalOpen] = useState(false);
-
-  const closeModal = () => setIsModalOpen(false);
-
-  const loadAllData = useCallback(async () => {
-    setLoading(true);
-    setStatus("Fetching holders...");
-    setProgress(0);
-    try {
-      const contracts = ["element280", "staxNFT", "element369"];
-      const results = await Promise.all(
-        contracts.map(async (contract, i) => {
-          let page = 0;
-          let totalPages = 1;
-          const pageSize = 500;
-          let holderMap = new Map();
-
-          do {
-            const response = await fetch(
-              `/api/holders?contract=${contract}&address=${contractAddresses[contract]}&page=${page}&pageSize=${pageSize}`
-            );
-            if (!response.ok) throw new Error(`Failed to fetch ${contract} holders, page ${page}`);
-            const data = await response.json();
-            const holdersArray = Array.isArray(data.holders) ? data.holders : [];
-
-            holdersArray.forEach((holder) => {
-              const existing = holderMap.get(holder.wallet);
-              if (existing) {
-                existing.total += holder.total;
-                existing.multiplierSum += holder.multiplierSum;
-                existing.percentage += holder.percentage;
-                existing.tiers = existing.tiers.map((t, idx) => t + (holder.tiers[idx] || 0));
-                existing.rank = Math.min(existing.rank, holder.rank);
-                existing.displayMultiplierSum += holder.displayMultiplierSum;
-              } else {
-                holderMap.set(holder.wallet, { ...holder });
-              }
-            });
-
-            totalPages = data.totalPages || 1;
-            page++;
-          } while (page < totalPages);
-
-          const allHolders = Array.from(holderMap.values());
-          const totalMultiplierSum = allHolders.reduce((sum, h) => sum + h.multiplierSum, 0);
-          allHolders.forEach((holder) => {
-            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-            holder.displayMultiplierSum = contract === "element280" ? holder.multiplierSum / 10 : holder.multiplierSum;
-          });
-          allHolders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-          allHolders.forEach((holder, index) => (holder.rank = index + 1));
-
-          setProgress(((i + 1) / contracts.length) * 100);
-          return [contract, allHolders];
-        })
-      );
-
-      const updatedHolders = Object.fromEntries(results);
-      setHolders(updatedHolders);
-      Object.assign(dataCache, updatedHolders);
-      setStatus("Holders loaded successfully!");
-    } catch (error) {
-      console.error(`Error fetching holders: ${error.message}`);
-      setStatus(`Error: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [dataCache]);
-
-  const handleSearch = useCallback(() => {
-    if (!searchAddress) {
-      setSearchResult(null);
-      setIsModalOpen(false);
-      setStatus("");
-      return;
-    }
-
-    setLoading(true);
-    setStatus(`Searching for address ${searchAddress}...`);
-
-    // Search across all contracts
-    const contracts = ["element280", "staxNFT", "element369"];
-    const searchResults = {};
-
-    contracts.forEach((contract) => {
-      const contractHolders = holders[contract] || [];
-      const foundHolder = contractHolders.find(
-        (holder) => holder.wallet.toLowerCase() === searchAddress.toLowerCase()
-      );
-      searchResults[contract] = foundHolder || null;
-    });
-
-    console.log("Search results across contracts:", searchResults);
-
-    // Check if any results were found
-    const hasResults = Object.values(searchResults).some((result) => result !== null);
-
-    setSearchResult(searchResults);
-    setIsModalOpen(true);
-    setStatus(hasResults ? "Search completed!" : "No results found for this address across all contracts.");
-    setLoading(false);
-  }, [searchAddress, holders]);
-
-  useEffect(() => {
-    loadAllData();
-  }, [loadAllData]);
-
-  return {
-    holders,
-    loading,
-    status,
-    progress,
-    searchResult,
-    setSearchAddress,
-    handleSearch,
-    loadAllData,
-    activeTab,
-    setActiveTab,
-    isModalOpen,
-    closeModal,
-  };
-}-e 
----
 File: ./components/NFTPage.js
 // components/NFTPage.js
 'use client';
@@ -2412,60 +2261,6 @@ export default function NFTPage({ contractKey }) {
     </div>
   );
 }-e 
----
-File: ./components/SearchBar.js
-// app/components/SearchBar.js
-export default function SearchBar({ setSearchAddress, handleSearch, loading }) {
-    return (
-      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 mb-4 w-full">
-        <input
-          type="text"
-          onChange={(e) => setSearchAddress(e.target.value)}
-          placeholder="Enter wallet address (0x...)"
-          className="p-2 sm:p-3 w-full sm:w-96 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed transition-shadow text-sm sm:text-base bg-gray-900 text-white"
-          disabled={loading}
-        />
-        <button
-          onClick={handleSearch}
-          disabled={loading}
-          className="p-2 sm:p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors shadow-md text-sm sm:text-base"
-        >
-          Search
-        </button>
-      </div>
-    );
-  }-e 
----
-File: ./components/ProtocolTabs.js
-// app/components/ProtocolTabs.js
-export default function ProtocolTabs({ activeTab, setActiveTab, loading }) {
-    const tabs = [
-      { id: "element280", label: "Element 280" },
-      { id: "staxNFT", label: "Stax NFT" },
-      { id: "element369", label: "Element 369" },
-    ];
-  
-    return (
-      <nav className="px-4 sm:px-6 py-2 sm:py-4 border-b border-gray-700">
-        <div className="flex flex-wrap gap-2 sm:gap-4">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              disabled={loading}
-              className={`py-2 px-3 sm:py-3 sm:px-6 font-medium text-gray-300 rounded-t-lg transition-all duration-200 text-sm sm:text-base ${
-                activeTab === tab.id
-                  ? "bg-blue-600 text-white shadow-md"
-                  : "bg-gray-700 hover:bg-gray-600 hover:text-white"
-              } ${loading ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </nav>
-    );
-  }-e 
 ---
 File: ./components/SearchResultsModal.js
 // components/SearchResultsModal.js
@@ -2836,6 +2631,220 @@ yarn-error.log*
 # typescript (optional if no TS)
 *.tsbuildinfo
 next-env.d.ts-e 
+---
+File: ./scripts/verifyContracts.js
+// scripts/verifyContracts.js
+import { tokenContracts } from '../app/token_contracts.js';
+
+Object.entries(tokenContracts).forEach(([key, config]) => {
+  console.log(`${key}: ${config.address}`);
+});-e 
+---
+File: ./scripts/again.js
+import { getAddress } from 'viem';
+
+const address = '0x58aD6ef28BfB092635454D02303aBbd4D87b503C';
+console.log('Checksummed address:', getAddress(address));-e 
+---
+File: ./scripts/checkEnv.js
+// scripts/checkEnv.js
+import dotenv from 'dotenv';
+dotenv.config({ path: '/Users/ollyjukes/nextjs.projects/titanx-utility/.env.local' });
+
+console.log('Alchemy API Key:', process.env.NEXT_PUBLIC_ALCHEMY_API_KEY);-e 
+---
+File: ./scripts/testContract.js
+// scripts/testContract.js
+import dotenv from 'dotenv';
+dotenv.config({ path: '/Users/ollyjukes/nextjs.projects/titanx-utility/.env.local' });
+
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import { tokenContracts, uniswapV2PoolABI } from '../app/token_contracts.js';
+
+const client = createPublicClient({
+  chain: mainnet,
+  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`),
+});
+
+async function test() {
+  try {
+    console.log('Alchemy API Key:', process.env.NEXT_PUBLIC_ALCHEMY_API_KEY);
+
+    // Flare Auction
+    console.log('Flare address:', tokenContracts.FLARE_AUCTION.address);
+    let flareTimestamp = 0;
+    try {
+      flareTimestamp = await client.readContract({
+        address: tokenContracts.FLARE_AUCTION.address,
+        abi: tokenContracts.FLARE_AUCTION.abi,
+        functionName: 'startTimestamp',
+      });
+      console.log('Flare startTimestamp:', flareTimestamp);
+    } catch (e) {
+      console.log('Flare startTimestamp failed:', e.shortMessage);
+      console.log('Assuming startTimestamp is 0 (auction not started)');
+    }
+
+    try {
+      const auctionState = await client.readContract({
+        address: tokenContracts.FLARE_AUCTION.address,
+        abi: tokenContracts.FLARE_AUCTION.abi,
+        functionName: 'state',
+      });
+      console.log('Flare auction state:', auctionState);
+    } catch (e) {
+      console.log('Flare state failed:', e.shortMessage);
+    }
+
+    if (flareTimestamp > 0) {
+      const flareDay = Math.max(1, Math.floor((Date.now() / 1000 - Number(flareTimestamp)) / (24 * 60 * 60)) + 1);
+      try {
+        const flareStats = await client.readContract({
+          address: tokenContracts.FLARE_AUCTION.address,
+          abi: tokenContracts.FLARE_AUCTION.abi,
+          functionName: 'dailyStats',
+          args: [flareDay],
+        });
+        console.log('Flare dailyStats:', flareStats);
+      } catch (e) {
+        console.log('Flare dailyStats failed:', e.shortMessage);
+      }
+    } else {
+      console.log('Skipping Flare dailyStats: Auction not started');
+    }
+
+    // Ascendant Auction
+    console.log('Ascendant address:', tokenContracts.ASCENDANT_AUCTION.address);
+    let ascendantTimestamp = 0;
+    try {
+      ascendantTimestamp = await client.readContract({
+        address: tokenContracts.ASCENDANT_AUCTION.address,
+        abi: tokenContracts.ASCENDANT_AUCTION.abi,
+        functionName: 'startTimestamp',
+      });
+      console.log('Ascendant startTimestamp:', ascendantTimestamp);
+    } catch (e) {
+      console.log('Ascendant startTimestamp failed:', e.shortMessage);
+      console.log('Assuming startTimestamp is 0 (auction not started)');
+    }
+
+    if (ascendantTimestamp > 0) {
+      const ascendantDay = Math.max(1, Math.floor((Date.now() / 1000 - Number(ascendantTimestamp)) / (24 * 60 * 60)) + 1);
+      try {
+        const ascendantStats = await client.readContract({
+          address: tokenContracts.ASCENDANT_AUCTION.address,
+          abi: tokenContracts.ASCENDANT_AUCTION.abi,
+          functionName: 'dailyStats',
+          args: [ascendantDay],
+        });
+        console.log('Ascendant dailyStats:', ascendantStats);
+      } catch (e) {
+        console.log('Ascendant dailyStats failed:', e.shortMessage);
+      }
+    } else {
+      console.log('Skipping Ascendant dailyStats: Auction not started');
+    }
+
+    // Flare/X28 Pool
+    console.log('Flare/X28 address:', tokenContracts.FLARE_X28.address);
+    try {
+      const flareX28Reserves = await client.readContract({
+        address: tokenContracts.FLARE_X28.address,
+        abi: uniswapV2PoolABI,
+        functionName: 'getReserves',
+      });
+      console.log('Flare/X28 reserves:', flareX28Reserves);
+    } catch (e) {
+      console.log('Flare/X28 reserves failed:', e.shortMessage);
+    }
+
+    try {
+      const flareX28Token0 = await client.readContract({
+        address: tokenContracts.FLARE_X28.address,
+        abi: uniswapV2PoolABI,
+        functionName: 'token0',
+      });
+      console.log('Flare/X28 token0:', flareX28Token0);
+    } catch (e) {
+      console.log('Flare/X28 token0 failed:', e.shortMessage);
+    }
+  } catch (error) {
+    console.error('General error:', error);
+  }
+}
+
+test();-e 
+---
+File: ./scripts/testAscendantOrder.js
+// scripts/testAscendantWallet.js
+
+async function fetchAscendantHoldersForWallet(targetWallet) {
+    const targetWalletLower = targetWallet.toLowerCase(); // Normalize for comparison
+    try {
+      // Fetch from the Next.js server
+      const res = await fetch('http://localhost:3000/api/holders/Ascendant?page=0&pageSize=1000');
+      if (!res.ok) {
+        throw new Error(`Failed to fetch: ${res.status} ${res.statusText}`);
+      }
+      const data = await res.json();
+  
+      // Validate response
+      if (!data.holders || !Array.isArray(data.holders)) {
+        throw new Error('Invalid response: holders data is missing or not an array');
+      }
+  
+      // Find the target wallet
+      const targetHolder = data.holders.find(
+        (holder) => holder && holder.wallet && holder.wallet.toLowerCase() === targetWalletLower
+      );
+  
+      // Display target wallet details
+      console.log(`\nDetails for Wallet ${targetWallet}:`);
+      if (targetHolder) {
+        console.log(
+          `Rank: ${targetHolder.rank},\n` +
+          `Wallet: ${targetHolder.wallet},\n` +
+          `Shares: ${(targetHolder.shares / 1e18).toLocaleString()},\n` +
+          `% Shares: ${data.totalShares ? ((targetHolder.shares / data.totalShares) * 100).toFixed(2) : 'N/A'}%,\n` +
+          `Total NFTs: ${targetHolder.total},\n` +
+          `Locked Ascendant: ${(targetHolder.lockedAscendant / 1e18).toLocaleString()},\n` +
+          `Pending DAY8 Rewards: ${(targetHolder.pendingDay8 / 1e18).toLocaleString()},\n` +
+          `Pending DAY28 Rewards: ${(targetHolder.pendingDay28 / 1e18).toLocaleString()},\n` +
+          `Pending DAY90 Rewards: ${(targetHolder.pendingDay90 / 1e18).toLocaleString()}`
+        );
+      } else {
+        console.log('This wallet does not hold any Ascendant NFTs.');
+      }
+  
+      // Display top 5 holders for context (ordered by shares)
+      console.log('\nTop 5 Ascendant Holders Ordered by Shares:');
+      data.holders.slice(0, 5).forEach((holder, index) => {
+        if (holder && holder.wallet && typeof holder.shares === 'number' && typeof holder.total === 'number') {
+          console.log(
+            `Rank ${index + 1}: Wallet ${holder.wallet.slice(0, 6)}...${holder.wallet.slice(-4)}, ` +
+            `Shares: ${(holder.shares / 1e18).toLocaleString()}, ` +
+            `% Shares: ${data.totalShares ? ((holder.shares / data.totalShares) * 100).toFixed(2) : 'N/A'}%, ` +
+            `Total NFTs: ${holder.total}`
+          );
+        } else {
+          console.warn(`Invalid holder data at index ${index}:`, holder);
+        }
+      });
+  
+      // Log total stats
+      console.log('\nCollection Summary:');
+      console.log(`Total Holders: ${data.holders.length}`);
+      console.log(`Total Shares: ${(data.totalShares / 1e18).toLocaleString()}`);
+      console.log(`Total NFTs: ${data.totalTokens.toLocaleString()}`);
+      console.log(`Total Pending Rewards: ${(data.pendingRewards / 1e18).toLocaleString()}`);
+    } catch (err) {
+      console.error('Error:', err.message);
+    }
+  }
+  
+  // Run the function for the specified wallet
+  fetchAscendantHoldersForWallet('0xF98f0ee190d9f2E6531E226933f1E47a2890CbDA');-e 
 ---
 File: ./eslint.config.mjs
 import { dirname } from "path";
