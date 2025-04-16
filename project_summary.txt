@@ -15,6 +15,7 @@ Dependencies from package.json:
   - react
   - react-dom
   - react-virtualized
+  - uuid
   - viem
   - wagmi
   - zustand

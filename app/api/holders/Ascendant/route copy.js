@@ -8,25 +8,33 @@ import ascendantABI from '../../../../abi/ascendantNFT.json';
 let cache = {};
 let tokenCache = new Map();
 
-// Utility to sanitize BigInt values
-function sanitizeBigInt(obj) {
+// Utility to sanitize BigInt values by converting them to strings
+function sanitizeBigInt(obj, path = 'root') {
   if (typeof obj === 'bigint') {
+    log(`[BigInt Detected] at ${path}: ${obj}`);
     return obj.toString();
   }
   if (Array.isArray(obj)) {
-    return obj.map((item) => sanitizeBigInt(item));
+    return obj.map((item, i) => sanitizeBigInt(item, `${path}[${i}]`));
   }
   if (typeof obj === 'object' && obj !== null) {
     const sanitized = {};
     for (const [key, value] of Object.entries(obj)) {
-      sanitized[key] = sanitizeBigInt(value);
+      sanitized[key] = sanitizeBigInt(value, `${path}.${key}`);
     }
     return sanitized;
   }
   return obj;
 }
 
-// Utility to serialize response objects
+// Utility to safely log objects containing BigInt
+function safeLog(obj) {
+  return JSON.stringify(obj, (key, value) =>
+    typeof value === 'bigint' ? value.toString() : value
+  );
+}
+
+// Utility to safely serialize response objects containing BigInt
 function safeSerialize(obj) {
   return JSON.parse(JSON.stringify(obj, (key, value) =>
     typeof value === 'bigint' ? value.toString() : value
@@ -41,9 +49,11 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
   const now = Date.now();
 
   if (cache[cacheKey] && now - cache[cacheKey].timestamp < CACHE_TTL) {
+    log(`[${requestId}] Returning cached data for ${cacheKey}`);
     return cache[cacheKey].data;
   }
 
+  log(`[${requestId}] Fetching holders, page=${page}, pageSize=${pageSize}`);
   if (!contractAddress || !tiers) {
     throw new Error('Missing contract address or tiers');
   }
@@ -54,6 +64,7 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
         return await fn();
       } catch (error) {
         if (i === attempts - 1) throw error;
+        log(`[${requestId}] Retry ${i + 1}/${attempts} failed: ${error.message}`);
         await new Promise((res) => setTimeout(res, delay * 2 ** i));
       }
     }
@@ -72,34 +83,45 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
     owners = owners.concat(response.owners);
     pageKey = response.pageKey;
   } while (pageKey);
+  log(`[${requestId}] Raw owners count: ${owners.length}`);
 
   const burnAddress = '0x0000000000000000000000000000000000000000';
   const filteredOwners = owners.filter(
     (owner) => owner?.ownerAddress && owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances?.length > 0
   );
+  log(`[${requestId}] Filtered live owners count: ${filteredOwners.length}`);
 
   const tokenOwnerMap = new Map();
   let totalTokens = 0;
   filteredOwners.forEach((owner) => {
-    if (!owner.ownerAddress) return;
+    if (!owner.ownerAddress) {
+      log(`[${requestId}] Skipping owner with missing ownerAddress`);
+      return;
+    }
     let wallet;
     try {
       wallet = getAddress(owner.ownerAddress);
     } catch (e) {
+      log(`[${requestId}] Invalid ownerAddress: ${owner.ownerAddress}, error: ${e.message}`);
       return;
     }
     owner.tokenBalances.forEach((tb) => {
-      if (!tb.tokenId) return;
+      if (!tb.tokenId) {
+        log(`[${requestId}] Skipping token with missing tokenId for owner ${wallet}`);
+        return;
+      }
       const tokenId = Number(tb.tokenId);
       tokenOwnerMap.set(tokenId, wallet);
       totalTokens++;
     });
   });
+  log(`[${requestId}] Total tokens checked: ${totalTokens}`);
 
   const allTokenIds = Array.from(tokenOwnerMap.keys());
   const start = page * pageSize;
   const end = Math.min(start + pageSize, allTokenIds.length);
   const paginatedTokenIds = allTokenIds.slice(start, end);
+  log(`[${requestId}] Paginated token IDs: ${paginatedTokenIds.length}`);
 
   if (paginatedTokenIds.length === 0) {
     const result = {
@@ -132,13 +154,18 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
     args: [BigInt(tokenId)],
   }));
 
+  log(`[${requestId}] Tier calls: ${safeLog(tierCalls.map((c) => ({ tokenId: c.args[0], functionName: c.functionName })))}`);
+  log(`[${requestId}] Record calls: ${safeLog(recordCalls.map((c) => ({ tokenId: c.args[0], functionName: c.functionName })))}`);
+
   const [rawTierResults, rawRecordResults] = await Promise.all([
     retry(() => batchMulticall(tierCalls)),
     retry(() => batchMulticall(recordCalls)),
   ]);
 
-  const tierResults = sanitizeBigInt(rawTierResults);
-  const recordResults = sanitizeBigInt(rawRecordResults);
+  log(`[${requestId}] Raw tierResults: ${safeLog(rawTierResults)}`);
+
+  const tierResults = sanitizeBigInt(rawTierResults, 'tierResults');
+  const recordResults = sanitizeBigInt(rawRecordResults, 'recordResults');
 
   const totalSharesRaw = await retry(() =>
     client.readContract({
@@ -183,7 +210,10 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
   const walletTokenIds = new Map();
   paginatedTokenIds.forEach((tokenId) => {
     const wallet = tokenOwnerMap.get(tokenId);
-    if (!wallet) return;
+    if (!wallet) {
+      log(`[${requestId}] Skipping token ${tokenId}: no wallet found`);
+      return;
+    }
     if (!walletTokenIds.has(wallet)) {
       walletTokenIds.set(wallet, []);
     }
@@ -197,12 +227,17 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
     args: [tokenIds.map((id) => BigInt(id))],
   }));
 
+  log(`[${requestId}] Claimable calls: ${safeLog(claimableCalls.map((c) => ({ tokenIds: c.args[0] })))}`);
+
   const rawClaimableResults = await retry(() => batchMulticall(claimableCalls));
-  const claimableResults = sanitizeBigInt(rawClaimableResults);
+  const claimableResults = sanitizeBigInt(rawClaimableResults, 'claimableResults');
 
   paginatedTokenIds.forEach((tokenId, i) => {
     const wallet = tokenOwnerMap.get(tokenId);
-    if (!wallet) return;
+    if (!wallet) {
+      log(`[${requestId}] Skipping token ${tokenId}: no wallet found in holdersMap`);
+      return;
+    }
     if (!holdersMap.has(wallet)) {
       holdersMap.set(wallet, {
         wallet,
@@ -232,6 +267,8 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
       holder.tiers[tier] += 1;
       holder.total += 1;
       holder.multiplierSum += tiers[tier]?.multiplier || 0;
+    } else {
+      log(`[${requestId}] Invalid tier ${tier} for tokenId ${tokenId}: ${safeLog(tierResult)}`);
     }
 
     const recordResult = recordResults[i];
@@ -243,6 +280,8 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
       holder.shares += shares;
       holder.lockedAscendant += lockedAscendant;
       totalLockedAscendant += lockedAscendant;
+    } else {
+      log(`[${requestId}] Invalid recordResult for tokenId ${tokenId}: ${safeLog(recordResult)}`);
     }
   });
 
@@ -250,12 +289,15 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
   for (const [wallet, tokenIds] of walletTokenIds.entries()) {
     const holder = holdersMap.get(wallet);
     if (!holder) {
+      log(`[${requestId}] Skipping claimable for wallet ${wallet}: no holder found`);
       claimableIndex++;
       continue;
     }
     if (claimableResults[claimableIndex]?.status === 'success') {
       const claimableRaw = claimableResults[claimableIndex].result || '0';
       holder.claimableRewards = parseFloat(formatUnits(claimableRaw, 18));
+    } else {
+      holder.claimableRewards = 0;
     }
     claimableIndex++;
   }
@@ -303,15 +345,14 @@ async function getHolderData(wallet, requestId = '') {
   const cacheKey = `${contractAddress}-${wallet}`;
   const now = Date.now();
 
-  if (cache[cacheKey] && now - cache[cacheKey].timestamp < CACHE_TTL) {
-    return cache[cacheKey].data;
-  }
+  delete cache[cacheKey]; // Force fresh data
 
   if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
     throw new Error('Invalid wallet address');
   }
 
   const checksummedWallet = getAddress(wallet);
+  log(`[${requestId}] getHolderData start: wallet=${checksummedWallet}, contract=${contractAddress}`);
 
   const retry = async (fn, attempts = 3, delay = 1000) => {
     for (let i = 0; i < attempts; i++) {
@@ -319,6 +360,7 @@ async function getHolderData(wallet, requestId = '') {
         return await fn();
       } catch (error) {
         if (i === attempts - 1) throw error;
+        log(`[${requestId}] Retry ${i + 1}/${attempts} failed: ${error.message}`);
         await new Promise((res) => setTimeout(res, delay * 2 ** i));
       }
     }
@@ -327,12 +369,14 @@ async function getHolderData(wallet, requestId = '') {
   const nfts = await retry(() =>
     alchemy.nft.getNftsForOwner(checksummedWallet, { contractAddresses: [contractAddress] })
   );
+  log(`[${requestId}] ${contractAddress} - Initial NFTs for ${checksummedWallet}: ${nfts.totalCount}`);
 
   if (nfts.totalCount === 0) return null;
 
   const tokenIds = nfts.ownedNfts
     .filter((nft) => nft.contract.address.toLowerCase() === contractAddress.toLowerCase())
     .map((nft) => Number(nft.tokenId));
+  log(`[${requestId}] ${contractAddress} - Token IDs for ${checksummedWallet}: [${tokenIds.join(', ')}]`);
 
   if (tokenIds.length === 0) return null;
 
@@ -357,15 +401,21 @@ async function getHolderData(wallet, requestId = '') {
     },
   ];
 
+  log(`[${requestId}] Tier calls: ${safeLog(tierCalls.map((c) => ({ tokenId: c.args[0], functionName: c.functionName })))}`);
+  log(`[${requestId}] Record calls: ${safeLog(recordCalls.map((c) => ({ tokenId: c.args[0], functionName: c.functionName })))}`);
+  log(`[${requestId}] Claimable call: ${safeLog(claimableCall)}`);
+
   const [rawTierResults, rawRecordResults, rawClaimableResults] = await Promise.all([
     retry(() => batchMulticall(tierCalls)),
     retry(() => batchMulticall(recordCalls)),
     retry(() => batchMulticall(claimableCall)),
   ]);
 
-  const tierResults = sanitizeBigInt(rawTierResults);
-  const recordResults = sanitizeBigInt(rawRecordResults);
-  const claimableResults = sanitizeBigInt(rawClaimableResults);
+  log(`[${requestId}] Raw tierResults: ${safeLog(rawTierResults)}`);
+
+  const tierResults = sanitizeBigInt(rawTierResults, 'tierResults');
+  const recordResults = sanitizeBigInt(rawRecordResults, 'recordResults');
+  const claimableResults = sanitizeBigInt(rawClaimableResults, 'claimableResults');
 
   let claimableRewards = 0;
   if (claimableResults[0]?.status === 'success') {
@@ -394,6 +444,8 @@ async function getHolderData(wallet, requestId = '') {
       tiersArray[tier] += 1;
       total += 1;
       multiplierSum += tiers[tier]?.multiplier || 0;
+    } else {
+      log(`[${requestId}] Invalid tier ${tier} for tokenId ${tokenId}: ${safeLog(tierResult)}`);
     }
 
     const recordResult = recordResults[i];
@@ -404,6 +456,8 @@ async function getHolderData(wallet, requestId = '') {
       const tokenLockedAscendant = parseFloat(formatUnits(lockedAscendantRaw, 18));
       shares += tokenShares;
       lockedAscendant += tokenLockedAscendant;
+    } else {
+      log(`[${requestId}] Invalid recordResult for tokenId ${tokenId}: ${safeLog(recordResult)}`);
     }
   });
 
@@ -482,6 +536,7 @@ export async function GET(request) {
   const wallet = searchParams.get('wallet');
   const page = parseInt(searchParams.get('page') || '0', 10);
   const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
+  log(`[${requestId}] Received request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
 
   try {
     if (wallet) {

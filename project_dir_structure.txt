@@ -13,11 +13,11 @@
 -rw-r--r--@ 1 ollyjukes  staff  1098  9 Apr 16:16 ./app/store.js
 -rw-r--r--@ 1 ollyjukes  staff  1763  8 Apr 11:49 ./app/about/page.js
 -rw-r--r--@ 1 ollyjukes  staff  3071  5 Apr 18:48 ./app/mining/page.js
--rw-r--r--@ 1 ollyjukes  staff  7926 15 Apr 16:45 ./app/api/holders/Stax/route.js
+-rw-r--r--@ 1 ollyjukes  staff  6726 15 Apr 17:13 ./app/api/holders/Stax/route.js
 -rw-r--r--@ 1 ollyjukes  staff  291  7 Apr 12:35 ./app/api/holders/E280/route.js
 -rw-r--r--@ 1 ollyjukes  staff  10649 15 Apr 10:37 ./app/api/holders/Element280/route.js
 -rw-r--r--@ 1 ollyjukes  staff  7422 15 Apr 15:25 ./app/api/holders/Element369/route.js
--rw-r--r--@ 1 ollyjukes  staff  12874 15 Apr 10:40 ./app/api/holders/Ascendant/route.js
+-rw-r--r--@ 1 ollyjukes  staff  18812 16 Apr 00:03 ./app/api/holders/Ascendant/route.js
 -rw-r--r--@ 1 ollyjukes  staff  2975 15 Apr 16:38 ./app/api/utils.js
 -rw-r--r--@ 1 ollyjukes  staff  380 14 Apr 11:26 ./app/layout.css
 -rw-r--r--@ 1 ollyjukes  staff  3426 14 Apr 11:26 ./app/auctions/page.js
@@ -40,8 +40,9 @@
 -rw-r--r--@ 1 ollyjukes  staff  2355  9 Apr 16:32 ./components/SearchResultsModal.js
 -rw-r--r--@ 1 ollyjukes  staff  8948  9 Apr 16:37 ./components/Navbar.jsx
 -rw-r--r--@ 1 ollyjukes  staff  517 29 Mar 20:39 ./.gitignore
--rw-r--r--@ 1 ollyjukes  staff  813 15 Apr 16:38 ./package.json
+-rw-r--r--@ 1 ollyjukes  staff  836 15 Apr 17:36 ./package.json
 -rw-r--r--@ 1 ollyjukes  staff  198 13 Apr 22:18 ./scripts/verifyContracts.js
+-rw-r--r--@ 1 ollyjukes  staff  12494 15 Apr 19:42 ./scripts/ascendantWalletData.js
 -rw-r--r--@ 1 ollyjukes  staff  827 15 Apr 13:04 ./scripts/checkTokens.js
 -rw-r--r--@ 1 ollyjukes  staff  155 13 Apr 22:17 ./scripts/again.js
 -rw-r--r--@ 1 ollyjukes  staff  213 13 Apr 22:41 ./scripts/checkEnv.js
