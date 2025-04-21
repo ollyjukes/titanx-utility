@@ -40,24 +40,29 @@ else
 fi
 echo "Directory structure saved to $STRUCTURE_FILE" >&2
 
-# Step 2: Dump non-ABI file contents
-echo "Dumping non-ABI file contents..." >&2
+# Step 2: Dump non-ABI file contents plus specific Element280 ABI JSONs
+echo "Dumping non-ABI file contents and Element280 ABI JSONs..." >&2
+CONTENT_FILE="project_text_files.txt"
+> "$CONTENT_FILE"  # Clear the file first
 find . -type f \
   -not -path "./node_modules/*" \
   -not -path "./public/*" \
   -not -path "./.git/*" \
   -not -path "./.next/*" \
-  -not -path "./abi/*" \
-  -not -name "package-lock.json" \
+  -not -path "./scripts/*" \
+  \( -path "./abi/element280.json" -o -path "./abi/element280Vault.json" \
+     -o -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" \
+     -o -name "*.css" -o -name "*.mjs" -o -name "*.md" -o -name ".env*" \
+     -o -name ".gitignore" \) \
+  -not -name "*.json" \
   -not -name "*.log" \
-  \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.mjs" -o -name "*.json" -o -name "*.md" -o -name ".env*" -o -name ".gitignore" \) \
-  -exec sh -c 'echo -e "\n---\nFile: {}" && cat "{}"' \; > "$CONTENT_FILE" 2>> "$SUMMARY_FILE"
+  -exec sh -c 'echo -e "\n---\nFile: {}" && cat "{}"' \; >> "$CONTENT_FILE" 2>> "$SUMMARY_FILE"
 if [ $? -eq 0 ] && [ -s "$CONTENT_FILE" ]; then
-  echo "Successfully dumped non-ABI file contents to $CONTENT_FILE" >> "$SUMMARY_FILE"
+  echo "Successfully dumped non-ABI files and Element280 ABI JSONs to $CONTENT_FILE" >> "$SUMMARY_FILE"
 else
-  echo "Warning: No non-ABI files found or error occurred" >> "$SUMMARY_FILE"
+  echo "Warning: No files found or error occurred" >> "$SUMMARY_FILE"
 fi
-echo "Non-ABI file contents saved to $CONTENT_FILE" >&2
+echo "Non-ABI file contents and Element280 ABI JSONs saved to $CONTENT_FILE" >&2
 
 # Step 3: Dump ABI file contents
 echo "Dumping ABI file contents..." >&2

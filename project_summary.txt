@@ -4,17 +4,27 @@ Project Summary
 Directory Tree: (Install 'tree' with 'brew install tree' for this feature)
 
 Dependencies from package.json:
+  - @covalenthq/client-sdk
   - @tanstack/react-query
   - @wagmi/connectors
   - alchemy-sdk
+  - async-mutex
+  - chart.js
   - dotenv
   - ethers
   - framer-motion
+  - minimist
   - next
+  - node-fetch
+  - p-limit
+  - pino
   - pino-pretty
   - react
+  - react-chartjs-2
   - react-dom
   - react-virtualized
+  - sqlite
+  - sqlite3
   - uuid
   - viem
   - wagmi
@@ -29,3 +39,4 @@ Dev Dependencies from package.json:
 
 Referenced Files Not Found:
 ---------------------------
+- ./app/nft/ETH/Element280/page.js (Referenced but not found in project structure)

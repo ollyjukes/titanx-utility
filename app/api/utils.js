@@ -24,7 +24,8 @@ export const client = createPublicClient({
   chain: mainnet,
   transport: http(
     process.env.ETH_RPC_URL ||
-    `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`
+    `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`,
+    { timeout: 60000 } // Added timeout
   ),
 });
 
@@ -59,7 +60,8 @@ export {
 export const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export function log(message) {
-  console.log(`[PROD_DEBUG] ${message}`);
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [PROD_DEBUG] ${message}`);
 }
 
 export async function batchMulticall(calls, batchSize = 50) {
@@ -69,11 +71,19 @@ export async function batchMulticall(calls, batchSize = 50) {
     const batch = calls.slice(i, i + batchSize);
     try {
       const batchResults = await client.multicall({ contracts: batch });
-      results.push(...batchResults);
+      results.push(...batchResults.map((result, idx) => ({
+        status: result.status,
+        result: result.status === 'success' ? result.result : null,
+        error: result.status === 'failure' ? result.error?.message || 'Unknown error' : null,
+      })));
       log(`batchMulticall: Batch ${i}-${i + batchSize - 1} completed with ${batchResults.length} results`);
     } catch (error) {
       console.error(`[PROD_ERROR] batchMulticall failed for batch ${i}-${i + batchSize - 1}: ${error.message}`);
-      results.push(...batch.map(() => ({ status: 'failure', result: null })));
+      results.push(...batch.map(() => ({
+        status: 'failure',
+        result: null,
+        error: error.message || 'Unknown error',
+      })));
     }
   }
   log(`batchMulticall: Completed with ${results.length} results`);

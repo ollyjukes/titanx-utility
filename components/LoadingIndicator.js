@@ -1,7 +1,7 @@
-// app/components/LoadingIndicator.js
 import { motion } from 'framer-motion';
 
-export default function LoadingIndicator({ status }) {
+export default function LoadingIndicator({ status, progress }) {
+  const percentage = progress?.totalOwners > 0 ? (progress.totalWallets / progress.totalOwners) * 100 : 0;
   return (
     <div className="flex flex-col items-center justify-center gap-3 animate-fade-in w-full flex-1">
       <motion.svg
@@ -20,6 +20,11 @@ export default function LoadingIndicator({ status }) {
         />
       </motion.svg>
       <p className="text-sm sm:text-base text-gray-300">{status}</p>
+      {progress?.totalOwners > 0 && (
+        <div className="w-64 bg-gray-700 rounded-full h-2.5 mt-2">
+          <div className="bg-blue-400 h-2.5 rounded-full" style={{ width: `${percentage}%` }}></div>
+        </div>
+      )}
     </div>
   );
 }

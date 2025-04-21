@@ -3,9 +3,9 @@ import { NextResponse } from 'next/server';
 import { contractDetails, nftContracts } from '../../../nft-contracts';
 import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, staxNFTAbi, staxVaultAbi } from '../../utils';
 
-const contractAddress = nftContracts.staxNFT.address;
-const vaultAddress = nftContracts.staxNFT.vaultAddress;
-const tiersConfig = nftContracts.staxNFT.tiers;
+const contractAddress = nftContracts.stax?.address;
+const vaultAddress = nftContracts.stax?.vaultAddress;
+const tiersConfig = nftContracts.stax?.tiers;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);

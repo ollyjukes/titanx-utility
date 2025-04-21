@@ -3,14 +3,15 @@ import { NextResponse } from 'next/server';
 import { contractDetails, nftContracts } from '../../../nft-contracts';
 import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, element369VaultAbi, element369Abi } from '../../utils';
 
-const contractAddress = nftContracts.element369.address;
-const vaultAddress = nftContracts.element369.vaultAddress;
-const tiersConfig = nftContracts.element369.tiers;
+const contractAddress = nftContracts.element369?.address;
+const vaultAddress = nftContracts.element369?.vaultAddress;
+const tiersConfig = nftContracts.element369?.tiers;
+const defaultPageSize = contractDetails.element369?.pageSize || 1000;
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '0');
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000');
+  const pageSize = parseInt(searchParams.get('pageSize') || defaultPageSize);
   const wallet = searchParams.get('wallet');
 
   log(`[Element369] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);

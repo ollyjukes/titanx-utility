@@ -1,3 +1,4 @@
+*.json filter=lfs diff=lfs merge=lfs -text
 **/* !text !filter !merge !diff
 abi/* !text !filter !merge !diff
 public/data/* !text !filter !merge !diff

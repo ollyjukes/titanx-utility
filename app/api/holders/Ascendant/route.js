@@ -1,6 +1,7 @@
+// app/api/holders/Ascendant/route.js
 import { NextResponse } from 'next/server';
 import { alchemy, client, CACHE_TTL, log, batchMulticall } from '../../utils';
-import { contractAddresses, contractTiers } from '@/app/nft-contracts';
+import { contractAddresses, contractTiers, contractDetails } from '@/app/nft-contracts';
 import { formatUnits, getAddress } from 'viem';
 import { v4 as uuidv4 } from 'uuid';
 import ascendantABI from '../../../../abi/ascendantNFT.json';
@@ -35,8 +36,9 @@ function safeSerialize(obj) {
 
 // Fetch data for all holders with pagination
 async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
-  const contractAddress = contractAddresses.ascendantNFT;
-  const tiers = contractTiers.ascendantNFT;
+  const contractAddress = contractAddresses.ascendant.address; // Fix: Use .address
+  const tiers = contractTiers.ascendant;
+  const defaultPageSize = contractDetails.ascendant?.pageSize || 1000;
   const cacheKey = `${contractAddress}-all-${page}-${pageSize}`;
   const now = Date.now();
 
@@ -73,7 +75,7 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
     pageKey = response.pageKey;
   } while (pageKey);
 
-  const burnAddress = '0x0000000000000000000000000000000000000000';
+  const burnAddress = '0x000000000000000 DOB0000000000000000000000';
   const filteredOwners = owners.filter(
     (owner) => owner?.ownerAddress && owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances?.length > 0
   );
@@ -298,10 +300,11 @@ async function getAllHolders(page = 0, pageSize = 1000, requestId = '') {
 
 // Fetch data for a specific wallet
 async function getHolderData(wallet, requestId = '') {
-  const contractAddress = contractAddresses.ascendantNFT;
-  const tiers = contractTiers.ascendantNFT;
+  const contractAddress = contractAddresses.ascendant.address; // Fix: Use .address
+  const tiers = contractTiers.ascendant;
   const cacheKey = `${contractAddress}-${wallet}`;
   const now = Date.now();
+
 
   if (cache[cacheKey] && now - cache[cacheKey].timestamp < CACHE_TTL) {
     return cache[cacheKey].data;
@@ -481,7 +484,7 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const wallet = searchParams.get('wallet');
   const page = parseInt(searchParams.get('page') || '0', 10);
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000', 10);
+  const pageSize = parseInt(searchParams.get('pageSize') || contractDetails.ascendant?.pageSize || 1000, 10);
 
   try {
     if (wallet) {
@@ -493,7 +496,7 @@ export async function GET(request) {
     const result = await getAllHolders(page, pageSize, requestId);
     return NextResponse.json(safeSerialize(result));
   } catch (error) {
-    console.error(`[${requestId}] [PROD_ERROR] AscendantNFT API error: ${error.message}`);
+    console.error(`[${requestId}] [PROD_ERROR] Ascendant API error: ${error.message}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }

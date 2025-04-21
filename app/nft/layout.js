@@ -43,19 +43,24 @@ export default function NFTLayout({ children }) {
 
   const fetchCollectionData = async (contractKey) => {
     console.log(`[NFTLayout] Fetching data for ${contractKey}`);
-    const cachedData = getCache(contractKey);
-    if (cachedData) {
-      console.log(`[NFTLayout] Using cached data for ${contractKey}: ${cachedData.holders.length} holders`);
-      return cachedData;
+    // Bypass cache for ascendantNFT to ensure fresh data
+    if (contractKey !== 'ascendantNFT') {
+      const cachedData = getCache(contractKey);
+      if (cachedData) {
+        console.log(`[NFTLayout] Using cached data for ${contractKey}: ${cachedData.holders.length} holders`);
+        return cachedData;
+      }
+    } else {
+      console.log(`[NFTLayout] Bypassing cache for ascendantNFT to ensure fresh sorting`);
     }
-
+  
     if (contractKey === 'e280') {
       console.log(`[NFTLayout] Skipping fetch for ${contractKey} - not deployed`);
       const result = { holders: [], totalTokens: 0, message: 'E280 data not available yet' };
       setCache(contractKey, result);
       return result;
     }
-
+  
     const { apiEndpoint, pageSize = 1000 } = contractDetails[contractKey];
     let allHolders = [];
     let totalTokens = 0;
@@ -67,7 +72,7 @@ export default function NFTLayout({ children }) {
     let pendingRewards = 0;
     let page = 0;
     let totalPages = Infinity;
-
+  
     try {
       while (page < totalPages) {
         console.log(`[NFTLayout] Fetching ${contractKey} page ${page}`);
@@ -79,7 +84,8 @@ export default function NFTLayout({ children }) {
           throw new Error(`Fetch failed for ${contractKey} page ${page}: ${res.status} - ${errorText}`);
         }
         const json = await res.json();
-        console.log(`[NFTLayout] ${contractKey} page ${page} fetched: holders=${json.holders.length}`);
+        console.log(`[NFTLayout] ${contractKey} page ${page} fetched: holders=${json.holders?.length || 0}`);
+        console.log(`[NFTLayout] Raw API response sample:`, JSON.stringify(json.holders?.slice(0, 2), null, 2));
         allHolders = allHolders.concat(json.holders || []);
         totalTokens = json.totalTokens || totalTokens;
         totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
@@ -92,28 +98,52 @@ export default function NFTLayout({ children }) {
         page++;
         if (!json.holders || json.holders.length === 0) break;
       }
-
+  
       const uniqueHoldersMap = new Map();
       allHolders.forEach(holder => {
-        if (holder && holder.wallet) uniqueHoldersMap.set(holder.wallet, holder);
+        if (holder && holder.wallet) {
+          // Map API fields to expected names
+          holder.Shares = holder.shares || holder.totalShares || 0;
+          holder.totalNfts = holder.totalNfts || holder.total || 0;
+          if (holder.Shares === undefined || holder.totalNfts === undefined) {
+            console.warn(`[NFTLayout] Holder ${holder.wallet} missing Shares or totalNfts:`, holder);
+          }
+          uniqueHoldersMap.set(holder.wallet, holder);
+        }
       });
       let uniqueHolders = Array.from(uniqueHoldersMap.values());
       console.log(`[NFTLayout] Total Unique ${contractKey} Holders: ${uniqueHolders.length}`);
-
+      console.log(`[NFTLayout] Aggregate totalShares for ${contractKey}: ${totalShares}`);
+  
       const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
+  
+      // Calculate sharesPercentage for display
+      uniqueHolders.forEach(holder => {
+        holder.sharesPercentage = totalShares > 0 ? ((holder.Shares || 0) / totalShares) * 100 : 0;
+        console.log(`[NFTLayout] Holder ${holder.wallet.slice(0, 8)}: sharesPercentage=${holder.sharesPercentage.toFixed(2)}%, totalNfts=${holder.totalNfts || 0}, Shares=${holder.Shares || 0}`);
+      });
+  
       if (contractKey === 'ascendantNFT') {
+        // Sort by Shares (descending), then by totalNfts (descending)
+        uniqueHolders.sort((a, b) => {
+          const sharesDiff = (b.Shares || 0) - (a.Shares || 0);
+          if (sharesDiff !== 0) return sharesDiff; // Primary: Shares
+          return (b.totalNfts || 0) - (a.totalNfts || 0); // Secondary: Total NFTs
+        });
+        // Assign ranks and log sorted order
         uniqueHolders.forEach((holder, index) => {
-          holder.rank = index + 1; // Retain API rank
-          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+          holder.rank = index + 1;
+          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0; // For compatibility
+          console.log(`[NFTLayout] Rank ${holder.rank}: ${holder.wallet.slice(0, 8)}, sharesPercentage=${holder.sharesPercentage.toFixed(2)}%, totalNfts=${holder.totalNfts || 0}, Shares=${holder.Shares || 0}`);
         });
       } else {
-        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
+        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.totalNfts || 0) - (a.totalNfts || 0));
         uniqueHolders.forEach((holder, index) => {
           holder.rank = index + 1;
           holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
         });
       }
-
+  
       const result = {
         holders: uniqueHolders,
         totalTokens,

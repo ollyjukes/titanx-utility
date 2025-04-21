@@ -41,4 +41,7 @@ yarn-error.log*
 
 # typescript (optional if no TS)
 *.tsbuildinfo
-next-env.d.ts
+next-env.d.ts*.sqlite
+*.db
+output.txt
+scripts/backups/
