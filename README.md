@@ -239,3 +239,12 @@ its not just the summary table that needs to be updated with the latet data.  Al
     CREATE INDEX IF NOT EXISTS idx_transfers_eventType ON element280_transfers(eventType);
     CREATE INDEX IF NOT EXISTS idx_transfers_blockNumber ON element280_transfers(blockNumber);
   `);```
+
+
+
+  Element 369: show Unique Wallets, Active NFTs, Inferno , Flux and Element 280 Rewards
+Element 280: show unique wallets, NUmber live NFTs, number burned NFTs,  keep the live NFTs distribution list
+Stax:  Unique wallets, NUm live NFTs, NUmber of burned NFts, the live NFTs distribution list if available
+Ascendant:  Unique wallets, Active NFTs, Total Ascendant Locked, Total Claimable rewards, Total Pending REwards
+
+

@@ -1,7 +1,6 @@
-// app/api/holders/Stax/route.js
 import { NextResponse } from 'next/server';
 import { contractDetails, nftContracts } from '../../../nft-contracts';
-import { client, alchemy, CACHE_TTL, log, batchMulticall, staxNFTAbi, staxVaultAbi, getCache, setCache } from '../../utils';
+import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, staxNFTAbi, staxVaultAbi } from '../../utils';
 
 const contractAddress = nftContracts.stax?.address;
 const vaultAddress = nftContracts.stax?.vaultAddress;
@@ -21,33 +20,15 @@ export async function GET(request) {
     }
 
     const cacheKey = `stax_holders_${page}_${pageSize}_${wallet || 'all'}`;
-    if (!wallet) {
-      const cachedData = await getCache(cacheKey);
-      if (cachedData) {
-        log(`[Stax] Returning cached data for ${cacheKey}`);
-        return NextResponse.json(cachedData);
-      }
+    if (cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < CACHE_TTL && !wallet) {
+      log(`[Stax] Cache hit: ${cacheKey}`);
+      return NextResponse.json(cache[cacheKey].data);
     }
-    log(`[Stax] No cache hit for ${cacheKey}`);
+    log(`[Stax] Cache miss or wallet filter: ${cacheKey}`);
 
-    // Clear cache for wallet-specific queries
+    // Clear cache for wallet-specific queries to avoid stale data
     if (wallet) {
-      await setCache(cacheKey, null);
-    }
-
-    // Fetch totalBurned
-    let totalBurned = 0;
-    try {
-      const burnedResult = await client.readContract({
-        address: contractAddress,
-        abi: staxNFTAbi,
-        functionName: 'totalBurned',
-      });
-      totalBurned = Number(burnedResult || 0);
-      log(`[Stax] Fetched totalBurned: ${totalBurned}`);
-    } catch (error) {
-      log(`[Stax] Error fetching totalBurned: ${error.message}`);
-      totalBurned = 0;
+      delete cache[cacheKey];
     }
 
     // Fetch owners
@@ -104,7 +85,7 @@ export async function GET(request) {
     const tierResults = await batchMulticall(tierCalls);
     log(`[Stax] Tiers fetched for ${tierResults.length} tokens`);
 
-    // Log tier results
+    // Log tier results for debugging
     tierResults.forEach((result, i) => {
       const tokenId = paginatedTokenIds[i];
       if (result?.status === 'success') {
@@ -115,7 +96,7 @@ export async function GET(request) {
     });
 
     // Build holders
-    const maxTier = Math.max(...Object.keys(tiersConfig).map(Number));
+    const maxTier = Math.max(...Object.keys(tiersConfig).map(Number)); // 12
     const holdersMap = new Map();
 
     tierResults.forEach((result, i) => {
@@ -130,14 +111,14 @@ export async function GET(request) {
               wallet: walletAddr,
               total: 0,
               multiplierSum: 0,
-              tiers: Array(maxTier).fill(0),
+              tiers: Array(maxTier).fill(0), // 12 elements
               claimableRewards: 0,
             });
           }
           const holder = holdersMap.get(walletAddr);
           holder.total += 1;
           holder.multiplierSum += tiersConfig[tier]?.multiplier || 0;
-          holder.tiers[tier - 1] += 1;
+          holder.tiers[tier - 1] += 1; // Zero-based indexing
         } else {
           log(`[Stax] Invalid tier ${tier} for token ${tokenId}`);
         }
@@ -184,6 +165,9 @@ export async function GET(request) {
           `Claimable=${holder.claimableRewards.toFixed(4)}, ` +
           `Tokens=${ownerTokens.get(holder.wallet).length}`
         );
+        if (holder.claimableRewards === 0) {
+          log(`[Stax] Zero rewards for ${holder.wallet}: Tokens=${ownerTokens.get(holder.wallet).join(',')}`);
+        }
       } else {
         holder.claimableRewards = 0;
         log(`[Stax] Reward fetch failed for ${holder.wallet.slice(0, 6)}...: ${rewardResults[i]?.error || 'Unknown'}`);
@@ -201,18 +185,12 @@ export async function GET(request) {
     const response = {
       holders,
       totalTokens,
-      summary: {
-        totalLive: totalTokens,
-        totalBurned,
-        totalRewardPool,
-      },
       page,
       pageSize,
       totalPages: wallet ? 1 : Math.ceil(totalTokens / pageSize),
     };
-
-    await setCache(cacheKey, response);
-    log(`[Stax] Success: ${holders.length} holders, totalBurned=${totalBurned}, totalRewardPool=${totalRewardPool}`);
+    cache[cacheKey] = { data: response, timestamp: Date.now() };
+    log(`[Stax] Success: ${holders.length} holders`);
 
     return NextResponse.json(response);
   } catch (error) {

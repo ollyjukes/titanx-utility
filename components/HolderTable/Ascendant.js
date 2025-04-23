@@ -1,18 +1,60 @@
-// components/HolderTable/Ascendant.js
+'use client';
+
 import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { contractTiers } from "@/app/nft-contracts";
+import { contractTiers } from '@/app/nft-contracts';
 
 const rowVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function HolderTable({ holders, contract, loading, totalShares }) {
+function HolderTable({ holders, loading, totalShares }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
-  const isAscendant = contract === 'ascendantNFT';
-  const isElement369 = contract === 'element369';
-  const isStax = contract === 'staxNFT';
+
+  // Define Ascendant tier order (descending: Tier 8 to Tier 1)
+  const ascendantTierOrder = [
+    { tierId: '8', name: 'Tier 8', index: 7 },
+    { tierId: '7', name: 'Tier 7', index: 6 },
+    { tierId: '6', name: 'Tier 6', index: 5 },
+    { tierId: '5', name: 'Tier 5', index: 4 },
+    { tierId: '4', name: 'Tier 4', index: 3 },
+    { tierId: '3', name: 'Tier 3', index: 2 },
+    { tierId: '2', name: 'Tier 2', index: 1 },
+    { tierId: '1', name: 'Tier 1', index: 0 },
+  ];
+
+  // Debugging: Log holders data for the specific wallet
+  if (safeHolders.length) {
+    const targetWallet = '0xF98f0ee190d9f2E6531E226933f1E47a2890CbDA';
+    const targetHolder = safeHolders.find(h => h.wallet.toLowerCase() === targetWallet.toLowerCase());
+    if (targetHolder) {
+      console.log('[Ascendant] Holder Data for Wallet:', targetHolder);
+      console.log('[Ascendant] Tiers Raw Data:', targetHolder.tiers);
+      console.log('[Ascendant] Tiers Length:', targetHolder.tiers?.length);
+      // Compute tier counts and sum
+      const tierCounts = ascendantTierOrder.map(tier => {
+        const count =
+          // Try one-based array (tiers[8] = Tier 8)
+          (Array.isArray(targetHolder.tiers) && targetHolder.tiers[Number(tier.tierId)]) ||
+          // Try zero-based array (tiers[7] = Tier 8)
+          (Array.isArray(targetHolder.tiers) && targetHolder.tiers[Number(tier.tierId) - 1]) ||
+          // Try object (tiers["8"] = Tier 8)
+          (targetHolder.tiers && typeof targetHolder.tiers === 'object' && targetHolder.tiers[tier.tierId]) ||
+          0;
+        return { tier: tier.name, count };
+      });
+      console.log('[Ascendant] Computed Tier Counts:', tierCounts);
+      const tierSum = tierCounts.reduce((sum, { count }) => sum + Number(count), 0);
+      console.log('[Ascendant] Tier Sum vs Total NFTs:', { tierSum, total: targetHolder.total });
+      if (targetHolder.tiers?.length && targetHolder.tiers.length !== 8) {
+        console.warn('[Ascendant] Warning: Unexpected tiers array length:', targetHolder.tiers.length, 'Expected: 8');
+      }
+      if (tierSum !== targetHolder.total) {
+        console.warn('[Ascendant] Warning: Tier sum does not match Total NFTs for wallet', targetWallet);
+      }
+    }
+  }
 
   if (!safeHolders.length) {
     if (loading) {
@@ -24,36 +66,17 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-                {isElement369 ? (
-                  <>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
-                  </>
-                ) : (
-                  <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-                )}
-                {isAscendant ? (
-                  <>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Shares</th>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY8 Rewards</th>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY28 Rewards</th>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY90 Rewards</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-                    <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
-                    {Object.keys(contractTiers[contract] || {})
-                      .sort((a, b) => b - a)
-                      .map(tier => (
-                        <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
-                          {contractTiers[contract][tier].name}
-                        </th>
-                      ))}
-                  </>
-                )}
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Shares</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY8 Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY28 Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY90 Rewards</th>
+                {ascendantTierOrder.map(tier => (
+                  <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                    {tier.name}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="text-gray-300 text-xs md:text-sm">
@@ -68,32 +91,15 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  {isElement369 ? (
-                    <>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                    </>
-                  ) : (
-                    <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  )}
-                  {isAscendant ? (
-                    <>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      {Object.keys(contractTiers[contract] || {}).map(tier => (
-                        <td key={tier} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                      ))}
-                    </>
-                  )}
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  {ascendantTierOrder.map(tier => (
+                    <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  ))}
                 </motion.tr>
               ))}
             </tbody>
@@ -104,9 +110,9 @@ function HolderTable({ holders, contract, loading, totalShares }) {
     return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
   }
 
-  const tiers = contractTiers[contract];
+  const tiers = contractTiers.ascendant;
   if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for {contract}.</div>;
+    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Ascendant.</div>;
   }
 
   return (
@@ -117,36 +123,17 @@ function HolderTable({ holders, contract, loading, totalShares }) {
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-            {isElement369 ? (
-              <>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
-              </>
-            ) : (
-              <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-            )}
-            {isAscendant ? (
-              <>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Shares</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY8 Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY28 Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY90 Rewards</th>
-              </>
-            ) : (
-              <>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
-                {Object.keys(tiers)
-                  .sort((a, b) => b - a)
-                  .map(tier => (
-                    <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
-                      {tiers[tier].name}
-                    </th>
-                  ))}
-              </>
-            )}
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Shares</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY8 Rewards</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY28 Rewards</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY90 Rewards</th>
+            {ascendantTierOrder.map(tier => (
+              <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                {tier.name}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody className="text-gray-300 text-xs md:text-sm">
@@ -158,9 +145,9 @@ function HolderTable({ holders, contract, loading, totalShares }) {
               animate="visible"
               whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"}`}
+              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
             >
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank}</td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
                 <a
                   href={`https://etherscan.io/address/${holder.wallet}`}
@@ -171,50 +158,39 @@ function HolderTable({ holders, contract, loading, totalShares }) {
                   {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
                 </a>
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total}</td>
-              {isElement369 ? (
-                <>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                    {Math.floor(holder.infernoRewards).toLocaleString()}
-                  </td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                    {Math.floor(holder.fluxRewards).toLocaleString()}
-                  </td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                    {Math.floor(holder.e280Rewards).toLocaleString()}
-                  </td>
-                </>
-              ) : (
-                <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                  {(isStax || isAscendant
-                    ? Math.floor(holder.claimableRewards)
-                    : holder.claimableRewards.toFixed(2)
-                  ).toLocaleString()}
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total || 0}</td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                {Math.floor(holder.claimableRewards || 0).toLocaleString()}
+              </td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                {totalShares ? ((holder.shares || 0) / totalShares * 100).toFixed(2) : '0.00'}%
+              </td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                {Math.floor(holder.shares || 0).toLocaleString()}
+              </td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                {Math.floor(holder.pendingDay8 || 0).toLocaleString()}
+              </td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                {Math.floor(holder.pendingDay28 || 0).toLocaleString()}
+              </td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                {Math.floor(holder.pendingDay90 || 0).toLocaleString()}
+              </td>
+              {ascendantTierOrder.map(tier => (
+                <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                  {
+                    // Try one-based array (tiers[8] = Tier 8)
+                    (Array.isArray(holder.tiers) && holder.tiers[Number(tier.tierId)]) ||
+                    // Try zero-based array (tiers[7] = Tier 8)
+                    (Array.isArray(holder.tiers) && holder.tiers[Number(tier.tierId) - 1]) ||
+                    // Try object (tiers["8"] = Tier 8)
+                    (holder.tiers && typeof holder.tiers === 'object' && holder.tiers[tier.tierId]) ||
+                    // Fallback to 0
+                    0
+                  }
                 </td>
-              )}
-              {isAscendant ? (
-                <>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                    {totalShares ? ((holder.shares / totalShares) * 100).toFixed(2) : '0.00'}%
-                  </td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.shares).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay8).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay28).toLocaleString()}</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.pendingDay90).toLocaleString()}</td>
-                </>
-              ) : (
-                <>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.percentage.toFixed(2)}%</td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.multiplierSum.toFixed(2)}</td>
-                  {Object.keys(tiers)
-                    .sort((a, b) => b - a)
-                    .map(tier => (
-                      <td key={tier} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                        {holder.tiers?.[tier] || 0}
-                      </td>
-                    ))}
-                </>
-              )}
+              ))}
             </motion.tr>
           ))}
         </tbody>

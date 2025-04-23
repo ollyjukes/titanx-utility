@@ -194,7 +194,7 @@ export const contractDetails = {
   element280: {
     name: nftContracts.element280.name,
     chain: nftContracts.element280.chain,
-    pageSize: 1000,
+    pageSize: 100,
     apiEndpoint: '/api/holders/Element280',
     rewardToken: 'ELMNT',
   },

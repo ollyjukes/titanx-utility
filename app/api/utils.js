@@ -2,11 +2,12 @@
 import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
 import { Alchemy, Network } from 'alchemy-sdk';
+import { Redis } from '@upstash/redis';
 
-// Shared cache for routes that import it
-export const cache = {};
+// Initialize Upstash Redis
+export const redis = Redis.fromEnv();
 
-// Import all ABI JSON files using @ notation
+// Import all ABI JSON files
 import staxNFTAbi from '@/abi/staxNFT.json';
 import element369Abi from '@/abi/element369.json';
 import element369VaultAbi from '@/abi/element369Vault.json';
@@ -25,17 +26,17 @@ export const client = createPublicClient({
   transport: http(
     process.env.ETH_RPC_URL ||
     `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`,
-    { timeout: 60000 } // Added timeout
+    { timeout: 60000 }
   ),
 });
 
-// Generic NFT ABI for common functions
+// Generic NFT ABI
 export const nftAbi = parseAbi([
   'function ownerOf(uint256 tokenId) view returns (address)',
   'function getNftTier(uint256 tokenId) view returns (uint8)',
 ]);
 
-// Ascendant NFT ABI with specific functions
+// Ascendant NFT ABI
 export const ascendantAbi = parseAbi([
   'function ownerOf(uint256 tokenId) view returns (address)',
   'function getNFTAttribute(uint256 tokenId) view returns (uint256 rarityNumber, uint8 tier, uint8 rarity)',
@@ -46,7 +47,7 @@ export const ascendantAbi = parseAbi([
   'error NonExistentToken(uint256 tokenId)',
 ]);
 
-// Export all ABIs
+// Export ABIs
 export {
   staxNFTAbi,
   element369Abi,
@@ -57,11 +58,36 @@ export {
   element280VaultAbi,
 };
 
-export const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+export const CACHE_TTL = 5 * 60; // 5 minutes in seconds
 
 export function log(message) {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [PROD_DEBUG] ${message}`);
+}
+
+// Upstash Redis cache functions
+export async function getCache(key) {
+  try {
+    const cached = await redis.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL * 1000) {
+      log(`[UpstashRedis] Cache hit for ${key}`);
+      return cached.data;
+    }
+    log(`[UpstashRedis] Cache miss for ${key}: ${cached ? 'expired' : 'no entry'}`);
+    return null;
+  } catch (error) {
+    log(`[UpstashRedis] Error getting cache for ${key}: ${error.message}`);
+    return null;
+  }
+}
+
+export async function setCache(key, data) {
+  try {
+    await redis.set(key, { data, timestamp: Date.now() }, { ex: CACHE_TTL }); // Expiry in seconds
+    log(`[UpstashRedis] Cached ${key}`);
+  } catch (error) {
+    log(`[UpstashRedis] Error setting cache for ${key}: ${error.message}`);
+  }
 }
 
 export async function batchMulticall(calls, batchSize = 50) {

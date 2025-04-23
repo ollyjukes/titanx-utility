@@ -2,25 +2,15 @@
 
 import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { contractTiers } from '@/app/nft-contracts';
+import { contractTiers } from "@/app/nft-contracts";
 
 const rowVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function HolderTable({ holders, loading }) {
+function HolderTable({ holders, contract, loading }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
-
-  // Define E280 tier order (same as Element280; adjust if different)
-  const e280TierOrder = [
-    { tierId: '6', name: 'Legendary Amped', index: 5 },
-    { tierId: '5', name: 'Legendary', index: 4 },
-    { tierId: '4', name: 'Rare Amped', index: 3 },
-    { tierId: '2', name: 'Common Amped', index: 1 },
-    { tierId: '3', name: 'Rare', index: 2 },
-    { tierId: '1', name: 'Common', index: 0 },
-  ];
 
   if (!safeHolders.length) {
     if (loading) {
@@ -32,14 +22,18 @@ function HolderTable({ holders, loading }) {
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
+                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
-                {e280TierOrder.map(tier => (
-                  <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
-                    {tier.name}
-                  </th>
-                ))}
+                {Object.keys(contractTiers.element369 || {})
+                  .sort((a, b) => b - a)
+                  .map(tier => (
+                    <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                      {contractTiers.element369[tier].name}
+                    </th>
+                  ))}
               </tr>
             </thead>
             <tbody className="text-gray-300 text-xs md:text-sm">
@@ -57,8 +51,10 @@ function HolderTable({ holders, loading }) {
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  {e280TierOrder.map(tier => (
-                    <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  {Object.keys(contractTiers.element369 || {}).map(tier => (
+                    <td key={tier} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
                   ))}
                 </motion.tr>
               ))}
@@ -70,9 +66,9 @@ function HolderTable({ holders, loading }) {
     return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
   }
 
-  const tiers = contractTiers.e280;
+  const tiers = contractTiers.element369;
   if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for E280.</div>;
+    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Element369.</div>;
   }
 
   return (
@@ -83,14 +79,18 @@ function HolderTable({ holders, loading }) {
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
+            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
-            {e280TierOrder.map(tier => (
-              <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
-                {tier.name}
-              </th>
-            ))}
+            {Object.keys(tiers)
+              .sort((a, b) => b - a)
+              .map(tier => (
+                <th key={tier} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                  {tiers[tier].name}
+                </th>
+              ))}
           </tr>
         </thead>
         <tbody className="text-gray-300 text-xs md:text-sm">
@@ -102,7 +102,7 @@ function HolderTable({ holders, loading }) {
               animate="visible"
               whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
+              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"}`}
             >
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
@@ -116,20 +116,22 @@ function HolderTable({ holders, loading }) {
                 </a>
               </td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total || 0}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                {(holder.claimableRewards || 0).toFixed(2).toLocaleString()}
-              </td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.infernoRewards || 0).toLocaleString()}</td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.fluxRewards || 0).toLocaleString()}</td>
+              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{Math.floor(holder.e280Rewards || 0).toLocaleString()}</td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
                 {typeof holder.percentage === 'number' ? holder.percentage.toFixed(2) + '%' : '-'}
               </td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
                 {typeof holder.displayMultiplierSum === 'number' ? holder.displayMultiplierSum.toFixed(2) : '-'}
               </td>
-              {e280TierOrder.map(tier => (
-                <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
-                  {holder.tiers?.[Number(tier.tierId) - 1] || 0}
-                </td>
-              ))}
+              {Object.keys(tiers)
+                .sort((a, b) => b - a)
+                .map(tier => (
+                  <td key={tier} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                    {holder.tiers?.[tier] || 0}
+                  </td>
+                ))}
             </motion.tr>
           ))}
         </tbody>
