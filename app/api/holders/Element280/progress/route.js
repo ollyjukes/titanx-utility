@@ -1,20 +1,15 @@
-// api/holders/Element280/progress/route.js
-// This route handles the progress of the cache population for the Element280 contract.
-// It provides information about the current state of the cache population process,
-// including whether it is currently populating, the total number of wallets,
-// the total number of owners, and the current phase of the process.
-// It also handles errors that may occur during the process and logs relevant information.
-// The route is defined as a GET request handler and returns a JSON response with the progress information.
-
 import { NextResponse } from 'next/server';
 import { log } from '@/app/api/utils';
 import { getCacheState } from '../route';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request) {
-  const { isCachePopulating, holdersMapCache, totalOwners, progressState } = getCacheState();
+  const { isCachePopulating, holdersMapCache, totalOwners, progressState } = await getCacheState();
   const contractName = 'element280';
 
-  log(`Handling /progress: isPopulating=${isCachePopulating}, totalWallets=${holdersMapCache?.size || 0}, totalOwners=${totalOwners}, step=${progressState.step}`);
+  
+  log(`Handling /progress: isPopulating=${isCachePopulating}, totalWallets=${holdersMapCache?.length || 0}, totalOwners=${totalOwners}, step=${progressState.step}`);
 
   try {
     const progressPercentage = progressState.totalNfts > 0 ? (progressState.processedNfts / progressState.totalNfts) * 100 : 0;
@@ -32,7 +27,7 @@ export async function GET(request) {
 
     return NextResponse.json({
       isPopulating: isCachePopulating,
-      totalWallets: holdersMapCache?.size || 0,
+      totalWallets: holdersMapCache?.length || 0,
       totalOwners,
       phase,
       progressPercentage: progressPercentage.toFixed(1),

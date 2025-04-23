@@ -6,6 +6,7 @@ Directory Tree: (Install 'tree' with 'brew install tree' for this feature)
 Dependencies from package.json:
   - @covalenthq/client-sdk
   - @tanstack/react-query
+  - @upstash/redis
   - @wagmi/connectors
   - alchemy-sdk
   - async-mutex

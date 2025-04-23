@@ -1,4 +1,5 @@
 'use client';
+
 import { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
@@ -44,15 +45,12 @@ export default function NFTLayout({ children }) {
 
   const fetchCollectionData = async (contractKey) => {
     console.log(`[NFTLayout] Fetching data for ${contractKey}`);
-    if (contractKey !== 'ascendantNFT') {
-      const cachedData = getCache(contractKey);
-      if (cachedData) {
-        console.log(`[NFTLayout] Using cached data for ${contractKey}: ${cachedData.holders.length} holders`);
-        return cachedData;
-      }
-    } else {
-      console.log(`[NFTLayout] Bypassing cache for ascendantNFT to ensure fresh sorting`);
+    const cachedData = getCache(contractKey);
+    if (cachedData && contractKey !== 'ascendantNFT') {
+      console.log(`[NFTLayout] Using cached data for ${contractKey}: ${cachedData.holders.length} holders`);
+      return cachedData;
     }
+    console.log(`[NFTLayout] ${contractKey === 'ascendantNFT' ? 'Bypassing cache for ascendantNFT' : 'Cache miss for ' + contractKey}`);
 
     if (contractKey === 'e280') {
       console.log(`[NFTLayout] Skipping fetch for ${contractKey} - not deployed`);
@@ -65,10 +63,11 @@ export default function NFTLayout({ children }) {
     try {
       console.log(`[NFTLayout] Fetching ${contractKey} from ${apiEndpoint}`);
       const res = await fetch(`${apiEndpoint}?page=0&pageSize=1000`, {
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(60000),
       });
       if (!res.ok) {
         const errorText = await res.text();
+        console.error(`[NFTLayout] Fetch failed for ${contractKey}: ${res.status} - ${errorText}`);
         throw new Error(`Fetch failed for ${contractKey}: ${res.status} - ${errorText}`);
       }
       const json = await res.json();
@@ -86,7 +85,7 @@ export default function NFTLayout({ children }) {
       console.log(`[NFTLayout] Cached ${contractKey} with ${result.holders.length} holders`);
       return result;
     } catch (err) {
-      console.error(`[NFTLayout] Error fetching ${contractKey}: ${err.message}`);
+      console.error(`[NFTLayout] Error fetching ${contractKey}: ${err.message}, stack: ${err.stack}`);
       const errorResult = { holders: [], totalTokens: 0, summary: { totalBurned: 0 }, error: err.message };
       setCache(contractKey, errorResult);
       return errorResult;
@@ -100,7 +99,7 @@ export default function NFTLayout({ children }) {
         fetchCollectionData(nft.apiKey)
           .then((data) => ({ apiKey: nft.apiKey, data }))
           .catch((err) => {
-            console.error(`[NFTLayout] Fetch failed for ${nft.apiKey}: ${err.message}`);
+            console.error(`[NFTLayout] Fetch failed for ${nft.apiKey}: ${err.message}, stack: ${err.stack}`);
             return { apiKey: nft.apiKey, data: { holders: [], totalTokens: 0, summary: { totalBurned: 0 }, error: err.message } };
           })
       );
@@ -133,7 +132,7 @@ export default function NFTLayout({ children }) {
         fetchCollectionData(nft.apiKey)
           .then((data) => ({ apiKey: nft.apiKey, data }))
           .catch((err) => {
-            console.error(`[NFTLayout] Fetch failed for ${nft.apiKey}: ${err.message}`);
+            console.error(`[NFTLayout] Fetch failed for ${nft.apiKey}: ${err.message}, stack: ${err.stack}`);
             return { apiKey: nft.apiKey, data: { holders: [], totalTokens: 0, summary: { totalBurned: 0 }, error: err.message } };
           })
       );
@@ -164,7 +163,7 @@ export default function NFTLayout({ children }) {
       setSearchResults(searchResults);
       setIsModalOpen(true);
     } catch (err) {
-      console.error('[NFTLayout] Search error:', err);
+      console.error('[NFTLayout] Search error:', err.message, err.stack);
       setError(`Search failed: ${err.message}`);
     } finally {
       setSearchLoading(false);
@@ -286,10 +285,14 @@ export default function NFTLayout({ children }) {
           handleBackgroundClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}
         />
       )}
-// app/nft/layout.js (add to return statement)
-<button onClick={() => useNFTStore.getState().clearCache()} className="px-4 py-2 bg-red-500 text-white rounded-md mt-4">Clear Client Cache</button>
-      <div className="w-full max-w-6xl">{children}</div>
+
+      <button
+        onClick={() => useNFTStore.getState().clearCache()}
+        className="mt-6 px-4 py-2 bg-red-500 text-white rounded-md font-semibold hover:bg-red-600"
+      >
+        Clear Client Cache
+      </button>
+      <div className="w-full max-w-6xl mt-6">{children}</div>
     </div>
-    
   );
 }

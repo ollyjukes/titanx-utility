@@ -1,7 +1,6 @@
-// app/api/holders/Element369/route.js
 import { NextResponse } from 'next/server';
 import { contractDetails, nftContracts } from '../../../nft-contracts';
-import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, element369VaultAbi, element369Abi } from '../../utils';
+import { client, alchemy, getCache, setCache, CACHE_TTL, log, batchMulticall, element369VaultAbi, element369Abi } from '../../utils';
 
 const contractAddress = nftContracts.element369?.address;
 const vaultAddress = nftContracts.element369?.vaultAddress;
@@ -22,11 +21,17 @@ export async function GET(request) {
     }
 
     const cacheKey = `element369_holders_${page}_${pageSize}_${wallet || 'all'}`;
-    if (cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < CACHE_TTL) {
-      log(`[Element369] Cache hit: ${cacheKey}`);
-      return NextResponse.json(cache[cacheKey].data);
+    try {
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        log(`[Element369] Cache hit: ${cacheKey}`);
+        return NextResponse.json(cachedData);
+      }
+      log(`[Element369] Cache miss: ${cacheKey}`);
+    } catch (cacheError) {
+      log(`[Element369] Cache read error: ${cacheError.message}`);
+      // Proceed without cache to avoid blocking the request
     }
-    log(`[Element369] Cache miss: ${cacheKey}`);
 
     // Fetch owners
     const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
@@ -181,9 +186,15 @@ export async function GET(request) {
       pageSize,
       totalPages: Math.ceil(totalTokens / pageSize),
     };
-    cache[cacheKey] = { data: response, timestamp: Date.now() };
-    log(`[Element369] Success: ${holders.length} holders`);
 
+    try {
+      await setCache(cacheKey, response);
+      log(`[Element369] Cached response: ${cacheKey}`);
+    } catch (cacheError) {
+      log(`[Element369] Cache write error: ${cacheError.message}`);
+    }
+
+    log(`[Element369] Success: ${holders.length} holders`);
     return NextResponse.json(response);
   } catch (error) {
     log(`[Element369] Error: ${error.message}`);
