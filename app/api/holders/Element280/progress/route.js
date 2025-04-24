@@ -1,39 +1,47 @@
-import { NextResponse } from 'next/server';
-import { log } from '@/app/api/utils';
-import { getCacheState } from '../route';
+// /app/api/holders/Element280/progress/route.js
+import { NextResponse } from "next/server";
+import { log } from "@/app/api/utils";
+import { getCacheState } from "../route";
+import { contractAddresses } from "@/app/nft-contracts";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function GET(request) {
-  const { isCachePopulating, holdersMapCache, totalOwners, progressState } = await getCacheState();
-  const contractName = 'element280';
-
-  
-  log(`Handling /progress: isPopulating=${isCachePopulating}, totalWallets=${holdersMapCache?.length || 0}, totalOwners=${totalOwners}, step=${progressState.step}`);
+  const address = contractAddresses.element280.address;
+  if (!address) {
+    log(`[element280] [ERROR] Element280 contract address not found`);
+    return NextResponse.json({ error: "Element280 contract address not found" }, { status: 400 });
+  }
 
   try {
-    const progressPercentage = progressState.totalNfts > 0 ? (progressState.processedNfts / progressState.totalNfts) * 100 : 0;
-    const phase = isCachePopulating
-      ? {
-          fetching_supply: 'Fetching total supply',
-          fetching_ownership: 'Fetching NFT ownership',
-          initializing_holders: 'Initializing holder data',
-          fetching_tiers: `Fetching tiers (${progressPercentage.toFixed(1)}%)`,
-          fetching_rewards: `Fetching rewards (${progressPercentage.toFixed(1)}%)`,
-          calculating_metrics: 'Calculating multipliers and rankings',
-          error: 'Error during processing',
-        }[progressState.step] || 'Processing'
-      : 'Idle';
+    log(`[element280] [STAGE] Handling /progress for ${address}`);
+    const { isCachePopulating, totalOwners, progressState, debugId } = await getCacheState(address);
+    const totalLiveHolders = totalOwners;
+    const progressPercentage =
+      progressState.totalNfts > 0
+        ? ((progressState.processedNfts / progressState.totalNfts) * 100).toFixed(1)
+        : "0.0";
+    const phase =
+      progressState.step === "completed"
+        ? "Completed"
+        : progressState.step === "idle"
+        ? "Idle"
+        : progressState.step === "error"
+        ? "Error"
+        : "In Progress";
 
-    return NextResponse.json({
+    const response = {
       isPopulating: isCachePopulating,
-      totalWallets: holdersMapCache?.length || 0,
+      totalLiveHolders,
       totalOwners,
       phase,
-      progressPercentage: progressPercentage.toFixed(1),
-    });
+      progressPercentage,
+    };
+
+    log(`[element280] [PROD_DEBUG] Handling /progress for ${address}: isPopulating=${isCachePopulating}, totalLiveHolders=${totalLiveHolders}, totalOwners=${totalOwners}, step=${progressState.step}, phase=${phase}, progressPercentage=${progressPercentage}, debugId=${debugId}`);
+    return NextResponse.json(response);
   } catch (error) {
-    log(`Error in GET /progress: ${error.message}`);
+    log(`[element280] [ERROR] Error in GET /progress for ${address}: ${error.message}, stack: ${error.stack}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }

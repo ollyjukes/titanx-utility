@@ -7,6 +7,7 @@ Dependencies from package.json:
   - @covalenthq/client-sdk
   - @tanstack/react-query
   - @upstash/redis
+  - @vercel/analytics
   - @wagmi/connectors
   - alchemy-sdk
   - async-mutex
@@ -16,6 +17,7 @@ Dependencies from package.json:
   - framer-motion
   - minimist
   - next
+  - node-cache
   - node-fetch
   - p-limit
   - pino
