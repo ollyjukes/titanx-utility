@@ -1,29 +1,50 @@
-// /app/api/holders/Element280/validate-burned/route.js
-import { NextResponse } from "next/server";
-import { client, log, getCache, setCache } from "@/app/api/utils";
-import { contractAddresses, element280MainAbi } from "@/app/nft-contracts";
-import pLimit from "p-limit";
-import { parseAbiItem } from "viem";
+import { NextResponse } from 'next/server';
+import { client, log, batchMulticall, saveCacheState, loadCacheState } from '@/app/api/utils';
+import { contractAddresses, element280MainAbi } from '@/app/nft-contracts';
+import pLimit from 'p-limit';
+import { parseAbiItem } from 'viem';
+import NodeCache from 'node-cache';
+import fs from 'fs/promises';
 
-const DISABLE_REDIS = process.env.DISABLE_ELEMENT280_REDIS === "true";
-const BURNED_EVENTS_CACHE_KEY = "element280_burned_events_detailed";
+// force-dynamic
+// This route is dynamic and should not be cached by Next.js
+// This is important for streaming responses
+export const dynamic = 'force-dynamic';
+
+// Constants
+const BURN_ADDRESS = '0x0000000000000000000000000000000000000000';
+const DEPLOYMENT_BLOCK = 20945304; // From nft-contracts.js
+const MAX_BLOCK_RANGE = 2000; // Optimized for efficiency
+const RECENT_BLOCK_CHECK = 10000; // Check last 10,000 blocks for new burns
 const EVENT_CACHE_TTL = 24 * 60 * 60;
-const DEPLOYMENT_BLOCK = 17435629;
-const MAX_BLOCK_RANGE = 5000;
-const BURN_ADDRESS = "0x0000000000000000000000000000000000000000";
+const BURNED_EVENTS_CACHE_KEY = 'element280_burned_events_detailed';
+const METADATA_CACHE_KEY = 'element280_burned_metadata';
+const DISABLE_REDIS = process.env.DISABLE_ELEMENT280_REDIS === 'true';
 
-// In-memory storage, keyed by contract address
-const inMemoryStorage = new Map();
+// Initialize node-cache
+const cache = new NodeCache({ stdTTL: EVENT_CACHE_TTL });
 
 // Initialize storage
 function initStorage(contractAddress) {
-  if (!inMemoryStorage.has(contractAddress)) {
-    inMemoryStorage.set(contractAddress, {
-      burnedEventsDetailedCache: null,
-    });
-    log(`[element280] [INIT] Initialized validate-burned storage for ${contractAddress}`);
+  const cacheKey = `burned_storage_${contractAddress}`;
+  let storage = cache.get(cacheKey);
+  if (!storage) {
+    storage = { burnedEventsDetailedCache: null, lastBurnBlock: 22326677 }; // Initialize with known last burn block
+    cache.set(cacheKey, storage);
+    log(`[element280] [INIT] Initialized node-cache for burned events: ${contractAddress}`);
   }
-  return inMemoryStorage.get(contractAddress);
+  return storage;
+}
+
+// Load metadata (last burn block)
+async function loadMetadata(contractAddress) {
+  const metadata = await loadCacheState(`burned_metadata_${contractAddress}`);
+  return metadata ? metadata.lastBurnBlock : 22326677; // Default to known last burn block
+}
+
+// Save metadata
+async function saveMetadata(contractAddress, lastBurnBlock) {
+  await saveCacheState(`burned_metadata_${contractAddress}`, { lastBurnBlock });
 }
 
 // Retry utility
@@ -42,123 +63,202 @@ async function retry(fn, attempts = 5, delay = (retryCount) => Math.min(1000 * 2
   }
 }
 
-// Validate burned NFTs
+// Update last burn block by checking recent blocks
+async function updateLastBurnBlock(contractAddress, currentLastBurnBlock, endBlock) {
+  const fromBlock = Math.max(currentLastBurnBlock + 1, DEPLOYMENT_BLOCK);
+  const toBlock = Math.min(fromBlock + RECENT_BLOCK_CHECK, Number(endBlock));
+  if (fromBlock > toBlock) return currentLastBurnBlock;
+
+  log(`[element280] [DEBUG] Checking recent blocks ${fromBlock}-${toBlock} for new burns`);
+  const logs = await retry(() =>
+    client.getLogs({
+      address: contractAddress,
+      event: parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'),
+      fromBlock: BigInt(fromBlock),
+      toBlock: BigInt(toBlock),
+    })
+  );
+  const burnLogs = logs.filter(log => log.args.to.toLowerCase() === BURN_ADDRESS);
+  if (burnLogs.length > 0) {
+    const latestBurnBlock = Math.max(...burnLogs.map(log => Number(log.blockNumber)));
+    log(`[element280] [DEBUG] Found new burns, updating lastBurnBlock to ${latestBurnBlock}`);
+    return latestBurnBlock;
+  }
+  return currentLastBurnBlock;
+}
+
+// Validate burned events
 async function validateBurnedEvents(contractAddress) {
   const storage = initStorage(contractAddress);
-  let cachedData = null;
   if (DISABLE_REDIS) {
     if (storage.burnedEventsDetailedCache) {
-      cachedData = storage.burnedEventsDetailedCache;
-      log(`[element280] [DEBUG] Using in-memory detailed burned events cache for ${contractAddress}: ${cachedData.burnedCount} burned NFTs`);
+      log(`[element280] [DEBUG] Cache hit for burned events: ${storage.burnedEventsDetailedCache.burnedCount} events`);
+      return storage.burnedEventsDetailedCache;
     }
-  } else {
-    try {
-      cachedData = await getCache(`${BURNED_EVENTS_CACHE_KEY}_${contractAddress}`);
-      if (cachedData) {
-        log(`[element280] [DEBUG] Using Redis detailed burned events cache for ${contractAddress}: ${cachedData.burnedCount} burned NFTs`);
-      }
-    } catch (cacheError) {
-      log(`[element280] [ERROR] Cache read error for detailed burned events: ${cacheError.message}`);
+    const persistedCache = await loadCacheState(`burned_${contractAddress}`);
+    if (persistedCache) {
+      storage.burnedEventsDetailedCache = persistedCache;
+      log(`[element280] [DEBUG] Loaded persisted burned events: ${persistedCache.burnedCount} events`);
+      return persistedCache;
     }
   }
 
-  if (cachedData) {
-    return cachedData;
-  }
-
-  log(`[element280] [STAGE] Validating burned NFTs via Transfer events for ${contractAddress}`);
+  log(`[element280] [STAGE] Fetching burned events for ${contractAddress}`);
   const burnedEvents = [];
   let burnedCount = 0;
   const endBlock = await retry(() => client.getBlockNumber());
-  const limit = pLimit(3);
+  let lastBurnBlock = await loadMetadata(contractAddress);
+  lastBurnBlock = await updateLastBurnBlock(contractAddress, lastBurnBlock, endBlock);
   const ranges = [];
-  for (let fromBlock = DEPLOYMENT_BLOCK; fromBlock <= endBlock; fromBlock += MAX_BLOCK_RANGE) {
-    const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, Number(endBlock));
+  for (let fromBlock = DEPLOYMENT_BLOCK; fromBlock <= lastBurnBlock; fromBlock += MAX_BLOCK_RANGE) {
+    const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, lastBurnBlock);
     ranges.push({ fromBlock, toBlock });
   }
 
-  try {
-    await Promise.all(
-      ranges.map(({ fromBlock, toBlock }, index) =>
-        limit(async () => {
-          try {
-            log(`[element280] [PROGRESS] Processing blocks ${fromBlock}-${toBlock} for ${contractAddress} (${index + 1}/${ranges.length})`);
+  const limit = pLimit(2); // Reduced concurrency
+  for (const [index, { fromBlock, toBlock }] of ranges.entries()) {
+    try {
+      log(`[element280] [PROGRESS] Processing blocks ${fromBlock}-${toBlock} for ${contractAddress} (${index + 1}/${ranges.length})`);
+      const logs = await retry(() =>
+        client.getLogs({
+          address: contractAddress,
+          event: parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'),
+          fromBlock: BigInt(fromBlock),
+          toBlock: BigInt(toBlock),
+        })
+      );
+      const burnLogs = logs.filter(log => log.args.to.toLowerCase() === BURN_ADDRESS);
+      if (burnLogs.length === 0) continue;
+
+      const tokenIds = burnLogs.map(log => log.args.tokenId);
+      const tierCalls = tokenIds.map(tokenId => ({
+        address: contractAddress,
+        abi: element280MainAbi,
+        functionName: 'getNftTier',
+        args: [tokenId],
+      }));
+      const tierResults = await batchMulticall(tierCalls, 50);
+      const block = await retry(() => client.getBlock({ blockNumber: burnLogs[0]?.blockNumber }));
+
+      burnLogs.forEach((log, i) => {
+        const tier = tierResults[i].status === 'success' ? Number(tierResults[i].result) : 0;
+        burnedEvents.push({
+          tokenId: log.args.tokenId.toString(),
+          tier,
+          from: log.args.from.toLowerCase(),
+          transactionHash: log.transactionHash.toLowerCase(),
+          blockNumber: Number(log.blockNumber),
+          blockTimestamp: Number(block.timestamp),
+        });
+        burnedCount++;
+      });
+    } catch (error) {
+      log(`[element280] [ERROR] Failed to process blocks ${fromBlock}-${toBlock}: ${error.message}, stack: ${error.stack}`);
+    }
+  }
+
+  const result = { burnedCount, events: burnedEvents, timestamp: Date.now() };
+  if (DISABLE_REDIS) {
+    storage.burnedEventsDetailedCache = result;
+    storage.lastBurnBlock = lastBurnBlock;
+    cache.set(`burned_storage_${contractAddress}`, storage);
+    await saveCacheState(`burned_${contractAddress}`, result);
+    await saveMetadata(contractAddress, lastBurnBlock);
+  }
+  log(`[element280] [STAGE] Completed burned events fetch: ${burnedCount} events, lastBurnBlock=${lastBurnBlock}`);
+  return result;
+}
+
+// Stream burned events
+export async function GET() {
+  const address = contractAddresses.element280.address;
+  if (!address) {
+    log(`[element280] [ERROR] Element280 contract address not found`);
+    return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
+  }
+
+  return new Response(
+    new ReadableStream({
+      async start(controller) {
+        try {
+          const storage = initStorage(address);
+          if (DISABLE_REDIS && storage.burnedEventsDetailedCache) {
+            controller.enqueue(JSON.stringify({
+              complete: true,
+              result: storage.burnedEventsDetailedCache,
+            }) + '\n');
+            controller.close();
+            return;
+          }
+
+          const burnedEvents = [];
+          let burnedCount = 0;
+          const endBlock = await retry(() => client.getBlockNumber());
+          let lastBurnBlock = await loadMetadata(address);
+          lastBurnBlock = await updateLastBurnBlock(address, lastBurnBlock, endBlock);
+          const ranges = [];
+          for (let fromBlock = DEPLOYMENT_BLOCK; fromBlock <= lastBurnBlock; fromBlock += MAX_BLOCK_RANGE) {
+            const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, lastBurnBlock);
+            ranges.push({ fromBlock, toBlock });
+          }
+
+          const limit = pLimit(2);
+          for (const [index, { fromBlock, toBlock }] of ranges.entries()) {
+            log(`[element280] [PROGRESS] Processing blocks ${fromBlock}-${toBlock} for ${address} (${index + 1}/${ranges.length})`);
             const logs = await retry(() =>
               client.getLogs({
-                address: contractAddress,
+                address,
                 event: parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'),
                 fromBlock: BigInt(fromBlock),
                 toBlock: BigInt(toBlock),
               })
             );
-            for (const log of logs) {
-              if (log.args.to.toLowerCase() === BURN_ADDRESS) {
-                let tier = 0;
-                try {
-                  const tierResult = await retry(() =>
-                    client.readContract({
-                      address: contractAddress,
-                      abi: element280MainAbi,
-                      functionName: "getNftTier",
-                      args: [log.args.tokenId],
-                      blockNumber: log.blockNumber,
-                    })
-                  );
-                  tier = Number(tierResult);
-                } catch (error) {
-                  log(`[element280] [WARN] Failed to fetch tier for burned token ${log.args.tokenId}: ${error.message}`);
-                }
-                const block = await retry(() => client.getBlock({ blockNumber: log.blockNumber }));
-                burnedEvents.push({
-                  tokenId: log.args.tokenId.toString(),
-                  tier,
-                  from: log.args.from.toLowerCase(),
-                  transactionHash: log.transactionHash.toLowerCase(),
-                  blockNumber: Number(log.blockNumber),
-                  blockTimestamp: Number(block.timestamp),
-                });
-                burnedCount++;
-              }
-            }
-          } catch (error) {
-            log(`[element280] [ERROR] Failed to fetch Transfer events for blocks ${fromBlock}-${toBlock}: ${error.message}`);
+            const burnLogs = logs.filter(log => log.args.to.toLowerCase() === BURN_ADDRESS);
+            if (burnLogs.length === 0) continue;
+
+            const tokenIds = burnLogs.map(log => log.args.tokenId);
+            const tierCalls = tokenIds.map(tokenId => ({
+              address,
+              abi: element280MainAbi,
+              functionName: 'getNftTier',
+              args: [tokenId],
+            }));
+            const tierResults = await batchMulticall(tierCalls, 50);
+            const block = await retry(() => client.getBlock({ blockNumber: burnLogs[0]?.blockNumber }));
+
+            burnLogs.forEach((log, i) => {
+              const tier = tierResults[i].status === 'success' ? Number(tierResults[i].result) : 0;
+              const event = {
+                tokenId: log.args.tokenId.toString(),
+                tier,
+                from: log.args.from.toLowerCase(),
+                transactionHash: log.transactionHash.toLowerCase(),
+                blockNumber: Number(log.blockNumber),
+                blockTimestamp: Number(block.timestamp),
+              };
+              burnedEvents.push(event);
+              burnedCount++;
+              controller.enqueue(JSON.stringify({ event, progress: { index: index + 1, total: ranges.length } }) + '\n');
+            });
           }
-        })
-      )
-    );
 
-    log(`[element280] [STAGE] Validated ${burnedCount} burned NFTs with ${burnedEvents.length} events for ${contractAddress}`);
-    const result = { burnedCount, events: burnedEvents, timestamp: Date.now() };
-
-    if (DISABLE_REDIS) {
-      storage.burnedEventsDetailedCache = result;
-    } else {
-      await setCache(`${BURNED_EVENTS_CACHE_KEY}_${contractAddress}`, result, EVENT_CACHE_TTL);
-    }
-
-    return result;
-  } catch (error) {
-    log(`[element280] [ERROR] Failed to validate burned events for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
-    return { burnedCount: 0, events: [], timestamp: Date.now() };
-  }
-}
-
-export async function GET() {
-  const address = contractAddresses.element280.address;
-  if (!address) {
-    log(`[element280] [ERROR] Element280 contract address not found`);
-    return NextResponse.json({ error: "Element280 contract address not found" }, { status: 400 });
-  }
-
-  try {
-    const result = await validateBurnedEvents(address);
-    return NextResponse.json({
-      burnedCount: result.burnedCount,
-      events: result.events,
-      cachedAt: new Date(result.timestamp).toISOString(),
-    });
-  } catch (error) {
-    log(`[element280] [ERROR] Error in GET /api/holders/Element280/validate-burned: ${error.message}, stack: ${error.stack}`);
-    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
-  }
+          const result = { burnedCount, events: burnedEvents, timestamp: Date.now() };
+          if (DISABLE_REDIS) {
+            storage.burnedEventsDetailedCache = result;
+            storage.lastBurnBlock = lastBurnBlock;
+            cache.set(`burned_storage_${address}`, storage);
+            await saveCacheState(`burned_${address}`, result);
+            await saveMetadata(address, lastBurnBlock);
+          }
+          controller.enqueue(JSON.stringify({ complete: true, result }) + '\n');
+          controller.close();
+        } catch (error) {
+          log(`[element280] [ERROR] Streaming error: ${error.message}, stack: ${error.stack}`);
+          controller.enqueue(JSON.stringify({ error: `Server error: ${error.message}` }) + '\n');
+          controller.close();
+        }
+      },
+    }),
+    { headers: { 'Content-Type': 'text/event-stream' } }
+  );
 }

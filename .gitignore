@@ -46,3 +46,6 @@ next-env.d.ts*.sqlite
 output.txt
 scripts/backups/
 .env*.local
+
+cache_*.json
+burned_events_*.json

@@ -3,24 +3,13 @@
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import LoadingIndicator from './LoadingIndicator';
-import { contractDetails, contractTiers, contractAddresses, vaultAddresses } from '@/app/nft-contracts';
+import { contractDetails, contractTiers, contractAddresses, vaultAddresses, element280MainAbi, element280VaultAbi } from '@/app/nft-contracts';
 import { Bar } from 'react-chartjs-2';
 import Chart from 'chart.js/auto';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { useNFTStore } from '../app/store';
-
-// Contract ABIs for Element280
-const element280Abi = [
-  { name: 'totalSupply', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-  { name: 'totalBurned', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-  { name: 'getTotalNftsPerTiers', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256[]' }] },
-  { name: 'multiplierPool', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-];
-const element280VaultAbi = [
-  { name: 'totalRewardPool', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-];
 
 // Retry utility
 async function retry(fn, attempts = 5, delay = retryCount => Math.min(2000 * 2 ** retryCount, 10000)) {
@@ -58,38 +47,70 @@ async function fetchContractData() {
     const results = await retry(() =>
       client.multicall({
         contracts: [
-          { address: contractAddress, abi: element280Abi, functionName: 'totalSupply' },
-          { address: contractAddress, abi: element280Abi, functionName: 'totalBurned' },
-          { address: contractAddress, abi: element280Abi, functionName: 'getTotalNftsPerTiers' },
-          { address: contractAddress, abi: element280Abi, functionName: 'multiplierPool' },
+          { address: contractAddress, abi: element280MainAbi, functionName: 'totalSupply' },
+          { address: contractAddress, abi: element280MainAbi, functionName: 'getTotalNftsPerTiers' },
+          { address: contractAddress, abi: element280MainAbi, functionName: 'multiplierPool' },
           { address: vaultAddress, abi: element280VaultAbi, functionName: 'totalRewardPool' },
         ],
       })
     );
-    const [totalSupply, totalBurned, tierCounts, multiplierPool, totalRewardPool] = results;
+    console.log(`[NFTPage] [DEBUG] multicall results: ${JSON.stringify(results, (k, v) => (typeof v === 'bigint' ? v.toString() : v), 2)}`);
+    const [totalSupply, tierCounts, multiplierPool, totalRewardPool] = results;
     if (totalSupply.status === 'failure') {
       throw new Error(`totalSupply call failed: ${totalSupply.error}`);
     }
-    if (totalBurned.status === 'failure') {
-      throw new Error(`totalBurned call failed: ${totalBurned.error}`);
+    if (tierCounts.status === 'failure' || !tierCounts.result) {
+      console.warn(`[NFTPage] [WARN] getTotalNftsPerTiers failed or returned no data: ${tierCounts.error || 'empty result'}`);
     }
-    if (tierCounts.status === 'failure') {
-      throw new Error(`getTotalNftsPerTiers call failed: ${tierCounts.error}`);
-    }
-    if (multiplierPool.status === 'failure') {
-      throw new Error(`multiplierPool call failed: ${multiplierPool.error}`);
+    if (multiplierPool.status === 'failure' || !multiplierPool.result) {
+      console.warn(`[NFTPage] [WARN] multiplierPool failed or returned no data: ${multiplierPool.error || 'empty result'}`);
     }
     if (totalRewardPool.status === 'failure') {
       throw new Error(`totalRewardPool call failed: ${totalRewardPool.error}`);
     }
+
+    let burnedDistribution = [0, 0, 0, 0, 0, 0];
+    let totalBurned = 0;
+    try {
+      const res = await fetch('/api/holders/Element280/validate-burned', { cache: 'no-store' });
+      if (res.ok) {
+        const reader = res.body.getReader();
+        let events = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n').filter(line => line);
+          for (const line of lines) {
+            const data = JSON.parse(line);
+            if (data.event) {
+              const tier = data.event.tier;
+              if (tier >= 1 && tier <= 6) {
+                burnedDistribution[tier - 1]++;
+              }
+            }
+            if (data.complete) {
+              events = data.result.events;
+              totalBurned = data.result.burnedCount;
+            }
+          }
+        }
+        console.log(`[NFTPage] [DEBUG] Burned distribution: ${burnedDistribution}, total events: ${events.length}, totalBurned: ${totalBurned}`);
+      } else {
+        console.error(`[NFTPage] [ERROR] Failed to fetch burned distribution: ${res.status}`);
+      }
+    } catch (err) {
+      console.error(`[NFTPage] [ERROR] Burned distribution fetch error: ${err.message}, stack: ${err.stack}`);
+    }
+
     return {
-      totalMinted: Number(totalSupply.result) + Number(totalBurned.result),
-      totalBurned: Number(totalBurned.result),
+      totalMinted: Number(totalSupply.result) + totalBurned,
+      totalBurned,
       totalLive: Number(totalSupply.result),
-      tierDistribution: tierCounts.result.map(Number),
-      multiplierPool: Number(multiplierPool.result),
+      tierDistribution: tierCounts.status === 'success' && tierCounts.result ? tierCounts.result.map(Number) : [0, 0, 0, 0, 0, 0],
+      multiplierPool: multiplierPool.status === 'success' && multiplierPool.result ? Number(multiplierPool.result) : 0,
       totalRewardPool: Number(totalRewardPool.result) / 1e18,
-      burnedDistribution: [0, 0, 0, 0, 0, 0],
+      burnedDistribution,
     };
   } catch (error) {
     console.error(`[NFTPage] [ERROR] fetchContractData failed: ${error.message}, stack: ${error.stack}`);
@@ -174,7 +195,7 @@ export default function NFTPage({ chain, contract }) {
     setError(null);
 
     try {
-      let progressData = { isPopulating: false, phase: 'Idle', progressPercentage: 0 };
+      let progressData = { isPopulating: false, phase: 'Idle', progressPercentage: 0, totalOwners: 0 };
       if (isElement280) {
         try {
           console.log(`[NFTPage] [INFO] Fetching progress from ${apiEndpoint}/progress`);
@@ -183,13 +204,48 @@ export default function NFTPage({ chain, contract }) {
             console.error(`[NFTPage] [ERROR] Progress fetch failed: ${res.status}`);
           } else {
             progressData = await res.json();
+            if (progressData.totalOwners === 0 && progressData.phase === 'Idle') {
+              console.log(`[NFTPage] [INFO] Stale progress, triggering cache refresh`);
+              await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
+              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+              if (retryRes.ok) progressData = await retryRes.json();
+            }
           }
         } catch (err) {
           console.error(`[NFTPage] [ERROR] Progress fetch error: ${err.message}, stack: ${err.stack}`);
         }
         setProgress(progressData);
       }
-      await fetchAllHolders();
+
+      const cacheKey = `contract_data_${contractId}`;
+      const cachedData = getCache(cacheKey);
+      if (cachedData && cachedData.totalMinted > 0) {
+        console.log(`[NFTPage] [INFO] Cache hit for ${cacheKey}`);
+        setData(cachedData);
+        setLoading(false);
+        return;
+      }
+
+      let contractData;
+      if (isElement280) {
+        contractData = await fetchContractData();
+      } else {
+        // Placeholder for other contracts (unchanged)
+        contractData = {
+          totalMinted: 0,
+          totalBurned: 0,
+          totalLive: 0,
+          tierDistribution: [0, 0, 0, 0, 0, 0],
+          multiplierPool: 0,
+          totalRewardPool: 0,
+          burnedDistribution: [0, 0, 0, 0, 0, 0],
+        };
+        console.log(`[NFTPage] [INFO] Using placeholder data for non-Element280 contract: ${contractId}`);
+      }
+
+      setCache(cacheKey, contractData);
+      setData(contractData);
+      setLoading(false);
     } catch (err) {
       console.error(`[NFTPage] [ERROR] Fetch error: ${err.message}, stack: ${err.stack}`);
       setError(`Failed to load ${name} data: ${err.message}. Please try again later.`);
@@ -197,23 +253,19 @@ export default function NFTPage({ chain, contract }) {
     }
   };
 
-  // Initial data fetch (no polling)
-  useEffect(() => {
-    fetchData();
-  }, [apiEndpoint, contractId, isElement280, disabled]);
-
+  // Fetch holders data
   async function fetchAllHolders() {
     const cacheKey = `holders_${contractId}`;
     const cachedData = getCache(cacheKey);
     if (cachedData) {
-      setData(cachedData);
+      setData(prev => ({ ...prev, holders: cachedData.holders, summary: cachedData.summary }));
       setLoading(false);
       return;
     }
-    console.log(`[NFTPage] [INFO] Cache miss for ${cacheKey}, fetching data`);
+    console.log(`[NFTPage] [INFO] Cache miss for ${cacheKey}, fetching holders`);
 
     try {
-      console.log(`[NFTPage] [INFO] Starting fetch for ${contractId} at ${apiEndpoint}`);
+      console.log(`[NFTPage] [INFO] Starting holders fetch for ${contractId} at ${apiEndpoint}`);
 
       let allHolders = [];
       let totalTokens = 0;
@@ -259,6 +311,10 @@ export default function NFTPage({ chain, contract }) {
             toDistributeDay28 = json.toDistributeDay28 || toDistributeDay28;
             toDistributeDay90 = json.toDistributeDay90 || toDistributeDay90;
             pendingRewards = json.pendingRewards || pendingRewards;
+            totalClaimableRewards = json.totalClaimableRewards || totalClaimableRewards;
+            totalInfernoRewards = json.totalInfernoRewards || totalInfernoRewards;
+            totalFluxRewards = json.totalFluxRewards || totalFluxRewards;
+            totalE280Rewards = json.totalE280Rewards || totalE280Rewards;
             summary = json.summary || summary;
             burnedNfts = json.burnedNfts || burnedNfts;
             totalPages = json.totalPages || 1;
@@ -267,66 +323,17 @@ export default function NFTPage({ chain, contract }) {
             if (!newHolders || newHolders.length === 0) break;
           } catch (err) {
             attempts++;
-            if (err.message.includes('Rate limit') || err.name === 'TimeoutError') {
-              console.log(`[NFTPage] [INFO] Retry ${attempts} for ${contractId} page ${page}: ${err.message}`);
-              await new Promise(resolve => setTimeout(resolve, 2000 * 2 ** attempts));
-            } else {
-              console.error(`[NFTPage] [ERROR] Fetch error for ${contractId} page ${page}: ${err.message}, stack: ${err.stack}`);
-              throw err;
+            console.error(`[NFTPage] [ERROR] Attempt ${attempts}/${maxAttempts} failed for page ${page}: ${err.message}`);
+            if (attempts >= maxAttempts) {
+              throw new Error(`Failed to fetch page ${page} after ${maxAttempts} attempts: ${err.message}`);
             }
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
           }
         }
-        if (!success) {
-          throw new Error(`Failed to fetch page ${page} for ${contractId} after ${maxAttempts} attempts`);
-        }
       }
 
-      const uniqueHoldersMap = new Map();
-      allHolders.forEach(holder => {
-        if (holder && holder.wallet) {
-          holder.shares = holder.shares || holder.totalShares || 0;
-          holder.totalNfts = holder.totalNfts || holder.total || 0;
-          uniqueHoldersMap.set(holder.wallet, holder);
-        }
-      });
-      const uniqueHolders = Array.from(uniqueHoldersMap.values());
-
-      const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
-      if (contractId === 'element369') {
-        totalInfernoRewards = uniqueHolders.reduce((sum, h) => sum + (h.infernoRewards || 0), 0);
-        totalFluxRewards = uniqueHolders.reduce((sum, h) => sum + (h.fluxRewards || 0), 0);
-        totalE280Rewards = uniqueHolders.reduce((sum, h) => sum + (h.e280Rewards || 0), 0);
-      } else {
-        totalClaimableRewards = uniqueHolders.reduce((sum, h) => sum + (h.claimableRewards || 0), 0);
-      }
-      if (!totalTokens && uniqueHolders.length > 0) {
-        totalTokens = uniqueHolders.reduce((sum, h) => sum + (isElement280 ? h.totalLive || 0 : h.totalNfts || 0), 0);
-      }
-
-      uniqueHolders.forEach(holder => {
-        holder.sharesPercentage = totalShares > 0 ? ((holder.shares || 0) / totalShares) * 100 : 0;
-      });
-
-      if (contractId === 'ascendant') {
-        uniqueHolders.sort((a, b) => {
-          const sharesDiff = (b.shares || 0) - (a.shares || 0);
-          if (sharesDiff !== 0) return sharesDiff;
-          return (b.totalNfts || 0) - (a.totalNfts || 0);
-        });
-        uniqueHolders.forEach((holder, index) => {
-          holder.rank = index + 1;
-          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-        });
-      } else {
-        uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.totalLive || b.total || 0) - (a.totalLive || a.total || 0));
-        uniqueHolders.forEach((holder, index) => {
-          holder.rank = index + 1;
-          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-        });
-      }
-
-      let fetchedData = {
-        holders: uniqueHolders,
+      const holdersData = {
+        holders: allHolders,
         totalTokens,
         totalLockedAscendant,
         totalShares,
@@ -342,312 +349,140 @@ export default function NFTPage({ chain, contract }) {
         burnedNfts,
       };
 
-      if (isElement280) {
-        try {
-          const blockchainSummary = await fetchContractData();
-          fetchedData.summary = { ...fetchedData.summary, ...blockchainSummary };
-          fetchedData.totalTokens = blockchainSummary.totalLive || fetchedData.totalTokens;
-          fetchedData.totalShares = blockchainSummary.multiplierPool || fetchedData.totalShares;
-          fetchedData.totalClaimableRewards = blockchainSummary.totalRewardPool || fetchedData.totalClaimableRewards;
-        } catch (err) {
-          console.error(`[NFTPage] [ERROR] Blockchain Summary Fetch Error: ${err.message}, stack: ${err.stack}`);
-        }
-      }
-
-      setCache(cacheKey, fetchedData);
-      setData(fetchedData);
+      setCache(cacheKey, holdersData);
+      setData(prev => ({ ...prev, ...holdersData }));
       setLoading(false);
     } catch (err) {
-      console.error(`[NFTPage] [ERROR] Fetch Error: ${err.message}, stack: ${err.stack}`);
-      setError(`Failed to load ${name} holders: ${err.message}. Please try again later.`);
+      console.error(`[NFTPage] [ERROR] Holders fetch error: ${err.message}, stack: ${err.stack}`);
+      setError(`Failed to load holders data: ${err.message}. Please try again later.`);
       setLoading(false);
     }
   }
 
-  // renderSummary function
-  const renderSummary = () => {
-    if (!data) return null;
+  // Initial data fetch
+  useEffect(() => {
+    fetchData();
+  }, [apiEndpoint, contractId, isElement280, disabled]);
 
-    const totalTokens = data.totalTokens || 0;
-    const totalBurned = data.summary?.totalBurned || 0;
-    const totalLockedAscendant = data.totalLockedAscendant || 0;
-    const totalClaimableRewards = (data.toDistributeDay8 || 0) + (data.toDistributeDay28 || 0) + (data.toDistributeDay90 || 0);
-    const totalInfernoRewards = data.holders.reduce((sum, h) => sum + (h.infernoRewards || 0), 0);
-    const totalFluxRewards = data.holders.reduce((sum, h) => sum + (h.fluxRewards || 0), 0);
-    const totalE280Rewards = data.holders.reduce((sum, h) => sum + (h.e280Rewards || 0), 0);
-    const pendingRewards = data.pendingRewards || 0;
-    const totalRewardPool = data.summary?.totalRewardPool || 0;
-
-    if (contractId === 'element280') {
-      const summary = data.summary || {};
-      const totalSupply = Number(summary.totalLive || totalTokens || 0);
-      const tierDistribution = summary.tierDistribution || [0, 0, 0, 0, 0, 0];
-      const burnedDistribution = summary.burnedDistribution || [0, 0, 0, 0, 0, 0];
-
-      const element280TierOrder = [
-        { tierId: '6', name: 'Legendary Amped', index: 5 },
-        { tierId: '5', name: 'Legendary', index: 4 },
-        { tierId: '4', name: 'Rare Amped', index: 3 },
-        { tierId: '2', name: 'Common Amped', index: 1 },
-        { tierId: '3', name: 'Rare', index: 2 },
-        { tierId: '1', name: 'Common', index: 0 },
-      ];
-
-      const tierData = element280TierOrder.map((tier) => {
-        const index = tier.index;
-        const tierConfig = contractTiers.element280[tier.tierId];
-        const remainingCount = Number(tierDistribution[index] || 0);
-        const burnedCount = Number(burnedDistribution[index] || 0);
-        const initialCount = remainingCount + burnedCount;
-        const burnedPercentage = initialCount > 0 ? ((burnedCount / initialCount) * 100).toFixed(2) : '0.00';
-        return {
-          name: tier.name,
-          count: remainingCount,
-          percentage: totalSupply > 0 ? ((remainingCount / totalSupply) * 100).toFixed(2) : '0.00',
-          multiplier: tierConfig.multiplier,
-          burned: burnedCount,
-          burnedPercentage,
-        };
-      });
-
-      return (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-white mb-2">Element 280 Summary</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Wallets</h3>
-              <p className="text-sm font-mono text-right">{data.holders.length.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Live NFTs</h3>
-              <p className="text-sm font-mono text-right">{totalSupply.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Burned</h3>
-              <p className="text-sm font-mono text-right">{totalBurned.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Rewards</h3>
-              <p className="text-sm font-mono text-right">{totalRewardPool.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ELMNT</p>
-            </div>
-          </div>
-          <div className="mt-4">
-            <h3 className="text-md font-semibold text-white mb-2">Tier Distribution</h3>
-            <div className="bg-gray-800 rounded-md p-3 overflow-x-auto">
-              <table className="w-full text-sm text-gray-300">
-                <thead>
-                  <tr>
-                    <th className="px-2 py-1 text-left">Tier</th>
-                    <th className="px-2 py-1 text-right">Count</th>
-                    <th className="px-2 py-1 text-right">%</th>
-                    <th className="px-2 py-1 text-right">Multiplier</th>
-                    <th className="px-2 py-1 text-right">Burned</th>
-                    <th className="px-2 py-1 text-right">Burned %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tierData.map((tier) => (
-                    <tr key={tier.name}>
-                      <td className="px-2 py-1">{tier.name}</td>
-                      <td className="px-2 py-1 text-right">{tier.count.toLocaleString()}</td>
-                      <td className="px-2 py-1 text-right">{tier.percentage}%</td>
-                      <td className="px-2 py-1 text-right">{tier.multiplier}</td>
-                      <td className="px-2 py-1 text-right">{tier.burned.toLocaleString()}</td>
-                      <td className="px-2 py-1 text-right">{tier.burnedPercentage}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          {showChart && (
-            <div className="mt-4">
-              <Bar
-                data={{
-                  labels: tierData.map(t => t.name),
-                  datasets: [
-                    {
-                      label: 'Remaining NFTs',
-                      data: tierData.map(t => t.count),
-                      backgroundColor: 'rgba(255, 159, 64, 0.5)',
-                      borderColor: 'rgba(255, 159, 64, 1)',
-                      borderWidth: 1,
-                    },
-                    {
-                      label: 'Burned NFTs',
-                      data: tierData.map(t => t.burned),
-                      backgroundColor: 'rgba(255, 99, 132, 0.5)',
-                      borderColor: 'rgba(255, 99, 132, 1)',
-                      borderWidth: 1,
-                    },
-                  ],
-                }}
-                options={{
-                  responsive: true,
-                  plugins: {
-                    legend: { position: 'top' },
-                    title: { display: true, text: 'Tier Distribution' },
-                  },
-                  scales: {
-                    y: { beginAtZero: true },
-                  },
-                }}
-              />
-            </div>
-          )}
-          <button
-            onClick={() => setShowChart(!showChart)}
-            className="mt-2 px-4 py-2 bg-orange-500 text-white rounded-md font-semibold hover:bg-orange-600"
-          >
-            {showChart ? 'Hide Chart' : 'Show Chart'}
-          </button>
-        </div>
-      );
-    } else if (contractId === 'stax') {
-      return (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-white mb-2">Stax Summary</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Wallets</h3>
-              <p className="text-sm font-mono text-right">{data.holders.length.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Live NFTs</h3>
-              <p className="text-sm font-mono text-right">{(totalTokens - totalBurned).toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Burned</h3>
-              <p className="text-sm font-mono text-right">{totalBurned.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Rewards</h3>
-              <p className="text-sm font-mono text-right">{data.holders.reduce((sum, h) => sum + (h.claimableRewards || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} X28</p>
-            </div>
-          </div>
-        </div>
-      );
-    } else if (contractId === 'element369') {
-      return (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-white mb-2">Element 369 Summary</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Wallets</h3>
-              <p className="text-sm font-mono text-right">{data.holders.length.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Live NFTs</h3>
-              <p className="text-sm font-mono text-right">{totalTokens.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Inferno</h3>
-              <p className="text-sm font-mono text-right">{totalInfernoRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETH</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Flux</h3>
-              <p className="text-sm font-mono text-right">{totalFluxRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETH</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">E280</h3>
-              <p className="text-sm font-mono text-right">{totalE280Rewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETH</p>
-            </div>
-          </div>
-        </div>
-      );
-    } else if (contractId === 'ascendant') {
-      return (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-white mb-2">Ascendant Summary</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Wallets</h3>
-              <p className="text-sm font-mono text-right">{data.holders.length.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Live NFTs</h3>
-              <p className="text-sm font-mono text-right">{totalTokens.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Locked</h3>
-              <p className="text-sm font-mono text-right">{totalLockedAscendant.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Claimable</h3>
-              <p className="text-sm font-mono text-right">{totalClaimableRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DRAGONX</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Pending</h3>
-              <p className="text-sm font-mono text-right">{pendingRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DRAGONX</p>
-            </div>
-          </div>
-        </div>
-      );
-    } else {
-      return (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-white mb-2">{name} Summary</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Wallets</h3>
-              <p className="text-sm font-mono text-right">{data.holders.length.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Live NFTs</h3>
-              <p className="text-sm font-mono text-right">{totalTokens.toLocaleString()}</p>
-            </div>
-            <div className="bg-gray-800 rounded-md p-3 text-gray-300">
-              <h3 className="text-sm font-semibold">Rewards</h3>
-              <p className="text-sm font-mono text-right">{totalClaimableRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {rewardToken || 'Unknown'}</p>
-            </div>
-          </div>
-        </div>
-      );
-    }
-  };
-
-  const getLoadingMessage = () => {
-    if (!isElement280) {
-      return `Loading all ${name || 'contract'} holders (may take up to 60 seconds)...`;
-    }
-    if (progress.isPopulating) {
-      return `Fetching ${name} data: ${progress.phase} (${progress.progressPercentage}%)...`;
-    }
-    return `Finalizing ${name} data...`;
-  };
+  // Chart data for tier distribution
+  const chartData = data && isElement280 ? {
+    labels: ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Tier 5', 'Tier 6'],
+    datasets: [
+      {
+        label: 'Live NFTs',
+        data: data.tierDistribution || [0, 0, 0, 0, 0, 0],
+        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+      },
+      {
+        label: 'Burned NFTs',
+        data: data.burnedDistribution || [0, 0, 0, 0, 0, 0],
+        backgroundColor: 'rgba(255, 99, 132, 0.6)',
+      },
+    ],
+  } : null;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
       <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
-      {loading ? (
-        <LoadingIndicator status={getLoadingMessage()} progress={progress} />
-      ) : error ? (
-        <p className="text-red-500 text-lg">Error: {error}</p>
-      ) : !data ? (
-        <p className="text-gray-400 text-lg">No data available for {name || 'this contract'}.</p>
-      ) : data.message ? (
-        <p className="text-gray-400 text-lg">{data.message}</p>
-      ) : (
-        <div className="w-full max-w-6xl">
-          <div className="mb-6 p-4 bg-gray-800 rounded-lg shadow">{renderSummary()}</div>
+
+      <AnimatePresence>
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="w-full max-w-4xl"
+          >
+            <LoadingIndicator message={`Loading ${name} data... ${isElement280 ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {error && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-red-500 text-lg mb-6"
+        >
+          {error}
+        </motion.p>
+      )}
+
+      {!loading && !error && data && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="w-full max-w-4xl"
+        >
+          <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-6">
+            <h2 className="text-2xl font-semibold mb-4">Contract Summary</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p><strong>Total Minted:</strong> {data.totalMinted?.toLocaleString() || 'N/A'}</p>
+                <p><strong>Total Live:</strong> {data.totalLive?.toLocaleString() || 'N/A'}</p>
+                <p><strong>Total Burned:</strong> {data.totalBurned?.toLocaleString() || 'N/A'}</p>
+              </div>
+              <div>
+                <p><strong>Multiplier Pool:</strong> {data.multiplierPool?.toLocaleString() || 'N/A'}</p>
+                <p><strong>Total Reward Pool:</strong> {data.totalRewardPool?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'} {rewardToken}</p>
+                <p><strong>Total Holders:</strong> {progress.totalOwners?.toLocaleString() || 'N/A'}</p>
+              </div>
+            </div>
+            {isElement280 && (
+              <div className="mt-4">
+                <button
+                  onClick={() => setShowChart(!showChart)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200"
+                >
+                  {showChart ? 'Hide Tier Distribution' : 'Show Tier Distribution'}
+                </button>
+                {showChart && chartData && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-4"
+                  >
+                    <Bar
+                      data={chartData}
+                      options={{
+                        responsive: true,
+                        plugins: {
+                          legend: { position: 'top' },
+                          title: { display: true, text: 'NFT Tier Distribution' },
+                        },
+                        scales: {
+                          y: { beginAtZero: true, title: { display: true, text: 'Number of NFTs' } },
+                          x: { title: { display: true, text: 'Tiers' } },
+                        },
+                      }}
+                    />
+                  </motion.div>
+                )}
+              </div>
+            )}
+          </div>
+
           <HolderTable
             holders={data.holders || []}
-            contract={contractId}
-            summary={data.summary}
-            loading={loading}
-            totalShares={isElement280 ? data.summary?.multiplierPool : data.totalShares}
-            totalLockedAscendant={data.totalLockedAscendant}
-            toDistributeDay8={data.toDistributeDay8}
-            toDistributeDay28={data.toDistributeDay28}
-            toDistributeDay90={data.toDistributeDay90}
-            pendingRewards={data.pendingRewards}
-            totalClaimableRewards={data.totalClaimableRewards}
-            totalInfernoRewards={data.totalInfernoRewards}
-            totalFluxRewards={data.totalFluxRewards}
-            totalE280Rewards={data.totalE280Rewards}
-            burnedNfts={data.burnedNfts}
+            totalPages={data.totalPages || 1}
+            totalTokens={data.totalTokens || 0}
+            totalLockedAscendant={data.totalLockedAscendant || 0}
+            totalShares={data.totalShares || 0}
+            toDistributeDay8={data.toDistributeDay8 || 0}
+            toDistributeDay28={data.toDistributeDay28 || 0}
+            toDistributeDay90={data.toDistributeDay90 || 0}
+            pendingRewards={data.pendingRewards || 0}
+            totalClaimableRewards={data.totalClaimableRewards || 0}
+            totalInfernoRewards={data.totalInfernoRewards || 0}
+            totalFluxRewards={data.totalFluxRewards || 0}
+            totalE280Rewards={data.totalE280Rewards || 0}
+            summary={data.summary || {}}
+            burnedNfts={data.burnedNfts || []}
+            rewardToken={rewardToken}
           />
-        </div>
+        </motion.div>
       )}
     </div>
   );

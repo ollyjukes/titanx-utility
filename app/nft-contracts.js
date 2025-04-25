@@ -3,35 +3,57 @@
 // Supported blockchain networks
 export const supportedChains = ['ETH', 'BASE'];
 
-// ABI for the main Element280 token contract (unchanged)
+// ABI for the main Element280 token contract (trimmed to used functions)
 export const element280MainAbi = [
   {
-    name: 'totalSupply',
-    outputs: [{ internalType: 'uint256', name: 'result', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
+    "inputs": [],
+    "name": "totalSupply",
+    "outputs": [{ "internalType": "uint256", "name": "result", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
-    name: 'balanceOf',
-    inputs: [{ internalType: 'address', name: 'owner', type: 'address' }],
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
+    "inputs": [{ "internalType": "address", "name": "owner", "type": "address" }],
+    "name": "balanceOf",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
-    name: 'ownerOf',
-    inputs: [{ internalType: 'uint256', name: 'tokenId', type: 'uint256' }],
-    outputs: [{ internalType: 'address', name: '', type: 'address' }],
-    stateMutability: 'view',
-    type: 'function',
+    "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }],
+    "name": "ownerOf",
+    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
   },
   {
-    name: 'getNftTier',
-    inputs: [{ internalType: 'uint256', name: 'tokenId', type: 'uint256' }],
-    outputs: [{ internalType: 'uint8', name: '', type: 'uint8' }],
-    stateMutability: 'view',
-    type: 'function',
+    "inputs": [{ "internalType": "uint256", "name": "tokenId", "type": "uint256" }],
+    "name": "getNftTier",
+    "outputs": [{ "internalType": "uint8", "name": "", "type": "uint8" }],
+    "stateMutability": "view",
+    "type": "function"
   },
+  {
+    "inputs": [{ "internalType": "address", "name": "account", "type": "address" }],
+    "name": "tokenIdsOf",
+    "outputs": [{ "internalType": "uint256[]", "name": "tokenIds", "type": "uint256[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getTotalNftsPerTiers",
+    "outputs": [{ "internalType": "uint256[]", "name": "total", "type": "uint256[]" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "multiplierPool",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
 ];
 
 // ABI for Element280 vault contract (unchanged)
@@ -63,7 +85,7 @@ export const nftContracts = {
   element280: {
     name: 'Element 280',
     symbol: 'ELMNT',
-    chain: 'ETH', // Added chain property
+    chain: 'ETH',
     address: '0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9',
     vaultAddress: '0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97',
     deploymentBlock: '20945304',

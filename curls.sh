@@ -1,11 +1,14 @@
 clear;
+echo "first check"
+curl http://localhost:3000/api/holders/Element280/progress
+echo "second"
 curl -X POST http://localhost:3000/api/holders/Element280
 
-echo "Second curl"
-curl -v "http://localhost:3000/api/holders/Element280?page=0&pageSize=100"
 echo "Third curl"
-curl http://localhost:3000/api/holders/Element280/progress
+curl -v "http://localhost:3000/api/holders/Element280?page=0&pageSize=100"
 echo "Forth curl"
+curl http://localhost:3000/api/holders/Element280/progress
+echo "Fifth curl"
 curl http://localhost:3000/api/holders/Element280/validate-burned
 
 

@@ -1,51 +1,63 @@
-
-// /app/api/holders/Element280/route.js
-import { NextResponse } from "next/server";
-import { alchemy, client, CACHE_TTL, log, getCache, setCache } from "@/app/api/utils";
-import { contractAddresses, contractTiers, vaultAddresses, element280MainAbi, element280VaultAbi } from "@/app/nft-contracts";
-import pLimit from "p-limit";
-import { parseAbiItem } from "viem";
+import { NextResponse } from 'next/server';
+import { alchemy, client, CACHE_TTL, log, getCache, setCache, saveCacheState, loadCacheState, batchMulticall } from '@/app/api/utils';
+import { contractAddresses, contractTiers, vaultAddresses, element280MainAbi, element280VaultAbi } from '@/app/nft-contracts';
+import pLimit from 'p-limit';
+import { parseAbiItem } from 'viem';
+import NodeCache from 'node-cache';
 
 // Cache state keys
-const CACHE_STATE_KEY = "element280_cache_state";
-const HOLDERS_CACHE_KEY = "element280_holders_map";
-const TOKEN_CACHE_KEY = "element280_token_cache";
-const BURNED_EVENTS_CACHE_KEY = "element280_burned_events";
-const DISABLE_REDIS = process.env.DISABLE_ELEMENT280_REDIS === "true";
+const CACHE_STATE_KEY = 'element280_cache_state';
+const HOLDERS_CACHE_KEY = 'element280_holders_map';
+const TOKEN_CACHE_KEY = 'element280_token_cache';
+const BURNED_EVENTS_CACHE_KEY = 'element280_burned_events';
+const DISABLE_REDIS = process.env.DISABLE_ELEMENT280_REDIS === 'true';
 
 // Hardcoded constants
 const TOTAL_MINTED = 16883;
-const DEPLOYMENT_BLOCK = 17435629;
-const MAX_BLOCK_RANGE = 5000;
+const DEPLOYMENT_BLOCK = 20945304; // Updated from nft-contracts.js
+const MAX_BLOCK_RANGE = 2000; // Reduced for efficiency
 const EVENT_CACHE_TTL = 24 * 60 * 60;
 
-// In-memory storage, keyed by contract address
-const inMemoryStorage = new Map(); // Map<contractAddress, {holdersMap, cacheState, burnedEventsCache}>
+// Initialize node-cache
+const cache = new NodeCache({ stdTTL: EVENT_CACHE_TTL });
 
 // Initialize storage for a contract
 function initStorage(contractAddress) {
-  if (!inMemoryStorage.has(contractAddress)) {
-    inMemoryStorage.set(contractAddress, {
+  const cacheKey = `storage_${contractAddress}`;
+  let storage = cache.get(cacheKey);
+  if (!storage) {
+    storage = {
       inMemoryHoldersMap: null,
       inMemoryCacheState: {
         isCachePopulating: false,
         holdersMapCache: null,
         totalOwners: 0,
-        progressState: { step: "idle", processedNfts: 0, totalNfts: 0 },
-        debugId: "state-" + Math.random().toString(36).slice(2),
+        progressState: { step: 'idle', processedNfts: 0, totalNfts: 0 },
+        debugId: 'state-' + Math.random().toString(36).slice(2),
       },
       burnedEventsCache: null,
-    });
-    log(`[element280] [INIT] Initialized inMemoryStorage for ${contractAddress}, debugId=${inMemoryStorage.get(contractAddress).inMemoryCacheState.debugId}`);
+    };
+    cache.set(cacheKey, storage);
+    log(`[element280] [INIT] Initialized node-cache for ${contractAddress}, debugId=${storage.inMemoryCacheState.debugId}`);
   }
-  return inMemoryStorage.get(contractAddress);
+  return storage;
 }
 
-// Export cache state
+// Cache state
 export async function getCacheState(contractAddress) {
   const storage = initStorage(contractAddress);
   if (DISABLE_REDIS) {
-    const state = storage.inMemoryCacheState;
+    let state = storage.inMemoryCacheState;
+    if (!state || state.totalOwners === 0) {
+      const persistedState = await loadCacheState(`state_${contractAddress}`);
+      if (persistedState) {
+        storage.inMemoryCacheState = persistedState;
+        state = persistedState;
+        log(`[element280] [DEBUG] Loaded persisted state from file for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+      } else {
+        log(`[element280] [DEBUG] No persisted state found for ${contractAddress}, using default: ${JSON.stringify(state, null, 2)}`);
+      }
+    }
     log(`[element280] [DEBUG] getCacheState: contract=${contractAddress}, totalOwners=${state.totalOwners}, step=${state.progressState.step}, isCachePopulating=${state.isCachePopulating}, debugId=${state.debugId}`);
     return state;
   }
@@ -56,7 +68,7 @@ export async function getCacheState(contractAddress) {
       isCachePopulating: false,
       holdersMapCache: null,
       totalOwners: 0,
-      progressState: { step: "idle", processedNfts: 0, totalNfts: 0 },
+      progressState: { step: 'idle', processedNfts: 0, totalNfts: 0 },
     };
   } catch (error) {
     log(`[element280] [ERROR] Error fetching cache state for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
@@ -64,7 +76,7 @@ export async function getCacheState(contractAddress) {
       isCachePopulating: false,
       holdersMapCache: null,
       totalOwners: 0,
-      progressState: { step: "error", processedNfts: 0, totalNfts: 0 },
+      progressState: { step: 'error', processedNfts: 0, totalNfts: 0 },
     };
   }
 }
@@ -72,9 +84,7 @@ export async function getCacheState(contractAddress) {
 // Serialize BigInt
 function serializeBigInt(obj) {
   return JSON.parse(
-    JSON.stringify(obj, (key, value) =>
-      typeof value === "bigint" ? value.toString() : value
-    )
+    JSON.stringify(obj, (key, value) => (typeof value === 'bigint' ? value.toString() : value))
   );
 }
 
@@ -96,7 +106,7 @@ async function retry(fn, attempts = 5, delay = (retryCount) => Math.min(1000 * 2
 
 // Count burned NFTs from Transfer events
 async function getBurnedCountFromEvents(contractAddress, errorLog) {
-  const burnAddress = "0x0000000000000000000000000000000000000000";
+  const burnAddress = '0x0000000000000000000000000000000000000000';
   const storage = initStorage(contractAddress);
   let cachedBurned = null;
 
@@ -123,7 +133,7 @@ async function getBurnedCountFromEvents(contractAddress, errorLog) {
   log(`[element280] [STAGE] Fetching burned NFT count from Transfer events for ${contractAddress}`);
   let burnedCount = 0;
   const endBlock = await retry(() => client.getBlockNumber());
-  const limit = pLimit(3);
+  const limit = pLimit(2); // Reduced concurrency
   const ranges = [];
   for (let fromBlock = DEPLOYMENT_BLOCK; fromBlock <= endBlock; fromBlock += MAX_BLOCK_RANGE) {
     const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, Number(endBlock));
@@ -148,7 +158,7 @@ async function getBurnedCountFromEvents(contractAddress, errorLog) {
             burnedCount += burns.length;
           } catch (error) {
             log(`[element280] [ERROR] Failed to fetch Transfer events for blocks ${fromBlock}-${toBlock}: ${error.message}`);
-            errorLog.push({ timestamp: new Date().toISOString(), phase: "fetch_burned_events", error: error.message });
+            errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_burned_events', error: error.message });
           }
         })
       )
@@ -158,6 +168,8 @@ async function getBurnedCountFromEvents(contractAddress, errorLog) {
     const cacheData = { count: burnedCount, timestamp: Date.now() };
     if (DISABLE_REDIS) {
       storage.burnedEventsCache = cacheData;
+      cache.set(`storage_${contractAddress}`, storage);
+      await saveCacheState(`burned_${contractAddress}`, cacheData);
     } else {
       await setCache(`${BURNED_EVENTS_CACHE_KEY}_${contractAddress}`, cacheData, EVENT_CACHE_TTL);
     }
@@ -165,7 +177,7 @@ async function getBurnedCountFromEvents(contractAddress, errorLog) {
     return burnedCount;
   } catch (error) {
     log(`[element280] [ERROR] Failed to fetch burned events for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "fetch_burned_events", error: error.message });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_burned_events', error: error.message });
     throw error;
   }
 }
@@ -188,15 +200,15 @@ async function getTotalSupply(contractAddress, errorLog) {
     const results = await retry(() =>
       client.multicall({
         contracts: [
-          { address: contractAddress, abi: element280MainAbi, functionName: "totalSupply" },
+          { address: contractAddress, abi: element280MainAbi, functionName: 'totalSupply' },
         ],
       })
     );
-    const totalSupply = results[0].status === "success" ? Number(results[0].result) : 0;
+    const totalSupply = results[0].status === 'success' ? Number(results[0].result) : 0;
     if (isNaN(totalSupply)) {
       const errorMsg = `Invalid totalSupply=${totalSupply}`;
       log(`[element280] [ERROR] ${errorMsg}`);
-      errorLog.push({ timestamp: new Date().toISOString(), phase: "fetch_total_supply", error: errorMsg });
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_total_supply', error: errorMsg });
       throw new Error(errorMsg);
     }
 
@@ -204,14 +216,14 @@ async function getTotalSupply(contractAddress, errorLog) {
     if (totalBurned < 0) {
       const errorMsg = `Invalid totalBurned=${totalBurned} from events`;
       log(`[element280] [ERROR] ${errorMsg}`);
-      errorLog.push({ timestamp: new Date().toISOString(), phase: "validate_burned", error: errorMsg });
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'validate_burned', error: errorMsg });
       throw new Error(errorMsg);
     }
 
     if (totalSupply + totalBurned > TOTAL_MINTED) {
       const errorMsg = `Invalid data: totalSupply (${totalSupply}) + totalBurned (${totalBurned}) exceeds totalMinted (${TOTAL_MINTED})`;
       log(`[element280] [ERROR] ${errorMsg}`);
-      errorLog.push({ timestamp: new Date().toISOString(), phase: "validate_supply", error: errorMsg });
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'validate_supply', error: errorMsg });
       throw new Error(errorMsg);
     }
 
@@ -224,7 +236,7 @@ async function getTotalSupply(contractAddress, errorLog) {
     return { totalSupply, totalBurned };
   } catch (error) {
     log(`[element280] [ERROR] Failed to fetch total supply for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "fetch_total_supply", error: error.message });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_total_supply', error: error.message });
     throw error;
   }
 }
@@ -233,13 +245,13 @@ async function getTotalSupply(contractAddress, errorLog) {
 async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
   const ownershipByToken = new Map();
   const ownershipByWallet = new Map();
-  const burnAddress = "0x0000000000000000000000000000000000000000";
+  const burnAddress = '0x0000000000000000000000000000000000000000';
   const failedTokens = new Set();
 
   if (!contractAddress || !/^0x[a-fA-F0-9]{40}$/.test(contractAddress)) {
     const errorMsg = `Invalid contract address: ${contractAddress}`;
     log(`[element280] [ERROR] ${errorMsg}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "validate_contract", error: errorMsg });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'validate_contract', error: errorMsg });
     throw new Error(errorMsg);
   }
 
@@ -254,7 +266,7 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
       if (!response.nfts || !Array.isArray(response.nfts)) {
         const errorMsg = `Invalid NFT response: nfts array missing`;
         log(`[element280] [ERROR] ${errorMsg}`);
-        errorLog.push({ timestamp: new Date().toISOString(), phase: "fetch_token_ids", error: errorMsg });
+        errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_token_ids', error: errorMsg });
         throw new Error(errorMsg);
       }
       response.nfts.forEach(nft => {
@@ -266,14 +278,14 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
     timings.tokenIdFetch = Date.now() - tokenIdStart;
   } catch (error) {
     log(`[element280] [ERROR] Alchemy error fetching NFTs for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "fetch_token_ids", error: error.message });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_token_ids', error: error.message });
     throw error;
   }
 
   if (tokenIds.length === 0) {
     const errorMsg = `No token IDs found for contract ${contractAddress}`;
     log(`[element280] [ERROR] ${errorMsg}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "fetch_token_ids", error: errorMsg });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_token_ids', error: errorMsg });
     throw new Error(errorMsg);
   }
 
@@ -281,7 +293,7 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
   const ownerCalls = tokenIds.map(tokenId => ({
     address: contractAddress,
     abi: element280MainAbi,
-    functionName: "ownerOf",
+    functionName: 'ownerOf',
     args: [BigInt(tokenId)],
   }));
   const limit = pLimit(10);
@@ -299,7 +311,7 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
   let nonExistentTokens = 0;
   tokenIds.forEach((tokenId, index) => {
     const result = ownerResults[index];
-    if (result.status === "success") {
+    if (result.status === 'success') {
       const owner = result.result.toLowerCase();
       if (owner && owner !== burnAddress) {
         ownershipByToken.set(tokenId, owner);
@@ -310,12 +322,12 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
         invalidTokens++;
       }
     } else {
-      if (result.error?.message.includes("0xdf2d9b42")) {
+      if (result.error?.message.includes('0xdf2d9b42')) {
         nonExistentTokens++;
-        failedTokens.add(tokenId);
+        failedFacts.add(tokenId);
       } else {
-        log(`[element280] [ERROR] Failed to fetch owner for token ${tokenId}: ${result.error || "unknown error"}`);
-        errorLog.push({ timestamp: new Date().toISOString(), phase: "process_owners", error: `Failed to fetch owner for token ${tokenId}: ${result.error || "unknown error"}` });
+        log(`[element280] [ERROR] Failed to fetch owner for token ${tokenId}: ${result.error || 'unknown error'}`);
+        errorLog.push({ timestamp: new Date().toISOString(), phase: 'process_owners', error: `Failed to fetch owner for token ${tokenId}: ${result.error || 'unknown error'}` });
         failedTokens.add(tokenId);
       }
     }
@@ -323,20 +335,20 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
   timings.ownerProcess = Date.now() - ownerProcessStart;
 
   if (failedTokens.size > 0) {
-    log(`[element280] [WARN] Failed to fetch owners for ${failedTokens.size} tokens: ${[...failedTokens].join(", ")}`);
+    log(`[element280] [WARN] Failed to fetch owners for ${failedTokens.size} tokens: ${[...failedTokens].join(', ')}`);
   }
 
   const { totalSupply, totalBurned } = await getTotalSupply(contractAddress, errorLog);
   if (ownershipByToken.size > totalSupply) {
     const errorMsg = `Found ${ownershipByToken.size} live NFTs, more than totalSupply ${totalSupply}`;
     log(`[element280] [ERROR] ${errorMsg}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "validate_ownership", error: errorMsg });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'validate_ownership', error: errorMsg });
     throw new Error(errorMsg);
   }
   if (ownershipByToken.size === 0 && totalSupply > 0) {
     const errorMsg = `No valid NFTs with owners found for contract ${contractAddress}, expected up to ${totalSupply}`;
     log(`[element280] [ERROR] ${errorMsg}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "validate_ownership", error: errorMsg });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'validate_ownership', error: errorMsg });
     throw new Error(errorMsg);
   }
 
@@ -354,10 +366,12 @@ async function populateHoldersMapCache(contractAddress, tiers) {
   }
 
   state.isCachePopulating = true;
-  state.progressState = { step: "fetching_supply", processedNfts: 0, totalNfts: 0 };
+  state.progressState = { step: 'fetching_supply', processedNfts: 0, totalNfts: 0 };
   if (DISABLE_REDIS) {
     storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-    log(`[element280] [DEBUG] Updated inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+    cache.set(`storage_${contractAddress}`, storage);
+    log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+    await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
   } else {
     await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
   }
@@ -381,10 +395,12 @@ async function populateHoldersMapCache(contractAddress, tiers) {
     const supplyStart = Date.now();
     const { ownershipByToken, ownershipByWallet, totalSupply, totalBurned } = await fetchAllNftOwnership(contractAddress, errorLog, timings);
     timings.totalSupply = Date.now() - supplyStart;
-    state.progressState = { step: "fetching_ownership", processedNfts: 0, totalNfts: totalSupply };
+    state.progressState = { step: 'fetching_ownership', processedNfts: 0, totalNfts: totalSupply };
     if (DISABLE_REDIS) {
       storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-      log(`[element280] [DEBUG] Updated inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+      cache.set(`storage_${contractAddress}`, storage);
+      log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+      await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
     } else {
       await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
     }
@@ -411,10 +427,12 @@ async function populateHoldersMapCache(contractAddress, tiers) {
     timings.holderInit = Date.now() - holderInitStart;
     log(`[element280] [STAGE] Holders initialized for ${contractAddress}: ${holdersMap.size} holders, duration: ${timings.holderInit}ms`);
     state.totalOwners = holdersMap.size;
-    state.progressState = { step: "fetching_tiers", processedNfts: ownershipByToken.size, totalNfts: totalSupply };
+    state.progressState = { step: 'fetching_tiers', processedNfts: ownershipByToken.size, totalNfts: totalSupply };
     if (DISABLE_REDIS) {
       storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-      log(`[element280] [DEBUG] Updated inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+      cache.set(`storage_${contractAddress}`, storage);
+      log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+      await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
     } else {
       await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
     }
@@ -424,7 +442,7 @@ async function populateHoldersMapCache(contractAddress, tiers) {
     const tierCalls = allTokenIds.map(tokenId => ({
       address: contractAddress,
       abi: element280MainAbi,
-      functionName: "getNftTier",
+      functionName: 'getNftTier',
       args: [tokenId],
     }));
     if (tierCalls.length > 0) {
@@ -436,20 +454,22 @@ async function populateHoldersMapCache(contractAddress, tiers) {
         const results = await limit(() => retry(() => client.multicall({ contracts: chunk })));
         tierResults.push(...results);
         state.progressState = {
-          step: "fetching_tiers",
+          step: 'fetching_tiers',
           processedNfts: Math.min(ownershipByToken.size, i + chunkSize),
           totalNfts: totalSupply,
         };
         if (DISABLE_REDIS) {
           storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-          log(`[element280] [DEBUG] Updated inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+          cache.set(`storage_${contractAddress}`, storage);
+          log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+          await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
         } else {
           await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
         }
       }
       tierResults.forEach((result, index) => {
         const tokenId = allTokenIds[index].toString();
-        if (result.status === "success") {
+        if (result.status === 'success') {
           const tier = Number(result.result);
           if (tier >= 1 && tier <= 6) {
             const owner = ownershipByToken.get(tokenId);
@@ -459,15 +479,19 @@ async function populateHoldersMapCache(contractAddress, tiers) {
               if (!DISABLE_REDIS) setCache(`${TOKEN_CACHE_KEY}_${contractAddress}-${tokenId}-tier`, tier, CACHE_TTL);
             }
           }
+        } else {
+          log(`[element280] [ERROR] Failed to fetch tier for token ${tokenId}: ${result.error || 'unknown error'}`);
         }
       });
     }
     timings.tierFetch = Date.now() - tierFetchStart;
     log(`[element280] [STAGE] Tiers fetched for ${contractAddress}: ${allTokenIds.length} tokens processed, duration: ${timings.tierFetch}ms`);
-    state.progressState = { step: "fetching_rewards", processedNfts: ownershipByToken.size, totalNfts: totalSupply };
+    state.progressState = { step: 'fetching_rewards', processedNfts: ownershipByToken.size, totalNfts: totalSupply };
     if (DISABLE_REDIS) {
       storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-      log(`[element280] [DEBUG] Updated inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+      cache.set(`storage_${contractAddress}`, storage);
+      log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+      await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
     } else {
       await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
     }
@@ -479,7 +503,7 @@ async function populateHoldersMapCache(contractAddress, tiers) {
         rewardCalls.push({
           address: vaultAddresses.element280.address,
           abi: element280VaultAbi,
-          functionName: "getRewards",
+          functionName: 'getRewards',
           args: [[BigInt(tokenId)], wallet],
         });
       });
@@ -493,13 +517,15 @@ async function populateHoldersMapCache(contractAddress, tiers) {
         const results = await limit(() => retry(() => client.multicall({ contracts: chunk })));
         rewardResults.push(...results);
         state.progressState = {
-          step: "fetching_rewards",
+          step: 'fetching_rewards',
           processedNfts: Math.min(ownershipByToken.size, i + chunkSize),
           totalNfts: totalSupply,
         };
         if (DISABLE_REDIS) {
           storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-          log(`[element280] [DEBUG] Updated inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+          cache.set(`storage_${contractAddress}`, storage);
+          log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+          await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
         } else {
           await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
         }
@@ -509,7 +535,7 @@ async function populateHoldersMapCache(contractAddress, tiers) {
         let totalRewards = 0n;
         tokenIds.forEach(() => {
           const result = rewardResults[resultIndex++];
-          if (result.status === "success") {
+          if (result.status === 'success') {
             const rewardValue = BigInt(result.result[1] || 0);
             totalRewards += rewardValue;
           }
@@ -526,10 +552,12 @@ async function populateHoldersMapCache(contractAddress, tiers) {
     }
     timings.rewardFetch = Date.now() - rewardFetchStart;
     log(`[element280] [STAGE] Rewards fetched for ${contractAddress}: ${rewardCalls.length} NFTs processed, duration: ${timings.rewardFetch}ms`);
-    state.progressState = { step: "calculating_metrics", processedNfts: ownershipByToken.size, totalNfts: totalSupply };
+    state.progressState = { step: 'calculating_metrics', processedNfts: ownershipByToken.size, totalNfts: totalSupply };
     if (DISABLE_REDIS) {
       storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-      log(`[element280] [DEBUG] Updated inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+      cache.set(`storage_${contractAddress}`, storage);
+      log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+      await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
     } else {
       await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
     }
@@ -554,7 +582,10 @@ async function populateHoldersMapCache(contractAddress, tiers) {
       holdersMap.set(holder.wallet, holder);
     });
     if (!DISABLE_REDIS) await setCache(`${HOLDERS_CACHE_KEY}_${contractAddress}`, Array.from(holdersMap.entries()), CACHE_TTL);
-    if (DISABLE_REDIS) storage.inMemoryHoldersMap = holdersMap;
+    if (DISABLE_REDIS) {
+      storage.inMemoryHoldersMap = holdersMap;
+      cache.set(`storage_${contractAddress}`, storage);
+    }
     timings.metricsCalc = Date.now() - metricsStart;
     log(`[element280] [STAGE] Metrics calculated for ${contractAddress}: ${holders.length} holders, duration: ${timings.metricsCalc}ms`);
 
@@ -576,25 +607,20 @@ async function populateHoldersMapCache(contractAddress, tiers) {
       errors: errorLog,
     };
     log(`[element280] [STAGE] Cache population completed for ${contractAddress}: ${summary.nftsProcessed} NFTs, ${summary.walletsProcessed} wallets, ${summary.totalDurationMs}ms`);
-    state.progressState = { step: "completed", processedNfts: ownershipByToken.size, totalNfts: totalSupply };
+    state.progressState = { step: 'completed', processedNfts: ownershipByToken.size, totalNfts: totalSupply };
   } catch (error) {
     log(`[element280] [ERROR] Failed to populate holdersMapCache for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: "populate_cache", error: error.message });
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'populate_cache', error: error.message });
     state.holdersMapCache = null;
-    state.progressState = { step: "error", processedNfts: 0, totalNfts: 0 };
-    if (DISABLE_REDIS) {
-      storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-      log(`[element280] [DEBUG] Updated inMemoryCacheState (error) for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
-    } else {
-      await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
-    }
-    throw error;
+    state.progressState = { step: 'error', processedNfts: 0, totalNfts: 0 };
   } finally {
     state.isCachePopulating = false;
     state.totalOwners = storage.inMemoryHoldersMap ? storage.inMemoryHoldersMap.size : 0;
     if (DISABLE_REDIS) {
       storage.inMemoryCacheState = { ...state, debugId: storage.inMemoryCacheState.debugId };
-      log(`[element280] [DEBUG] Finalized inMemoryCacheState for ${contractAddress}: ${JSON.stringify(storage.inMemoryCacheState)}`);
+      cache.set(`storage_${contractAddress}`, storage);
+      log(`[element280] [DEBUG] Saving cache state for ${contractAddress}: ${JSON.stringify(state, null, 2)}`);
+      await saveCacheState(`state_${contractAddress}`, storage.inMemoryCacheState);
     } else {
       await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
     }
@@ -660,7 +686,7 @@ async function getHolderData(contractAddress, wallet, tiers) {
     client.readContract({
       address: contractAddress,
       abi: element280MainAbi,
-      functionName: "tokenIdsOf",
+      functionName: 'tokenIdsOf',
       args: [walletLower],
     })
   );
@@ -680,13 +706,13 @@ async function getHolderData(contractAddress, wallet, tiers) {
     calls.push({
       address: contractAddress,
       abi: element280MainAbi,
-      functionName: "getNftTier",
+      functionName: 'getNftTier',
       args: [tokenId],
     });
     calls.push({
       address: vaultAddresses.element280.address,
       abi: element280VaultAbi,
-      functionName: "getRewards",
+      functionName: 'getRewards',
       args: [[tokenId], walletLower],
     });
   });
@@ -697,22 +723,23 @@ async function getHolderData(contractAddress, wallet, tiers) {
   nfts.forEach((nft, index) => {
     const tierResult = results[index * 2];
     const rewardResult = results[index * 2 + 1];
-    if (tierResult.status === "success") {
+    if (tierResult.status === 'success') {
       const tier = Number(tierResult.result);
       if (tier >= 1 && tier <= 6) {
-        nft.tier = tier;
         holder.tiers[tier - 1]++;
         finalTokenIds.push(BigInt(nft.tokenId));
         if (!DISABLE_REDIS) setCache(`${TOKEN_CACHE_KEY}_${contractAddress}-${nft.tokenId}-tier`, tier, CACHE_TTL);
       }
     }
-    if (rewardResult.status === "success") {
+    if (rewardResult.status === 'success') {
       const rewardValue = BigInt(rewardResult.result[1] || 0);
       totalRewards += rewardValue;
-      if (!DISABLE_REDIS) setCache(`${TOKEN_CACHE_KEY}_${contractAddress}-${nft.tokenId}-single-reward`, rewardValue, CACHE_TTL);
     }
   });
+
   holder.tokenIds = finalTokenIds;
+  holder.total = finalTokenIds.length;
+  holder.totalLive = finalTokenIds.length;
   holder.claimableRewards = Number(totalRewards) / 1e18;
   if (isNaN(holder.claimableRewards)) {
     holder.claimableRewards = 0;
@@ -726,158 +753,157 @@ async function getHolderData(contractAddress, wallet, tiers) {
   );
   holder.displayMultiplierSum = holder.multiplierSum / 10;
 
-  const allHolders = await getAllHolders(contractAddress, tiers, 0, 100);
-  const totalMultiplierSum = allHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
-  holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-  const existingHolder = allHolders.holders.find(h => h.wallet === walletLower);
-  holder.rank = existingHolder ? existingHolder.rank : allHolders.holders.length + 1;
-
-  if (holder.total > 0) {
-    holdersMap.set(walletLower, holder);
-    if (!DISABLE_REDIS) await setCache(`${HOLDERS_CACHE_KEY}_${contractAddress}`, Array.from(holdersMap.entries()), CACHE_TTL);
-    if (DISABLE_REDIS) storage.inMemoryHoldersMap = holdersMap;
-    return serializeBigInt(holder);
-  }
-  return null;
+  if (!DISABLE_REDIS) await setCache(cacheKey, serializeBigInt(holder), CACHE_TTL);
+  return serializeBigInt(holder);
 }
 
 // Fetch all holders
-async function getAllHolders(contractAddress, tiers, page = 0, pageSize = 100, refresh = false) {
-  const cacheKey = `element280_all_${contractAddress}-${page}-${pageSize}`;
+async function getAllHolders(contractAddress, page = 0, pageSize = 100) {
   const storage = initStorage(contractAddress);
-  if (!DISABLE_REDIS && !refresh) {
-    try {
-      const cached = await getCache(cacheKey);
-      if (cached) {
-        return cached;
-      }
-    } catch (cacheError) {
-      log(`[element280] [ERROR] Cache read error for all holders: ${cacheError.message}, stack: ${cacheError.stack}`);
-    }
+  let state = await getCacheState(contractAddress);
+  while (state.isCachePopulating) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    state = await getCacheState(contractAddress);
   }
 
-  let state = await getCacheState(contractAddress);
   let holdersMap;
-  if (refresh || !state.holdersMapCache || state.isCachePopulating) {
-    while (state.isCachePopulating) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      state = await getCacheState(contractAddress);
-    }
-    if (refresh || !state.holdersMapCache) {
-      await populateHoldersMapCache(contractAddress, tiers);
-      holdersMap = DISABLE_REDIS ? storage.inMemoryHoldersMap || new Map() : new Map(await getCache(`${HOLDERS_CACHE_KEY}_${contractAddress}`) || []);
-    } else {
-      holdersMap = DISABLE_REDIS ? storage.inMemoryHoldersMap || new Map() : new Map(await getCache(`${HOLDERS_CACHE_KEY}_${contractAddress}`) || []);
+  if (!DISABLE_REDIS) {
+    try {
+      const holdersEntries = await getCache(`${HOLDERS_CACHE_KEY}_${contractAddress}`);
+      holdersMap = holdersEntries ? new Map(holdersEntries) : new Map();
+    } catch (cacheError) {
+      log(`[element280] [ERROR] Cache read error for holders map: ${cacheError.message}, stack: ${cacheError.stack}`);
+      holdersMap = new Map();
     }
   } else {
-    holdersMap = DISABLE_REDIS ? storage.inMemoryHoldersMap || new Map() : new Map(await getCache(`${HOLDERS_CACHE_KEY}_${contractAddress}`) || []);
+    holdersMap = storage.inMemoryHoldersMap || new Map();
   }
 
-  const { totalSupply, totalBurned } = await getTotalSupply(contractAddress, []);
-  const holders = Array.from(holdersMap.values());
-  const start = page * pageSize;
-  const end = Math.min(start + pageSize, holders.length);
-  const paginatedHolders = holders.slice(start, end);
-
-  let tierDistribution = Array(6).fill(0);
+  let tierDistribution = [0, 0, 0, 0, 0, 0];
   let multiplierPool = 0;
   try {
     const results = await retry(() =>
       client.multicall({
         contracts: [
-          { address: contractAddress, abi: element280MainAbi, functionName: "getTotalNftsPerTiers" },
-          { address: contractAddress, abi: element280MainAbi, functionName: "multiplierPool" },
+          { address: contractAddress, abi: element280MainAbi, functionName: 'getTotalNftsPerTiers' },
+          { address: contractAddress, abi: element280MainAbi, functionName: 'multiplierPool' },
         ],
       })
     );
-    if (results[0].status === "success") {
+    log(`[element280] [DEBUG] multicall results for tiers and multiplier: ${JSON.stringify(results, (k, v) => (typeof v === 'bigint' ? v.toString() : v), 2)}`);
+    if (results[0].status === 'success' && results[0].result) {
       tierDistribution = results[0].result.map(Number);
-      log(`[element280] [DEBUG] Fetched tierDistribution for ${contractAddress}: ${tierDistribution}`);
+      log(`[element280] [DEBUG] Fetched tierDistribution: ${tierDistribution}`);
     } else {
-      log(`[element280] [WARN] Failed to fetch getTotalNftsPerTiers for ${contractAddress}: ${results[0].error || "unknown error"}`);
+      log(`[element280] [WARN] getTotalNftsPerTiers returned no data, using default: ${tierDistribution}`);
     }
-    if (results[1].status === "success") {
+    if (results[1].status === 'success' && results[1].result) {
       multiplierPool = Number(results[1].result);
-      log(`[element280] [DEBUG] Fetched multiplierPool for ${contractAddress}: ${multiplierPool}`);
+      log(`[element280] [DEBUG] Fetched multiplierPool: ${multiplierPool}`);
     } else {
-      log(`[element280] [WARN] Failed to fetch multiplierPool for ${contractAddress}: ${results[1].error || "unknown error"}`);
+      log(`[element280] [WARN] multiplierPool returned no data, using default: ${multiplierPool}`);
     }
   } catch (error) {
-    log(`[element280] [ERROR] Failed to fetch tierDistribution or multiplierPool for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
+    log(`[element280] [ERROR] Failed to fetch tierDistribution or multiplierPool: ${error.message}, stack: ${error.stack}`);
+    // Fallback: Compute manually if critical
+    const allTokenIds = Array.from(holdersMap.values()).flatMap(h => h.tokenIds);
+    if (allTokenIds.length > 0) {
+      try {
+        const tierCalls = allTokenIds.map(tokenId => ({
+          address: contractAddress,
+          abi: element280MainAbi,
+          functionName: 'getNftTier',
+          args: [tokenId],
+        }));
+        const tierResults = await batchMulticall(tierCalls, 50);
+        tierResults.forEach(result => {
+          if (result.status === 'success') {
+            const tier = Number(result.result);
+            if (tier >= 1 && tier <= 6) {
+              tierDistribution[tier - 1]++;
+            }
+          }
+        });
+        const multipliers = Object.values(contractTiers.element280).map(t => t.multiplier);
+        multiplierPool = tierDistribution.reduce(
+          (sum, count, index) => sum + count * (multipliers[index] || 0),
+          0
+        );
+        log(`[element280] [DEBUG] Computed tierDistribution: ${tierDistribution}`);
+        log(`[element280] [DEBUG] Computed multiplierPool: ${multiplierPool}`);
+        // Cache results to avoid repeated computation
+        cache.set(`element280_tier_distribution_${contractAddress}`, { tierDistribution, multiplierPool }, EVENT_CACHE_TTL);
+      } catch (computeError) {
+        log(`[element280] [ERROR] Failed to compute tierDistribution: ${computeError.message}, stack: ${computeError.stack}`);
+      }
+    }
   }
 
-  const result = {
-    holders: paginatedHolders,
-    totalLiveTokens: holdersMap.size > 0 ? holders.reduce((sum, h) => sum + h.total, 0) : totalSupply,
-    totalLiveHolders: holders.length,
-    page,
-    pageSize,
-    totalPages: Math.ceil(holders.length / pageSize),
+  const totalTokens = Array.from(holdersMap.values()).reduce((sum, h) => sum + h.totalLive, 0);
+  const holders = Array.from(holdersMap.values());
+  const totalPages = Math.ceil(holders.length / pageSize);
+  const startIndex = page * pageSize;
+  const paginatedHolders = holders.slice(startIndex, startIndex + pageSize);
+
+  return {
+    holders: serializeBigInt(paginatedHolders),
+    totalPages,
+    totalTokens,
+    totalShares: multiplierPool,
+    totalClaimableRewards: paginatedHolders.reduce((sum, h) => sum + h.claimableRewards, 0),
     summary: {
-      totalLive: totalSupply,
-      totalBurned,
+      totalLive: totalTokens,
+      totalBurned: await getBurnedCountFromEvents(contractAddress, []),
       totalMinted: TOTAL_MINTED,
       tierDistribution,
       multiplierPool,
-      totalRewardPool: holders.reduce((sum, h) => sum + h.claimableRewards, 0),
+      totalRewardPool: 0, // Add vault call if needed
     },
   };
-
-  if (!DISABLE_REDIS) await setCache(cacheKey, serializeBigInt(result), CACHE_TTL);
-  return serializeBigInt(result);
 }
 
-// GET handler
+// API handlers
 export async function GET(request) {
-  let url = request.url || (request.nextUrl && request.nextUrl.toString());
-  if (!url) {
-    log(`[element280] [ERROR] Both request.url and request.nextUrl are undefined`);
-    return NextResponse.json({ error: "Invalid request: URL is undefined" }, { status: 400 });
+  const address = contractAddresses.element280.address;
+  if (!address) {
+    log(`[element280] [ERROR] Element280 contract address not found`);
+    return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
   }
 
+  const { searchParams } = new URL(request.url);
+  const page = parseInt(searchParams.get('page') || '0', 10);
+  const pageSize = parseInt(searchParams.get('pageSize') || '100', 10);
+  const wallet = searchParams.get('wallet');
+
   try {
-    const { searchParams } = new URL(url);
-    const wallet = searchParams.get("wallet");
-    const page = parseInt(searchParams.get("page") || "0", 10);
-    const pageSize = parseInt(searchParams.get("pageSize") || "100", 10);
-    const refresh = searchParams.get("refresh") === "true";
-
-    const address = contractAddresses.element280.address;
-    if (!address) {
-      log(`[element280] [ERROR] Element280 contract address not found`);
-      return NextResponse.json({ error: "Element280 contract address not found" }, { status: 400 });
-    }
-
     if (wallet) {
-      const holderData = await getHolderData(address, wallet, contractTiers.element280);
-      return NextResponse.json(serializeBigInt({ holders: holderData ? [holderData] : [] }));
-    } else {
-      const result = await getAllHolders(address, contractTiers.element280, page, pageSize, refresh);
-      return NextResponse.json(serializeBigInt(result));
+      const holder = await getHolderData(address, wallet, contractTiers.element280);
+      if (!holder) {
+        return NextResponse.json({ message: 'No holder data found for wallet' }, { status: 404 });
+      }
+      return NextResponse.json(serializeBigInt(holder));
     }
+
+    const data = await getAllHolders(address, page, pageSize);
+    return NextResponse.json(data);
   } catch (error) {
-    log(`[element280] [ERROR] Error in GET /api/holders/Element280: ${error.message}, stack: ${error.stack}`);
+    log(`[element280] [ERROR] GET error: ${error.message}, stack: ${error.stack}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }
 
-// POST handler
 export async function POST() {
   const address = contractAddresses.element280.address;
   if (!address) {
     log(`[element280] [ERROR] Element280 contract address not found`);
-    return NextResponse.json({ error: "Element280 contract address not found" }, { status: 400 });
+    return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
   }
 
   try {
     await populateHoldersMapCache(address, contractTiers.element280);
-    const storage = initStorage(address);
-    const holdersEntries = DISABLE_REDIS ? (storage.inMemoryHoldersMap ? Array.from(storage.inMemoryHoldersMap.entries()) : []) : await getCache(`${HOLDERS_CACHE_KEY}_${address}`);
-    const totalLiveHolders = holdersEntries ? holdersEntries.length : 0;
-    log(`[element280] [DEBUG] POST completed for ${address}: totalLiveHolders=${totalLiveHolders}, inMemoryCacheState=${JSON.stringify(storage.inMemoryCacheState)}`);
-    return NextResponse.json({ message: "Cache preload completed", totalLiveHolders });
+    return NextResponse.json({ message: 'Cache population started' });
   } catch (error) {
-    log(`[element280] [ERROR] Error in POST /api/holders/Element280: ${error.message}, stack: ${error.stack}`);
-    return NextResponse.json({ error: `Cache preload failed: ${error.message}` }, { status: 500 });
+    log(`[element280] [ERROR] POST error: ${error.message}, stack: ${error.stack}`);
+    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }
