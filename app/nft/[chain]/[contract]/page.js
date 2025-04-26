@@ -1,15 +1,14 @@
-// app/nft/[chain]/[contract]/page.js
 import { notFound } from 'next/navigation';
 import NFTPage from '@/components/NFTPage';
-import { supportedChains, contractDetails } from '@/app/nft-contracts';
+import config from '@/config'; // Use @/ alias for config.js
 
 export default function Page({ params }) {
   const { chain, contract } = params;
   console.log('[Page] Received params:', params); // Debug params
 
   // Validate chain and contract
-  const supportedContracts = Object.keys(contractDetails).map(key => key.toLowerCase());
-  if (!supportedChains.includes(chain) || !supportedContracts.includes(contract.toLowerCase())) {
+  const supportedContracts = Object.keys(config.contractDetails).map(key => key.toLowerCase());
+  if (!config.supportedChains.includes(chain) || !supportedContracts.includes(contract.toLowerCase())) {
     notFound(); // Render 404 for invalid chain or contract
   }
 
@@ -18,8 +17,8 @@ export default function Page({ params }) {
 
 // Define static paths for SSG
 export async function generateStaticParams() {
-  // Generate paths from contractDetails
-  return Object.entries(contractDetails).map(([contractId, details]) => ({
+  // Generate paths from config.contractDetails
+  return Object.entries(config.contractDetails).map(([contractId, details]) => ({
     chain: details.chain,
     contract: contractId.charAt(0).toUpperCase() + contractId.slice(1), // Capitalize first letter (e.g., 'element280' -> 'Element280')
   }));

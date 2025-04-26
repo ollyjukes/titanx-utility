@@ -1,11 +1,12 @@
+// app/nft/layout.js
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import SearchResultsModal from '@/components/SearchResultsModal';
 import NFTSummary from '@/components/NFTSummary';
-import { contractDetails } from '@/app/nft-contracts';
+import config from '@/config.js';
 import { useNFTStore } from '@/app/store';
 
 export default function NFTLayout({ children }) {
@@ -37,13 +38,13 @@ export default function NFTLayout({ children }) {
     { name: 'E280', href: null, apiKey: 'e280' },
   ];
 
-  const allNFTs = Object.keys(contractDetails).map((key) => ({
-    name: contractDetails[key].name,
+  const allNFTs = Object.keys(config.contractDetails).map((key) => ({
+    name: config.contractDetails[key].name,
     apiKey: key,
-    href: key === 'e280' ? null : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${contractDetails[key].name.replace(/\s+/g, '')}`,
+    href: key === 'e280' ? null : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${config.contractDetails[key].name.replace(/\s+/g, '')}`,
   }));
 
-  const fetchCollectionData = async (contractKey) => {
+  const fetchCollectionData = useCallback(async (contractKey) => {
     console.log(`[NFTLayout] Fetching data for ${contractKey}`);
     const cachedData = getCache(contractKey);
     if (cachedData && contractKey !== 'ascendantNFT') {
@@ -51,15 +52,15 @@ export default function NFTLayout({ children }) {
       return cachedData;
     }
     console.log(`[NFTLayout] ${contractKey === 'ascendantNFT' ? 'Bypassing cache for ascendantNFT' : 'Cache miss for ' + contractKey}`);
-
+  
     if (contractKey === 'e280') {
       console.log(`[NFTLayout] Skipping fetch for ${contractKey} - not deployed`);
       const result = { holders: [], totalTokens: 0, message: 'E280 data not available yet' };
       setCache(contractKey, result);
       return result;
     }
-
-    const { apiEndpoint } = contractDetails[contractKey];
+  
+    const { apiEndpoint } = config.contractDetails[contractKey];
     try {
       console.log(`[NFTLayout] Fetching ${contractKey} from ${apiEndpoint}`);
       const res = await fetch(`${apiEndpoint}?page=0&pageSize=1000`, {
@@ -72,7 +73,7 @@ export default function NFTLayout({ children }) {
       }
       const json = await res.json();
       console.log(`[NFTLayout] Fetched data for ${contractKey}: ${json.holders?.length || 0} holders`);
-
+  
       const result = {
         ...json,
         summary: {
@@ -90,7 +91,7 @@ export default function NFTLayout({ children }) {
       setCache(contractKey, errorResult);
       return errorResult;
     }
-  };
+  }, [getCache, setCache]);
 
   useEffect(() => {
     const fetchAllCollections = async () => {
@@ -107,12 +108,12 @@ export default function NFTLayout({ children }) {
       setCollectionsData(results);
       console.log('[NFTLayout] All collections fetched for summary:', results);
     };
-
+  
     if (!hasRun.current) {
       fetchAllCollections();
       hasRun.current = true;
     }
-  }, []);
+  }, [allNFTs, fetchCollectionData]);
 
   const handleSearch = async () => {
     console.log('[NFTLayout] handleSearch called with address:', searchAddress);

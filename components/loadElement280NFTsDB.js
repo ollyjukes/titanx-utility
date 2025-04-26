@@ -23,7 +23,7 @@ import { execSync } from 'child_process';
 import pino from 'pino';
 import { fileURLToPath } from 'url';
 import minimist from 'minimist';
-import { contractAddresses, vaultAddresses, deploymentBlocks, contractTiers } from '../app/nft-contracts.js';
+import config from '@/config.js';
 import { Semaphore } from 'async-mutex';
 
 // Initialize environment
@@ -62,9 +62,9 @@ const logger = pino({
 const dbSemaphore = new Semaphore(1);
 
 // Constants
-const CONTRACT_ADDRESS = contractAddresses.element280;
-const VAULT_CONTRACT_ADDRESS = vaultAddresses.element280;
-const DEPLOYMENT_BLOCK = Number(deploymentBlocks.element280);
+const CONTRACT_ADDRESS = config.contractAddresses.element280;
+const VAULT_CONTRACT_ADDRESS = config.vaultAddresses.element280;
+const DEPLOYMENT_BLOCK = Number(config.deploymentBlocks.element280);
 const CACHE_FILE = path.join(process.cwd(), 'public', 'data', 'element280_nft_status.json');
 const DB_FILE = path.join(process.cwd(), 'public', 'data', 'element280.db');
 const CHECKPOINT_FILE = path.join(process.cwd(), 'public', 'data', 'element280_checkpoint.json');
@@ -76,81 +76,40 @@ const FAILED_BLOCKS_FILE = path.join(process.cwd(), 'public', 'data', 'element28
 const SKIPPED_WALLETS_FILE = path.join(process.cwd(), 'public', 'data', 'element280_skipped_wallets.json');
 const COLLECTED_WALLETS_FILE = path.join(process.cwd(), 'public', 'data', 'element280_collected_wallets.json');
 const BACKUP_DIR = path.join(process.cwd(), 'scripts', 'backups');
-const MAX_BLOCK_RANGE = 5000;
-const MAX_CONCURRENT_BLOCKS = 3;
-const MAX_CONCURRENT_WALLETS = 1;
-const MAX_MULTICALL_BATCH = 50;
+const MAX_BLOCK_RANGE = config.element280.maxBlockRange || 5000;
+const MAX_CONCURRENT_BLOCKS = config.element280.maxConcurrentBlocks || 3;
+const MAX_CONCURRENT_WALLETS = config.element280.maxConcurrentWallets || 1;
+const MAX_MULTICALL_BATCH = config.element280.maxMulticallBatch || 50;
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-const ELMNT_DECIMALS = 18;
-const BLOCK_STEP = 1000;
-const DEBUG_WALLETS = [
+const ELMNT_DECIMALS = config.element280.decimals || 18;
+const BLOCK_STEP = config.element280.blockStep || 1000;
+const DEBUG_WALLETS = config.element280.debugWallets || [
   '0x15702443110894b26911b913b17ea4931f803b02',
   '0xf98f0ee190d9f2e6531e226933f1e47a2890cbda',
   '0x9d641961a31b3eed46e664fa631aad3021323862',
 ];
-const DEBUG_TOKEN_IDS = [16028, 630, 631, 632];
+const DEBUG_TOKEN_IDS = config.element280.debugTokenIds || [16028, 630, 631, 632];
 
 // Verify environment
-const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+const ALCHEMY_API_KEY = config.alchemy.apiKey;
 if (!ALCHEMY_API_KEY) {
-  logger.error('ALCHEMY_API_KEY not defined in .env.local');
+  logger.error('ALCHEMY_API_KEY not defined in config');
   process.exit(1);
 }
 
 // Contract ABIs
-const element280Abi = [
-  { name: 'totalSupply', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-  { name: 'totalBurned', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-  { name: 'getTotalNftsPerTiers', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256[]' }] },
-  { name: 'multiplierPool', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-  { name: 'getNftTier', type: 'function', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'uint8' }] },
-  { name: 'balanceOf', type: 'function', stateMutability: 'view', inputs: [{ type: 'address' }], outputs: [{ type: 'uint256' }] },
-  { name: 'ownerOf', type: 'function', stateMutability: 'view', inputs: [{ type: 'uint256' }], outputs: [{ type: 'address' }] },
-  {
-    name: 'getClaimableRewardsForTokens',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ type: 'uint256[]' }],
-    outputs: [{ type: 'uint256' }],
-  },
-  {
-    type: 'event',
-    name: 'Transfer',
-    inputs: [
-      { indexed: true, name: 'from', type: 'address' },
-      { indexed: true, name: 'to', type: 'address' },
-      { indexed: true, name: 'tokenId', type: 'uint256' },
-    ],
-  },
-  { type: 'error', name: 'NonexistentToken', inputs: [] },
-];
-
-const element280VaultAbi = [
-  { name: 'totalRewardPool', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
-  {
-    name: 'getRewards',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [
-      { type: 'uint256[]', name: 'tokenIds' },
-      { type: 'address', name: 'account' },
-    ],
-    outputs: [
-      { type: 'bool[]', name: 'availability' },
-      { type: 'uint256', name: 'totalReward' },
-    ],
-  },
-];
+const element280Abi = config.abis.element280.main;
+const element280VaultAbi = config.abis.element280.vault;
 
 // Clients
 const client = createPublicClient({
   chain: mainnet,
-  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, { timeout: 60000 }),
+  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, { timeout: config.element280.rpcTimeout || 60000 }),
 });
 const alchemy = new Alchemy({ apiKey: ALCHEMY_API_KEY, network: Network.ETH_MAINNET });
 
 // Utility Functions
-async function retry(fn, attempts = 5, delay = retryCount => Math.min(1000 * 2 ** retryCount, 10000)) {
+async function retry(fn, attempts = config.element280.retryAttempts || 5, delay = retryCount => Math.min(1000 * 2 ** retryCount, config.element280.maxRetryDelay || 10000)) {
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
@@ -201,7 +160,7 @@ async function initDb() {
     filename: DB_FILE,
     driver: sqlite3.Database,
   });
-  await db.configure('busyTimeout', 60000);
+  await db.configure('busyTimeout', config.element280.dbBusyTimeout || 60000);
   await db.run('PRAGMA journal_mode = WAL;');
   await db.exec(`
     CREATE TABLE IF NOT EXISTS element280_summary (
@@ -547,7 +506,7 @@ async function processWallet(owner, db, failedTokenIds, skippedTokenIds, skipped
     claimableRewards: 0,
   };
 
-  // NEW: Fetch current balance
+  // Fetch current balance
   try {
     const balance = await retry(() =>
       client.readContract({
@@ -563,7 +522,7 @@ async function processWallet(owner, db, failedTokenIds, skippedTokenIds, skipped
     wallet.totalLive = 0;
   }
 
-  // NEW: Fetch owned NFTs
+  // Fetch owned NFTs
   let nfts = [];
   if (wallet.totalLive > 0) {
     try {
@@ -594,7 +553,7 @@ async function processWallet(owner, db, failedTokenIds, skippedTokenIds, skipped
           const tier = Number(tierResults[index].result);
           if (tier >= 1 && tier <= 6) {
             nft.tier = tier;
-            nft.tierName = contractTiers.element280[tier].name;
+            nft.tierName = config.contractTiers.element280[tier].name;
             wallet.tiersLive[tier - 1]++;
             validTokenIds.push(BigInt(nft.tokenId));
           }
@@ -604,7 +563,7 @@ async function processWallet(owner, db, failedTokenIds, skippedTokenIds, skipped
       wallet.nfts = nfts;
 
       // Calculate multiplier sum
-      const multipliers = Object.values(contractTiers.element280).map(t => t.multiplier);
+      const multipliers = Object.values(config.contractTiers.element280).map(t => t.multiplier);
       wallet.multiplierSum = nfts.reduce((sum, nft) => sum + (nft.tier > 0 ? multipliers[nft.tier - 1] : 0), 0);
       wallet.displayMultiplierSum = wallet.multiplierSum / 100;
 
@@ -634,7 +593,7 @@ async function processWallet(owner, db, failedTokenIds, skippedTokenIds, skipped
     }
   }
 
-  // NEW: Process transfers to calculate minted, bought, sold, burned
+  // Process transfers to calculate minted, bought, sold, burned
   try {
     const transfers = await db.all(
       `SELECT tokenId, transactionHash, blockNumber, eventType, tier, fromAddr, toAddr
@@ -733,7 +692,7 @@ async function trackElement280NFTs() {
     const wallets = new Map();
     let owners = [];
 
-    // NEW: Fetch current owners using Alchemy
+    // Fetch current owners using Alchemy
     if (CUSTOM_WALLETS.length === 0) {
       logger.info('Fetching owners with NFTs');
       try {
@@ -750,7 +709,7 @@ async function trackElement280NFTs() {
       logger.info(`Processing custom wallets: ${CUSTOM_WALLETS.join(', ')}`);
     }
 
-    // MODIFIED: Initialize wallets from owners and transfers
+    // Initialize wallets from owners and transfers
     for (const owner of owners) {
       wallets.set(owner.toLowerCase(), {
         wallet: owner.toLowerCase(),
@@ -771,7 +730,7 @@ async function trackElement280NFTs() {
       });
     }
 
-    // NEW: Add wallets from transfers
+    // Add wallets from transfers
     const transferWallets = await db.all(`
       SELECT DISTINCT address
       FROM (
@@ -869,7 +828,7 @@ async function trackElement280NFTs() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
-    // NEW: Process transfers in memory for historical stats
+    // Process transfers in memory for historical stats
     const logs = await db.all('SELECT * FROM element280_transfers ORDER BY blockNumber ASC');
     for (const log of logs) {
       const from = log.fromAddr.toLowerCase();
@@ -930,7 +889,7 @@ async function trackElement280NFTs() {
         result.burnedNfts.push({
           tokenId: tokenIdNum,
           tier,
-          tierName: contractTiers.element280[tier].name,
+          tierName: config.contractTiers.element280[tier].name,
           burnerWallet: from,
           transactionHash: log.transactionHash,
           blockTimestamp: log.blockTimestamp,
@@ -946,7 +905,7 @@ async function trackElement280NFTs() {
       }
     }
 
-    // NEW: Finalize wallet data
+    // Finalize wallet data
     result.wallets = Array.from(wallets.values())
       .filter(w => w.totalLive > 0 || w.totalBurned > 0 || w.totalBought > 0 || w.totalSold > 0 || w.minted > 0)
       .map((w, index) => ({

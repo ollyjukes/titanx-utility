@@ -1,8 +1,9 @@
+// components/HolderTable/E280.js
 'use client';
 
 import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { contractTiers } from '@/app/nft-contracts';
+import config from '@/config.js';
 
 const rowVariants = {
   hidden: { opacity: 0, y: 20 },
@@ -70,7 +71,7 @@ function HolderTable({ holders, loading }) {
     return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
   }
 
-  const tiers = contractTiers.e280;
+  const tiers = config.contractTiers.e280;
   if (!tiers) {
     return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for E280.</div>;
   }

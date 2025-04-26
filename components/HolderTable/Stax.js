@@ -1,8 +1,9 @@
+// components/HolderTable/Stax.js
 'use client';
 
 import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { contractTiers } from '@/app/nft-contracts';
+import config from '@/config.js';
 
 const rowVariants = {
   hidden: { opacity: 0, y: 20 },
@@ -123,7 +124,7 @@ function HolderTable({ holders, loading }) {
     return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
   }
 
-  const tiers = contractTiers.stax;
+  const tiers = config.contractTiers.stax;
   if (!tiers) {
     return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Stax.</div>;
   }

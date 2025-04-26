@@ -1,36 +1,35 @@
+// app/api/holders/Element280/validate-burned/route.js
 import { NextResponse } from 'next/server';
-import { client, log, batchMulticall, saveCacheState, loadCacheState } from '@/app/api/utils';
-import { contractAddresses, element280MainAbi } from '@/app/nft-contracts';
+import config from '@/config.js';
+import { client, log, batchMulticall, saveCacheState, loadCacheState } from '../../../utils.js';
 import pLimit from 'p-limit';
 import { parseAbiItem } from 'viem';
 import NodeCache from 'node-cache';
 import fs from 'fs/promises';
 
-// force-dynamic
-// This route is dynamic and should not be cached by Next.js
-// This is important for streaming responses
+// Force-dynamic: This route is dynamic and should not be cached by Next.js
 export const dynamic = 'force-dynamic';
 
 // Constants
 const BURN_ADDRESS = '0x0000000000000000000000000000000000000000';
-const DEPLOYMENT_BLOCK = 20945304; // From nft-contracts.js
-const MAX_BLOCK_RANGE = 2000; // Optimized for efficiency
 const RECENT_BLOCK_CHECK = 10000; // Check last 10,000 blocks for new burns
-const EVENT_CACHE_TTL = 24 * 60 * 60;
+const EVENT_CACHE_TTL = config.cache.nodeCache.stdTTL;
 const BURNED_EVENTS_CACHE_KEY = 'element280_burned_events_detailed';
 const METADATA_CACHE_KEY = 'element280_burned_metadata';
 const DISABLE_REDIS = process.env.DISABLE_ELEMENT280_REDIS === 'true';
 
 // Initialize node-cache
 const cache = new NodeCache({ stdTTL: EVENT_CACHE_TTL });
+cache.setMaxListeners(20); // Increase limit
 
 // Initialize storage
 function initStorage(contractAddress) {
   const cacheKey = `burned_storage_${contractAddress}`;
   let storage = cache.get(cacheKey);
   if (!storage) {
-    storage = { burnedEventsDetailedCache: null, lastBurnBlock: 22326677 }; // Initialize with known last burn block
+    storage = { burnedEventsDetailedCache: null, lastBurnBlock: Number(config.deploymentBlocks.element280.block) };
     cache.set(cacheKey, storage);
+    cache.removeAllListeners('set'); // Clean up
     log(`[element280] [INIT] Initialized node-cache for burned events: ${contractAddress}`);
   }
   return storage;
@@ -39,7 +38,7 @@ function initStorage(contractAddress) {
 // Load metadata (last burn block)
 async function loadMetadata(contractAddress) {
   const metadata = await loadCacheState(`burned_metadata_${contractAddress}`);
-  return metadata ? metadata.lastBurnBlock : 22326677; // Default to known last burn block
+  return metadata ? metadata.lastBurnBlock : Number(config.deploymentBlocks.element280.block);
 }
 
 // Save metadata
@@ -48,7 +47,7 @@ async function saveMetadata(contractAddress, lastBurnBlock) {
 }
 
 // Retry utility
-async function retry(fn, attempts = 5, delay = (retryCount) => Math.min(1000 * 2 ** retryCount, 10000)) {
+async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
@@ -65,7 +64,7 @@ async function retry(fn, attempts = 5, delay = (retryCount) => Math.min(1000 * 2
 
 // Update last burn block by checking recent blocks
 async function updateLastBurnBlock(contractAddress, currentLastBurnBlock, endBlock) {
-  const fromBlock = Math.max(currentLastBurnBlock + 1, DEPLOYMENT_BLOCK);
+  const fromBlock = Math.max(currentLastBurnBlock + 1, Number(config.deploymentBlocks.element280.block));
   const toBlock = Math.min(fromBlock + RECENT_BLOCK_CHECK, Number(endBlock));
   if (fromBlock > toBlock) return currentLastBurnBlock;
 
@@ -110,8 +109,8 @@ async function validateBurnedEvents(contractAddress) {
   let lastBurnBlock = await loadMetadata(contractAddress);
   lastBurnBlock = await updateLastBurnBlock(contractAddress, lastBurnBlock, endBlock);
   const ranges = [];
-  for (let fromBlock = DEPLOYMENT_BLOCK; fromBlock <= lastBurnBlock; fromBlock += MAX_BLOCK_RANGE) {
-    const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, lastBurnBlock);
+  for (let fromBlock = Number(config.deploymentBlocks.element280.block); fromBlock <= lastBurnBlock; fromBlock += config.nftContracts.element280.maxTokensPerOwnerQuery) {
+    const toBlock = Math.min(fromBlock + config.nftContracts.element280.maxTokensPerOwnerQuery - 1, lastBurnBlock);
     ranges.push({ fromBlock, toBlock });
   }
 
@@ -133,11 +132,11 @@ async function validateBurnedEvents(contractAddress) {
       const tokenIds = burnLogs.map(log => log.args.tokenId);
       const tierCalls = tokenIds.map(tokenId => ({
         address: contractAddress,
-        abi: element280MainAbi,
+        abi: config.abis.element280.main,
         functionName: 'getNftTier',
         args: [tokenId],
       }));
-      const tierResults = await batchMulticall(tierCalls, 50);
+      const tierResults = await batchMulticall(tierCalls, config.alchemy.batchSize);
       const block = await retry(() => client.getBlock({ blockNumber: burnLogs[0]?.blockNumber }));
 
       burnLogs.forEach((log, i) => {
@@ -171,7 +170,7 @@ async function validateBurnedEvents(contractAddress) {
 
 // Stream burned events
 export async function GET() {
-  const address = contractAddresses.element280.address;
+  const address = config.contractAddresses.element280.address;
   if (!address) {
     log(`[element280] [ERROR] Element280 contract address not found`);
     return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
@@ -197,8 +196,8 @@ export async function GET() {
           let lastBurnBlock = await loadMetadata(address);
           lastBurnBlock = await updateLastBurnBlock(address, lastBurnBlock, endBlock);
           const ranges = [];
-          for (let fromBlock = DEPLOYMENT_BLOCK; fromBlock <= lastBurnBlock; fromBlock += MAX_BLOCK_RANGE) {
-            const toBlock = Math.min(fromBlock + MAX_BLOCK_RANGE - 1, lastBurnBlock);
+          for (let fromBlock = Number(config.deploymentBlocks.element280.block); fromBlock <= lastBurnBlock; fromBlock += config.nftContracts.element280.maxTokensPerOwnerQuery) {
+            const toBlock = Math.min(fromBlock + config.nftContracts.element280.maxTokensPerOwnerQuery - 1, lastBurnBlock);
             ranges.push({ fromBlock, toBlock });
           }
 
@@ -219,11 +218,11 @@ export async function GET() {
             const tokenIds = burnLogs.map(log => log.args.tokenId);
             const tierCalls = tokenIds.map(tokenId => ({
               address,
-              abi: element280MainAbi,
+              abi: config.abis.element280.main,
               functionName: 'getNftTier',
               args: [tokenId],
             }));
-            const tierResults = await batchMulticall(tierCalls, 50);
+            const tierResults = await batchMulticall(tierCalls, config.alchemy.batchSize);
             const block = await retry(() => client.getBlock({ blockNumber: burnLogs[0]?.blockNumber }));
 
             burnLogs.forEach((log, i) => {

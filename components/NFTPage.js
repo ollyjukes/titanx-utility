@@ -1,9 +1,10 @@
+// components/NFTPage.js
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import LoadingIndicator from './LoadingIndicator';
-import { contractDetails, contractTiers, contractAddresses, vaultAddresses, element280MainAbi, element280VaultAbi } from '@/app/nft-contracts';
+import config from '../config.js';
 import { Bar } from 'react-chartjs-2';
 import Chart from 'chart.js/auto';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,7 +13,7 @@ import { mainnet } from 'viem/chains';
 import { useNFTStore } from '../app/store';
 
 // Retry utility
-async function retry(fn, attempts = 5, delay = retryCount => Math.min(2000 * 2 ** retryCount, 10000)) {
+async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
@@ -28,29 +29,29 @@ async function retry(fn, attempts = 5, delay = retryCount => Math.min(2000 * 2 *
 
 // Fetch summary data for Element280
 async function fetchContractData() {
-  const contractAddress = contractAddresses.element280.address;
-  const vaultAddress = vaultAddresses.element280.address;
+  const contractAddress = config.contractAddresses.element280.address;
+  const vaultAddress = config.vaultAddresses.element280.address;
   console.log(`[NFTPage] [INFO] Fetching contract data for Element280: contract=${contractAddress}, vault=${vaultAddress}`);
   if (!contractAddress || !vaultAddress) {
     throw new Error('Element280 contract or vault address not configured');
   }
-  if (!process.env.NEXT_PUBLIC_ALCHEMY_API_KEY) {
+  if (!config.alchemy.apiKey) {
     throw new Error('Alchemy API key not configured');
   }
 
   const client = createPublicClient({
     chain: mainnet,
-    transport: http(`https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`, { timeout: 60000 }),
+    transport: http(`https://eth-mainnet.g.alchemy.com/v2/${config.alchemy.apiKey}`, { timeout: config.alchemy.timeoutMs }),
   });
 
   try {
     const results = await retry(() =>
       client.multicall({
         contracts: [
-          { address: contractAddress, abi: element280MainAbi, functionName: 'totalSupply' },
-          { address: contractAddress, abi: element280MainAbi, functionName: 'getTotalNftsPerTiers' },
-          { address: contractAddress, abi: element280MainAbi, functionName: 'multiplierPool' },
-          { address: vaultAddress, abi: element280VaultAbi, functionName: 'totalRewardPool' },
+          { address: contractAddress, abi: config.abis.element280.main, functionName: 'totalSupply' },
+          { address: contractAddress, abi: config.abis.element280.main, functionName: 'getTotalNftsPerTiers' },
+          { address: contractAddress, abi: config.abis.element280.main, functionName: 'multiplierPool' },
+          { address: vaultAddress, abi: config.abis.element280.vault, functionName: 'totalRewardPool' },
         ],
       })
     );
@@ -130,63 +131,29 @@ const holderTableComponents = {
 export default function NFTPage({ chain, contract }) {
   console.log(`[NFTPage] [INFO] Received props: chain=${chain}, contract=${contract}`);
 
-  // Derive contract identifier (convert to lowercase)
-  const contractId = contract ? contract.toLowerCase() : null;
-  console.log(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
-
-  // Validate contract
-  if (!contractId || !contractDetails[contractId]) {
-    console.error(`[NFTPage] [ERROR] Invalid or missing contract: chain=${chain}, contract=${contract}`);
-    return (
-      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-        <h1 className="text-4xl font-bold mb-6">Error</h1>
-        <p className="text-red-500 text-lg">Invalid contract: {contractId || 'none specified'}</p>
-      </div>
-    );
-  }
-
+  // **State and Hooks moved to the top**
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showChart, setShowChart] = useState(false);
   const [progress, setProgress] = useState({ isPopulating: true, totalWallets: 0, totalOwners: 0, phase: 'Initializing', progressPercentage: 0 });
+  const [isInvalidContract, setIsInvalidContract] = useState(false);
 
-  const contractConfig = contractDetails[contractId];
-  console.log(`[NFTPage] [INFO] contractConfig: name=${contractConfig.name}, apiEndpoint=${contractConfig.apiEndpoint}`);
+  const { getCache, setCache } = useNFTStore();
+
+  // **Derive contract identifier**
+  const contractId = contract ? contract.toLowerCase() : null;
+  console.log(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
+
+  const contractConfig = config.contractDetails[contractId] || {};
   const { name, apiEndpoint, rewardToken, pageSize, disabled } = contractConfig;
   const isElement280 = contractId === 'element280';
 
-  // Load HolderTable with error handling
-  let HolderTable = holderTableComponents[contractId];
-  if (!HolderTable) {
-    console.error(`[NFTPage] [ERROR] HolderTable for ${contractId} not found`);
-    return (
-      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-        <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
-        <p className="text-red-500 text-lg">Error: Holder table component for {contractId} not found</p>
-      </div>
-    );
-  }
-
-  // Use Zustand store for caching
-  const { getCache, setCache } = useNFTStore();
-
-  // Check for disabled contract (e.g., E280)
-  useEffect(() => {
-    if (disabled) {
-      console.log(`[NFTPage] [INFO] Contract ${name} is disabled`);
-      setError(`${name} is not yet supported (contract not deployed).`);
-      setLoading(false);
-    }
-  }, [disabled, name]);
-
-  // Fetch data function
-  const fetchData = async () => {
-    if (disabled || !apiEndpoint) {
-      if (!disabled) {
-        console.error(`[NFTPage] [ERROR] Invalid contract configuration for ${contractId}`);
-        setError('Invalid contract configuration');
-      }
+  // **Memoized fetch functions**
+  const fetchData = useCallback(async () => {
+    if (!apiEndpoint) {
+      console.error(`[NFTPage] [ERROR] Invalid contract configuration for ${contractId}`);
+      setError('Invalid contract configuration');
       setLoading(false);
       return;
     }
@@ -199,7 +166,7 @@ export default function NFTPage({ chain, contract }) {
       if (isElement280) {
         try {
           console.log(`[NFTPage] [INFO] Fetching progress from ${apiEndpoint}/progress`);
-          const res = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+          const res = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
           if (!res.ok) {
             console.error(`[NFTPage] [ERROR] Progress fetch failed: ${res.status}`);
           } else {
@@ -207,7 +174,7 @@ export default function NFTPage({ chain, contract }) {
             if (progressData.totalOwners === 0 && progressData.phase === 'Idle') {
               console.log(`[NFTPage] [INFO] Stale progress, triggering cache refresh`);
               await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
-              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
               if (retryRes.ok) progressData = await retryRes.json();
             }
           }
@@ -230,7 +197,6 @@ export default function NFTPage({ chain, contract }) {
       if (isElement280) {
         contractData = await fetchContractData();
       } else {
-        // Placeholder for other contracts (unchanged)
         contractData = {
           totalMinted: 0,
           totalBurned: 0,
@@ -251,13 +217,13 @@ export default function NFTPage({ chain, contract }) {
       setError(`Failed to load ${name} data: ${err.message}. Please try again later.`);
       setLoading(false);
     }
-  };
+  }, [apiEndpoint, contractId, isElement280, getCache, setCache, name]);
 
-  // Fetch holders data
-  async function fetchAllHolders() {
+  const fetchAllHolders = useCallback(async () => {
     const cacheKey = `holders_${contractId}`;
     const cachedData = getCache(cacheKey);
     if (cachedData) {
+      console.log(`[NFTPage] [INFO] Cache hit for ${cacheKey}, holders: ${cachedData.holders.length}`);
       setData(prev => ({ ...prev, holders: cachedData.holders, summary: cachedData.summary }));
       setLoading(false);
       return;
@@ -283,18 +249,24 @@ export default function NFTPage({ chain, contract }) {
       let burnedNfts = [];
       let page = 0;
       let totalPages = Infinity;
-      const effectivePageSize = pageSize || 100;
+      const effectivePageSize = pageSize || config.contractDetails[contractId]?.pageSize;
+
+      let progressData = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store' }).then(res => res.json()).catch(() => ({}));
+      if (progressData.phase === 'Idle' || progressData.totalOwners === 0) {
+        console.log(`[NFTPage] [INFO] Cache is Idle or empty, triggering POST`);
+        await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
+      }
 
       while (page < totalPages) {
         let attempts = 0;
-        const maxAttempts = 5;
+        const maxAttempts = config.alchemy.maxRetries;
         let success = false;
 
         while (attempts < maxAttempts && !success) {
           try {
             const url = `${apiEndpoint}?page=${page}&pageSize=${effectivePageSize}`;
             console.log(`[NFTPage] [INFO] Fetching ${contractId} page ${page} at ${url}`);
-            const res = await fetch(url, { signal: AbortSignal.timeout(180000) });
+            const res = await fetch(url, { signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
             if (!res.ok) {
               const errorText = await res.text();
               console.error(`[NFTPage] [ERROR] Fetch failed for ${url}: ${res.status} - ${errorText}`);
@@ -302,7 +274,17 @@ export default function NFTPage({ chain, contract }) {
             }
 
             const json = await res.json();
-            const newHolders = json.holders || [];
+            console.log(`[NFTPage] [DEBUG] API response for ${url}: ${JSON.stringify(json, null, 2)}`);
+            if (json.error) {
+              console.error(`[NFTPage] [ERROR] API error for ${url}: ${json.error}`);
+              throw new Error(json.error);
+            }
+            if (!json.holders || !Array.isArray(json.holders)) {
+              console.error(`[NFTPage] [ERROR] Invalid holders data for ${url}: ${JSON.stringify(json, null, 2)}`);
+              await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
+              throw new Error(`Invalid holders data: retrying after POST`);
+            }
+            const newHolders = json.holders;
             allHolders = allHolders.concat(newHolders);
             totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
             totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
@@ -320,14 +302,17 @@ export default function NFTPage({ chain, contract }) {
             totalPages = json.totalPages || 1;
             page++;
             success = true;
-            if (!newHolders || newHolders.length === 0) break;
+            if (!newHolders.length && json.totalPages === 0) {
+              console.log(`[NFTPage] [INFO] Empty holders with zero pages, accepting as valid`);
+              break;
+            }
           } catch (err) {
             attempts++;
             console.error(`[NFTPage] [ERROR] Attempt ${attempts}/${maxAttempts} failed for page ${page}: ${err.message}`);
             if (attempts >= maxAttempts) {
               throw new Error(`Failed to fetch page ${page} after ${maxAttempts} attempts: ${err.message}`);
             }
-            await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
+            await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs * attempts));
           }
         }
       }
@@ -349,22 +334,38 @@ export default function NFTPage({ chain, contract }) {
         burnedNfts,
       };
 
+      console.log(`[NFTPage] [INFO] Fetched ${allHolders.length} holders for ${contractId}`);
       setCache(cacheKey, holdersData);
       setData(prev => ({ ...prev, ...holdersData }));
       setLoading(false);
     } catch (err) {
       console.error(`[NFTPage] [ERROR] Holders fetch error: ${err.message}, stack: ${err.stack}`);
-      setError(`Failed to load holders data: ${err.message}. Please try again later.`);
+      setError(`Failed to load ${name} data: ${err.message}. Please try again later.`);
       setLoading(false);
     }
-  }
+  }, [apiEndpoint, contractId, getCache, setCache, name, pageSize]);
 
-  // Initial data fetch
+  // **Validate contract and handle disabled state**
   useEffect(() => {
-    fetchData();
-  }, [apiEndpoint, contractId, isElement280, disabled]);
+    if (!contractId || !config.contractDetails[contractId]) {
+      console.error(`[NFTPage] [ERROR] Invalid or missing contract: chain=${chain}, contract=${contract}`);
+      setIsInvalidContract(true);
+      setLoading(false);
+    } else if (disabled) {
+      console.log(`[NFTPage] [INFO] Contract ${name} is disabled`);
+      setError(`${name} is not yet supported (contract not deployed).`);
+      setLoading(false);
+    } else {
+      setIsInvalidContract(false);
+      fetchData();
+      fetchAllHolders();
+    }
+  }, [contractId, chain, contract, disabled, name, fetchData, fetchAllHolders]);
 
-  // Chart data for tier distribution
+  // **Load HolderTable**
+  const HolderTable = holderTableComponents[contractId] || null;
+
+  // **Chart data**
   const chartData = data && isElement280 ? {
     labels: ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Tier 5', 'Tier 6'],
     datasets: [
@@ -380,6 +381,25 @@ export default function NFTPage({ chain, contract }) {
       },
     ],
   } : null;
+
+  // **Render logic**
+  if (isInvalidContract) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
+        <h1 className="text-4xl font-bold mb-6">Error</h1>
+        <p className="text-red-500 text-lg">Invalid contract: {contractId || 'none specified'}</p>
+      </div>
+    );
+  }
+
+  if (!HolderTable) {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
+        <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
+        <p className="text-red-500 text-lg">Error: Holder table component for {contractId} not found</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">

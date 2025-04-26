@@ -1,7 +1,41 @@
+// components/SearchResultsModal.js
 'use client';
+
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
-import { contractDetails } from '@/app/nft-contracts';
+import config from '@/config.js';
+
+// Loading components
+const Element280Loading = () => <div className="text-gray-400">Loading Element280 holder table...</div>;
+Element280Loading.displayName = 'Element280Loading';
+
+const Element369Loading = () => <div className="text-gray-400">Loading Element369 holder table...</div>;
+Element369Loading.displayName = 'Element369Loading';
+
+const StaxNFTLoading = () => <div className="text-gray-400">Loading Stax holder table...</div>;
+StaxNFTLoading.displayName = 'StaxNFTLoading';
+
+const AscendantNFTLoading = () => <div className="text-gray-400">Loading Ascendant holder table...</div>;
+AscendantNFTLoading.displayName = 'AscendantNFTLoading';
+
+const E280Loading = () => <div className="text-gray-400">Loading E280 holder table...</div>;
+E280Loading.displayName = 'E280Loading';
+
+// Fallback components
+const Element280Fallback = () => <div>Error loading holder table for Element280</div>;
+Element280Fallback.displayName = 'Element280ErrorFallback';
+
+const Element369Fallback = () => <div>Error loading holder table for Element369</div>;
+Element369Fallback.displayName = 'Element369ErrorFallback';
+
+const StaxNFTFallback = () => <div>Error loading holder table for Stax</div>;
+StaxNFTFallback.displayName = 'StaxNFTErrorFallback';
+
+const AscendantNFTFallback = () => <div>Error loading holder table for Ascendant</div>;
+AscendantNFTFallback.displayName = 'AscendantNFTErrorFallback';
+
+const E280Fallback = () => <div>Error loading holder table for E280</div>;
+E280Fallback.displayName = 'E280ErrorFallback';
 
 // Define holder table components for each contract
 const holderTableComponents = {
@@ -9,58 +43,64 @@ const holderTableComponents = {
     () =>
       import('./HolderTable/Element280').catch(err => {
         console.error('Failed to load Element280 HolderTable:', err);
-        return () => <div>Error loading holder table for Element280</div>;
+        return { default: Element280Fallback };
       }),
     {
       ssr: false,
-      loading: () => <div className="text-gray-400">Loading Element280 holder table...</div>,
+      loading: Element280Loading,
     }
   ),
   element369: dynamic(
     () =>
       import('./HolderTable/Element369').catch(err => {
         console.error('Failed to load Element369 HolderTable:', err);
-        return () => <div>Error loading holder table for Element369</div>;
+        return { default: Element369Fallback };
       }),
     {
       ssr: false,
-      loading: () => <div className="text-gray-400">Loading Element369 holder table...</div>,
+      loading: Element369Loading,
     }
   ),
-  stax: dynamic(
+  staxNFT: dynamic(
     () =>
       import('./HolderTable/Stax').catch(err => {
         console.error('Failed to load Stax HolderTable:', err);
-        return () => <div>Error loading holder table for Stax</div>;
+        return { default: StaxNFTFallback };
       }),
     {
       ssr: false,
-      loading: () => <div className="text-gray-400">Loading Stax holder table...</div>,
+      loading: StaxNFTLoading,
     }
   ),
-  ascendant: dynamic(
+  ascendantNFT: dynamic(
     () =>
       import('./HolderTable/Ascendant').catch(err => {
         console.error('Failed to load Ascendant HolderTable:', err);
-        return () => <div>Error loading holder table for Ascendant</div>;
+        return { default: AscendantNFTFallback };
       }),
     {
       ssr: false,
-      loading: () => <div className="text-gray-400">Loading Ascendant holder table...</div>,
+      loading: AscendantNFTLoading,
     }
   ),
   e280: dynamic(
     () =>
       import('./HolderTable/E280').catch(err => {
         console.error('Failed to load E280 HolderTable:', err);
-        return () => <div>Error loading holder table for E280</div>;
+        return { default: E280Fallback };
       }),
     {
       ssr: false,
-      loading: () => <div className="text-gray-400">Loading E280 holder table...</div>,
+      loading: E280Loading,
     }
   ),
 };
+
+// Assign displayName to each dynamically imported component
+Object.keys(holderTableComponents).forEach(key => {
+  const Component = holderTableComponents[key];
+  Component.displayName = `${key}HolderTable`;
+});
 
 export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick }) {
   const modalVariants = {
@@ -96,7 +136,7 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
             const HolderTable = holderTableComponents[contract] || (() => <div>Holder table not found for {contract}</div>);
             return (
               <div key={contract} className="mb-6">
-                <h3 className="text-xl font-semibold mb-2">{contractDetails[contract]?.name || contract}</h3>
+                <h3 className="text-xl font-semibold mb-2">{config.contractDetails[contract]?.name || contract}</h3>
                 {data === null ? (
                   <p className="text-gray-400">Wallet not found in this collection.</p>
                 ) : data.error ? (

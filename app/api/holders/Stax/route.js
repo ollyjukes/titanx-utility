@@ -1,19 +1,30 @@
 import { NextResponse } from 'next/server';
-import { contractDetails, nftContracts } from '../../../nft-contracts';
-import { client, alchemy, CACHE_TTL, log, batchMulticall, staxNFTAbi, staxVaultAbi, getCache, setCache } from '../../utils';
+import config from '@/config.js';
+import { client, alchemy, log, batchMulticall, getCache, setCache } from '../../utils.js'; // Removed CACHE_TTL
+import NodeCache from 'node-cache';
 
-const contractAddress = nftContracts.stax?.address;
-const vaultAddress = nftContracts.stax?.vaultAddress;
-const tiersConfig = nftContracts.stax?.tiers;
+// Use config.cache.nodeCache.stdTTL instead of CACHE_TTL
+const CACHE_TTL = config.cache.nodeCache.stdTTL;
 
-async function retryAlchemy(fn, attempts = 3, delay = 2000) {
+// Redis toggle
+const DISABLE_REDIS = process.env.DISABLE_STAX_REDIS === 'true';
+
+// In-memory cache when Redis is disabled
+const inMemoryCache = new NodeCache({ stdTTL: CACHE_TTL });
+
+const contractAddress = config.contractAddresses.stax.address;
+const vaultAddress = config.vaultAddresses.stax.address;
+const tiersConfig = config.contractTiers.stax;
+const defaultPageSize = config.contractDetails.stax.pageSize || 1000;
+
+async function retryAlchemy(fn, attempts = config.alchemy.maxRetries, delayMs = config.alchemy.batchDelayMs) {
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
     } catch (error) {
       log(`[Stax] Alchemy retry ${i + 1}/${attempts}: ${error.message}`);
       if (i === attempts - 1) throw error;
-      await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+      await new Promise(resolve => setTimeout(resolve, delayMs * (i + 1)));
     }
   }
 }
@@ -21,7 +32,7 @@ async function retryAlchemy(fn, attempts = 3, delay = 2000) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '0');
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000');
+  const pageSize = parseInt(searchParams.get('pageSize') || defaultPageSize);
   const wallet = searchParams.get('wallet')?.toLowerCase();
 
   log(`[Stax] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
@@ -33,24 +44,33 @@ export async function GET(request) {
     }
 
     const cacheKey = `stax_holders_${page}_${pageSize}_${wallet || 'all'}`;
+    let cachedData;
     if (!wallet) {
-      let cachedData;
       try {
-        cachedData = await getCache(cacheKey);
+        if (DISABLE_REDIS) {
+          cachedData = inMemoryCache.get(cacheKey);
+        } else {
+          cachedData = await getCache(cacheKey);
+        }
         if (cachedData) {
-          log(`[Stax] Returning cached data for ${cacheKey}`);
+          log(`[Stax] Returning cached data for ${cacheKey} (Redis=${!DISABLE_REDIS})`);
           return NextResponse.json(cachedData);
         }
       } catch (cacheError) {
         log(`[Stax] Cache read error: ${cacheError.message}`);
       }
     }
-    log(`[Stax] No cache hit for ${cacheKey}`);
+    log(`[Stax] Cache miss for ${cacheKey}`);
 
     // Clear cache for wallet-specific queries
     if (wallet) {
       try {
-        await setCache(cacheKey, null);
+        if (DISABLE_REDIS) {
+          inMemoryCache.del(cacheKey);
+        } else {
+          await setCache(cacheKey, null);
+        }
+        log(`[Stax] Cleared cache for ${cacheKey}`);
       } catch (cacheError) {
         log(`[Stax] Cache clear error: ${cacheError.message}`);
       }
@@ -61,7 +81,7 @@ export async function GET(request) {
     try {
       const burnedResult = await client.readContract({
         address: contractAddress,
-        abi: staxNFTAbi,
+        abi: config.abis.stax.main,
         functionName: 'totalBurned',
       });
       totalBurned = Number(burnedResult || 0);
@@ -108,7 +128,7 @@ export async function GET(request) {
     });
     log(`[Stax] Total tokens: ${totalTokens}`);
 
-    // Paginate (only if no wallet filter)
+    // Paginate
     let paginatedTokenIds = Array.from(tokenOwnerMap.keys());
     if (!wallet) {
       const start = page * pageSize;
@@ -120,7 +140,7 @@ export async function GET(request) {
     // Fetch tiers
     const tierCalls = paginatedTokenIds.map(tokenId => ({
       address: contractAddress,
-      abi: staxNFTAbi,
+      abi: config.abis.stax.main,
       functionName: 'getNftTier',
       args: [tokenId],
     }));
@@ -179,7 +199,7 @@ export async function GET(request) {
       const tokenIds = ownerTokens.get(holder.wallet) || [];
       return {
         address: vaultAddress,
-        abi: staxVaultAbi,
+        abi: config.abis.stax.vault,
         functionName: 'getRewards',
         args: [tokenIds, holder.wallet],
       };
@@ -187,7 +207,7 @@ export async function GET(request) {
 
     const totalRewardPoolCall = {
       address: vaultAddress,
-      abi: staxVaultAbi,
+      abi: config.abis.stax.vault,
       functionName: 'totalRewardPool',
       args: [],
     };
@@ -222,6 +242,7 @@ export async function GET(request) {
       }
       holder.percentage = totalRewardPool ? (holder.claimableRewards / totalRewardPool) * 100 : 0;
       holder.rank = 0;
+      holder.displayMultiplierSum = holder.multiplierSum / 10; // Adjust for Stax display
     });
 
     // Calculate ranks
@@ -244,8 +265,12 @@ export async function GET(request) {
     };
 
     try {
-      await setCache(cacheKey, response);
-      log(`[Stax] Cached response: ${cacheKey}`);
+      if (DISABLE_REDIS) {
+        inMemoryCache.set(cacheKey, response);
+      } else {
+        await setCache(cacheKey, response);
+      }
+      log(`[Stax] Cached response: ${cacheKey} (Redis=${!DISABLE_REDIS})`);
     } catch (cacheError) {
       log(`[Stax] Cache write error: ${cacheError.message}`);
     }

@@ -1,8 +1,9 @@
+// components/HolderTable/Element280.js
 'use client';
 
 import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { contractTiers } from "@/app/nft-contracts";
+import config from '@/config.js';
 
 const rowVariants = {
   hidden: { opacity: 0, y: 20 },
@@ -14,12 +15,12 @@ function HolderTable({ holders, loading }) {
 
   // Define custom tier order for Element280
   const element280TierOrder = [
-    { tierId: "6", name: "Legendary Amped" },
-    { tierId: "5", name: "Legendary" },
-    { tierId: "4", name: "Rare Amped" },
-    { tierId: "2", name: "Common Amped" },
-    { tierId: "3", name: "Rare" },
-    { tierId: "1", name: "Common" },
+    { tierId: '6', name: 'Legendary Amped' },
+    { tierId: '5', name: 'Legendary' },
+    { tierId: '4', name: 'Rare Amped' },
+    { tierId: '2', name: 'Common Amped' },
+    { tierId: '3', name: 'Rare' },
+    { tierId: '1', name: 'Common' },
   ];
 
   if (!safeHolders.length) {
@@ -70,7 +71,7 @@ function HolderTable({ holders, loading }) {
     return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
   }
 
-  const tiers = contractTiers.element280;
+  const tiers = config.contractTiers.element280;
   if (!tiers) {
     return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Element280.</div>;
   }
@@ -102,7 +103,7 @@ function HolderTable({ holders, loading }) {
               animate="visible"
               whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"}`}
+              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
             >
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">

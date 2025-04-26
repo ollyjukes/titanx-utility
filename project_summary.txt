@@ -15,6 +15,8 @@ Dependencies from package.json:
   - dotenv
   - ethers
   - framer-motion
+  - glob
+  - lodash
   - minimist
   - next
   - node-cache
@@ -42,4 +44,4 @@ Dev Dependencies from package.json:
 
 Referenced Files Not Found:
 ---------------------------
-- ./app/nft/ETH/Element280/page.js (Referenced but not found in project structure)
+- ./app/nft/[chain]/[contract]/page.js (Referenced but not found in project structure)
