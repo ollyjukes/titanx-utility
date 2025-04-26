@@ -4,13 +4,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import LoadingIndicator from './LoadingIndicator';
-import config from '../config.js';
+import config from '@/config.js';
 import { Bar } from 'react-chartjs-2';
 import Chart from 'chart.js/auto';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
-import { useNFTStore } from '../app/store';
+import { useNFTStore } from '@/app/store';
 
 // Retry utility
 async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
