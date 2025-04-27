@@ -1,12 +1,15 @@
-// components/Navbar.jsx
 'use client';
+
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import { useThemeStore } from '@/app/store';
+import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isNFTDropdownOpen, setIsNFTDropdownOpen] = useState(false);
+  const { isDarkMode, toggleTheme } = useThemeStore();
 
   const menuVariants = {
     hidden: { opacity: 0, y: -20 },
@@ -18,12 +21,12 @@ function Navbar() {
   };
 
   const itemVariants = {
-    hidden: { opacity: 0, y: -10 },
-    visible: { opacity: 1, y: 0 },
+    hidden: { opacity: 0, y: -10, scale: 0.95 },
+    visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.2 } },
   };
 
   const dropdownVariants = {
-    hidden: { opacity: 0, height: 0 },
+    hidden: { opacity: 0, height: 0, transition: { duration: 0.2 } },
     visible: { opacity: 1, height: 'auto', transition: { duration: 0.2 } },
   };
 
@@ -46,9 +49,7 @@ function Navbar() {
         },
         {
           name: 'BASE',
-          subItems: [
-            { name: 'E280', href: '/nft/BASE/E280' },
-          ],
+          subItems: [{ name: 'E280', href: '/nft/BASE/E280' }],
         },
       ],
     },
@@ -56,61 +57,51 @@ function Navbar() {
   ];
 
   return (
-    <nav className="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-4 sticky top-0 z-50 shadow-md">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
-        {/* Logo */}
+    <nav className="nav">
+      <div className="nav-container">
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5 }}
-          className="text-2xl font-bold"
+          className="nav-logo"
         >
-          <Link href="/">TitanXUtils</Link>
+          <Link href="/" className="nav-link">
+            TitanXUtils
+          </Link>
         </motion.div>
 
-        {/* Desktop Links */}
         <div className="hidden md:flex space-x-6 items-center">
           {navItems.map((item) => (
             <motion.div
               key={item.name}
-              className="relative text-gray-300 hover:text-white transition-colors duration-200 group"
-              whileHover={{ scale: 1.1, color: '#f97316' }}
+              className="relative group"
+              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              {item.external ? (
-                <a href={item.href} target="_blank" rel="noopener noreferrer">
-                  {item.name}
-                </a>
-              ) : (
-                <Link href={item.href}>{item.name}</Link>
-              )}
+              <Link href={item.href} className="nav-link">
+                {item.name}
+              </Link>
               {item.subItems && (
                 <motion.div
-                  className="absolute left-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg hidden group-hover:block"
+                  className="nav-dropdown opacity-0 group-hover:opacity-100 group-hover:mt-3 transition-all duration-200 pointer-events-none group-hover:pointer-events-auto"
                   variants={dropdownVariants}
                   initial="hidden"
+                  animate="hidden"
                   whileHover="visible"
                 >
                   {item.subItems.map((subItem) => (
                     <div key={subItem.name} className="py-1">
-                      <div className="px-4 py-2 text-gray-300 hover:bg-gray-700 hover:text-white">
-                        {subItem.href ? (
-                          <Link href={subItem.href}>{subItem.name}</Link>
-                        ) : (
-                          <span>{subItem.name}</span>
-                        )}
-                      </div>
+                      <div className="nav-dropdown-item font-semibold">{subItem.name}</div>
                       {subItem.subItems && (
                         <div className="pl-4">
                           {subItem.subItems.map((nestedItem) => (
-                            <div
+                            <Link
                               key={nestedItem.name}
-                              className="px-4 py-2 text-gray-300 hover:bg-gray-700 hover:text-white"
+                              href={nestedItem.href}
+                              className="nav-dropdown-item"
                             >
-                              <Link href={nestedItem.href}>
-                                {nestedItem.name}
-                              </Link>
-                            </div>
+                              {nestedItem.name}
+                            </Link>
                           ))}
                         </div>
                       )}
@@ -120,11 +111,19 @@ function Navbar() {
               )}
             </motion.div>
           ))}
+          <motion.button
+            onClick={toggleTheme}
+            className="nav-toggle"
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            aria-label="Toggle theme"
+          >
+            {isDarkMode ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
+          </motion.button>
         </div>
 
-        {/* Mobile Menu Toggle */}
         <button
-          className="md:hidden p-2 focus:outline-none"
+          className="md:hidden p-2 focus:outline-none text-gray-300 hover:text-white"
           onClick={() => setIsOpen(!isOpen)}
         >
           <motion.svg
@@ -145,7 +144,6 @@ function Navbar() {
         </button>
       </div>
 
-      {/* Mobile Menu */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -153,13 +151,13 @@ function Navbar() {
             initial="hidden"
             animate="visible"
             exit="hidden"
-            className="md:hidden mt-4 space-y-2"
+            className="md:hidden mt-4 space-y-2 px-4"
           >
             {navItems.map((item) => (
               <motion.div
                 key={item.name}
                 variants={itemVariants}
-                className="block py-2 px-4 text-gray-300 hover:text-white hover:bg-gray-700 rounded-md transition-colors duration-200"
+                className="nav-dropdown-item"
               >
                 {item.subItems ? (
                   <>
@@ -170,7 +168,7 @@ function Navbar() {
                         setIsNFTDropdownOpen(!isNFTDropdownOpen)
                       }
                     >
-                      {item.name}
+                      <span>{item.name}</span>
                       {item.name === 'NFT' && (
                         <motion.svg
                           className="w-4 h-4"
@@ -178,6 +176,7 @@ function Navbar() {
                           stroke="currentColor"
                           viewBox="0 0 24 24"
                           animate={{ rotate: isNFTDropdownOpen ? 180 : 0 }}
+                          transition={{ duration: 0.2 }}
                         >
                           <path
                             strokeLinecap="round"
@@ -198,27 +197,20 @@ function Navbar() {
                       >
                         {item.subItems.map((subItem) => (
                           <div key={subItem.name}>
-                            <div className="py-2">
-                              {subItem.href ? (
-                                <Link href={subItem.href} onClick={() => setIsOpen(false)}>
-                                  {subItem.name}
-                                </Link>
-                              ) : (
-                                <span>{subItem.name}</span>
-                              )}
+                            <div className="py-2 text-gray-300 font-semibold">
+                              {subItem.name}
                             </div>
                             {subItem.subItems && (
                               <div className="pl-4 space-y-2">
                                 {subItem.subItems.map((nestedItem) => (
-                                  <div
+                                  <Link
                                     key={nestedItem.name}
-                                    className="py-2"
+                                    href={nestedItem.href}
+                                    className="nav-dropdown-item"
                                     onClick={() => setIsOpen(false)}
                                   >
-                                    <Link href={nestedItem.href}>
-                                      {nestedItem.name}
-                                    </Link>
-                                  </div>
+                                    {nestedItem.name}
+                                  </Link>
                                 ))}
                               </div>
                             )}
@@ -227,22 +219,24 @@ function Navbar() {
                       </motion.div>
                     )}
                   </>
-                ) : item.external ? (
-                  <a
+                ) : (
+                  <Link
                     href={item.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    className="block"
                     onClick={() => setIsOpen(false)}
                   >
-                    {item.name}
-                  </a>
-                ) : (
-                  <Link href={item.href} onClick={() => setIsOpen(false)}>
                     {item.name}
                   </Link>
                 )}
               </motion.div>
             ))}
+            <motion.button
+              onClick={toggleTheme}
+              className="w-full text-left nav-dropdown-item"
+              variants={itemVariants}
+            >
+              {isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            </motion.button>
           </motion.div>
         )}
       </AnimatePresence>

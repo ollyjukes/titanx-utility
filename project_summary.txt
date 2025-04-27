@@ -4,42 +4,31 @@ Project Summary
 Directory Tree: (Install 'tree' with 'brew install tree' for this feature)
 
 Dependencies from package.json:
-  - @covalenthq/client-sdk
   - @tanstack/react-query
   - @upstash/redis
-  - @vercel/analytics
-  - @wagmi/connectors
   - alchemy-sdk
   - async-mutex
   - chart.js
   - dotenv
-  - ethers
   - framer-motion
-  - glob
-  - lodash
-  - minimist
   - next
   - node-cache
   - node-fetch
   - p-limit
   - pino
-  - pino-pretty
   - react
   - react-chartjs-2
   - react-dom
-  - react-virtualized
-  - sqlite
-  - sqlite3
   - uuid
   - viem
-  - wagmi
   - zustand
 
 Dev Dependencies from package.json:
-  - @eslint/eslintrc
+  - @eslint/js
   - autoprefixer
   - eslint
   - eslint-config-next
+  - postcss
   - tailwindcss
 
 Referenced Files Not Found:

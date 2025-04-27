@@ -1,4 +1,3 @@
-// components/NFTPage.js
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -11,6 +10,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { useNFTStore } from '@/app/store';
+import { barChartOptions } from '@/lib/chartOptions';
 
 // Retry utility
 async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
@@ -121,17 +121,16 @@ async function fetchContractData() {
 
 // Map contract to HolderTable component
 const holderTableComponents = {
+  e280: dynamic(() => import('./HolderTable/E280'), { ssr: false }),
+  ascendant: dynamic(() => import('./HolderTable/Ascendant'), { ssr: false }),
   element280: dynamic(() => import('./HolderTable/Element280'), { ssr: false }),
   element369: dynamic(() => import('./HolderTable/Element369'), { ssr: false }),
   stax: dynamic(() => import('./HolderTable/Stax'), { ssr: false }),
-  ascendant: dynamic(() => import('./HolderTable/Ascendant'), { ssr: false }),
-  e280: dynamic(() => import('./HolderTable/E280'), { ssr: false }),
 };
 
 export default function NFTPage({ chain, contract }) {
   console.log(`[NFTPage] [INFO] Received props: chain=${chain}, contract=${contract}`);
 
-  // **State and Hooks moved to the top**
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -141,7 +140,6 @@ export default function NFTPage({ chain, contract }) {
 
   const { getCache, setCache } = useNFTStore();
 
-  // **Derive contract identifier**
   const contractId = contract ? contract.toLowerCase() : null;
   console.log(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
 
@@ -149,7 +147,6 @@ export default function NFTPage({ chain, contract }) {
   const { name, apiEndpoint, rewardToken, pageSize, disabled } = contractConfig;
   const isElement280 = contractId === 'element280';
 
-  // **Memoized fetch functions**
   const fetchData = useCallback(async () => {
     if (!apiEndpoint) {
       console.error(`[NFTPage] [ERROR] Invalid contract configuration for ${contractId}`);
@@ -303,7 +300,7 @@ export default function NFTPage({ chain, contract }) {
             page++;
             success = true;
             if (!newHolders.length && json.totalPages === 0) {
-              console.log(`[NFTPage] [INFO] Empty holders with zero pages, accepting as valid`);
+              console.log(`[NFTPage] [] Empty holders with zero pages, accepting as valid`);
               break;
             }
           } catch (err) {
@@ -345,7 +342,6 @@ export default function NFTPage({ chain, contract }) {
     }
   }, [apiEndpoint, contractId, getCache, setCache, name, pageSize]);
 
-  // **Validate contract and handle disabled state**
   useEffect(() => {
     if (!contractId || !config.contractDetails[contractId]) {
       console.error(`[NFTPage] [ERROR] Invalid or missing contract: chain=${chain}, contract=${contract}`);
@@ -362,48 +358,76 @@ export default function NFTPage({ chain, contract }) {
     }
   }, [contractId, chain, contract, disabled, name, fetchData, fetchAllHolders]);
 
-  // **Load HolderTable**
   const HolderTable = holderTableComponents[contractId] || null;
 
-  // **Chart data**
   const chartData = data && isElement280 ? {
     labels: ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Tier 5', 'Tier 6'],
     datasets: [
       {
         label: 'Live NFTs',
         data: data.tierDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+        backgroundColor: 'rgba(59, 130, 246, 0.6)', // Blue-500
+        /* Orange theme: backgroundColor: 'rgba(249, 115, 22, 0.6)', // Orange-500 */
       },
       {
         label: 'Burned NFTs',
         data: data.burnedDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(255, 99, 132, 0.6)',
+        backgroundColor: 'rgba(239, 68, 68, 0.6)', // Red-500
       },
     ],
   } : null;
 
-  // **Render logic**
   if (isInvalidContract) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-        <h1 className="text-4xl font-bold mb-6">Error</h1>
-        <p className="text-red-500 text-lg">Invalid contract: {contractId || 'none specified'}</p>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="container text-center-section"
+      >
+        <h1 className="title mb-4">Invalid Contract</h1>
+        <p className="text-error text-lg">
+          The contract "{contractId || 'none specified'}" is not supported.
+        </p>
+      </motion.div>
     );
   }
 
   if (!HolderTable) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-        <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
-        <p className="text-red-500 text-lg">Error: Holder table component for {contractId} not found</p>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="container text-center-section"
+      >
+        <h1 className="title mb-4">{name || 'Unknown Contract'} Holders</h1>
+        <p className="text-error text-lg">
+          Error: Holder table component for {contractId} not found.
+        </p>
+      </motion.div>
     );
   }
 
+  // Define props for each HolderTable component
+  const holderTableProps = {
+    e280: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    ascendant: { holders: data?.holders || [], loading, totalShares: data?.totalShares || 0, totalTokens: data?.totalTokens || 0, rewardToken },
+    element280: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    element369: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    stax: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+  };
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-      <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
+    <div className="container page-content">
+      <motion.h1
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="title mb-6"
+      >
+        {name || 'Unknown Contract'} Holders
+      </motion.h1>
 
       <AnimatePresence>
         {loading && (
@@ -411,9 +435,15 @@ export default function NFTPage({ chain, contract }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="w-full max-w-4xl"
+            transition={{ duration: 0.3 }}
+            className="card text-center-section"
           >
-            <LoadingIndicator message={`Loading ${name} data... ${isElement280 ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`} />
+            <LoadingIndicator
+              status={`Loading ${name} data... ${
+                isElement280 ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''
+              }`}
+              progress={progress}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -422,7 +452,8 @@ export default function NFTPage({ chain, contract }) {
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="text-red-500 text-lg mb-6"
+          transition={{ duration: 0.3 }}
+          className="text-error text-lg mb-6 text-center"
         >
           {error}
         </motion.p>
@@ -433,75 +464,72 @@ export default function NFTPage({ chain, contract }) {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="w-full max-w-4xl"
+          className="space-y-section"
         >
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-6">
-            <h2 className="text-2xl font-semibold mb-4">Contract Summary</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="card">
+            <h2 className="subtitle mb-4">Contract Summary</h2>
+            <div className="grid-responsive text-body">
               <div>
-                <p><strong>Total Minted:</strong> {data.totalMinted?.toLocaleString() || 'N/A'}</p>
-                <p><strong>Total Live:</strong> {data.totalLive?.toLocaleString() || 'N/A'}</p>
-                <p><strong>Total Burned:</strong> {data.totalBurned?.toLocaleString() || 'N/A'}</p>
+                <p>
+                  <strong>Total Minted:</strong> {data.totalMinted?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Live:</strong> {data.totalLive?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Burned:</strong> {data.totalBurned?.toLocaleString() || 'N/A'}
+                </p>
               </div>
               <div>
-                <p><strong>Multiplier Pool:</strong> {data.multiplierPool?.toLocaleString() || 'N/A'}</p>
-                <p><strong>Total Reward Pool:</strong> {data.totalRewardPool?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'} {rewardToken}</p>
-                <p><strong>Total Holders:</strong> {progress.totalOwners?.toLocaleString() || 'N/A'}</p>
+                <p>
+                  <strong>Multiplier Pool:</strong>{' '}
+                  {data.multiplierPool?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Reward Pool:</strong>{' '}
+                  {data.totalRewardPool?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) || 'N/A'}{' '}
+                  {rewardToken}
+                </p>
+                <p>
+                  <strong>Total Holders:</strong>{' '}
+                  {progress.totalOwners?.toLocaleString() || 'N/A'}
+                </p>
               </div>
             </div>
             {isElement280 && (
-              <div className="mt-4">
-                <button
+              <div className="mt-6">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   onClick={() => setShowChart(!showChart)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200"
+                  className="btn btn-primary"
                 >
                   {showChart ? 'Hide Tier Distribution' : 'Show Tier Distribution'}
-                </button>
-                {showChart && chartData && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mt-4"
-                  >
-                    <Bar
-                      data={chartData}
-                      options={{
-                        responsive: true,
-                        plugins: {
-                          legend: { position: 'top' },
-                          title: { display: true, text: 'NFT Tier Distribution' },
-                        },
-                        scales: {
-                          y: { beginAtZero: true, title: { display: true, text: 'Number of NFTs' } },
-                          x: { title: { display: true, text: 'Tiers' } },
-                        },
-                      }}
-                    />
-                  </motion.div>
-                )}
+                </motion.button>
+                <AnimatePresence>
+                  {showChart && chartData && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="chart-container mt-6"
+                    >
+                      <Bar data={chartData} options={barChartOptions} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
           </div>
 
-          <HolderTable
-            holders={data.holders || []}
-            totalPages={data.totalPages || 1}
-            totalTokens={data.totalTokens || 0}
-            totalLockedAscendant={data.totalLockedAscendant || 0}
-            totalShares={data.totalShares || 0}
-            toDistributeDay8={data.toDistributeDay8 || 0}
-            toDistributeDay28={data.toDistributeDay28 || 0}
-            toDistributeDay90={data.toDistributeDay90 || 0}
-            pendingRewards={data.pendingRewards || 0}
-            totalClaimableRewards={data.totalClaimableRewards || 0}
-            totalInfernoRewards={data.totalInfernoRewards || 0}
-            totalFluxRewards={data.totalFluxRewards || 0}
-            totalE280Rewards={data.totalE280Rewards || 0}
-            summary={data.summary || {}}
-            burnedNfts={data.burnedNfts || []}
-            rewardToken={rewardToken}
-          />
+          <div className="card">
+            <h2 className="subtitle mb-4">Holders</h2>
+            <HolderTable {...holderTableProps[contractId]} />
+          </div>
         </motion.div>
       )}
     </div>

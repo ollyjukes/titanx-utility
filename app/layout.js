@@ -1,10 +1,13 @@
-// app/layout.js
-import './layout.css';
+import './global.css';
+import Navbar from '@/components/Navbar';
 import { Inter } from 'next/font/google';
-import Navbar from '../components/Navbar';
-import ClientProvider from './ClientProvider';
 
 const inter = Inter({ subsets: ['latin'] });
+
+export const metadata = {
+  title: 'TitanXUtils',
+  description: 'NFT tracking and management platform for TitanX ecosystem',
+};
 
 export default function RootLayout({ children }) {
   return (
@@ -12,11 +15,12 @@ export default function RootLayout({ children }) {
       <head>
         <title>TitanXUtils</title>
       </head>
-      <body className={`${inter.className} bg-gray-900 text-white`}>
-        <ClientProvider>
-          <Navbar />
-          <main className="pt-16">{children}</main>
-        </ClientProvider>
+      <body className={inter.className}>
+        <Navbar />
+        <main className="flex-grow container page-content">{children}</main>
+        <footer className="footer">
+          <p>© {new Date().getFullYear()} TitanXUtils. All rights reserved.</p>
+        </footer>
       </body>
     </html>
   );

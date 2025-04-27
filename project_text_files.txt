@@ -1,18 +1,22 @@
 -e 
 ---
+File: ./types/eslint-config-next.d.ts
+declare module 'eslint-config-next';
+-e 
+---
 File: ./tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
     './app/**/*.{js,ts,jsx,tsx}',
-    './pages/**/*.{js,ts,jsx,tsx}',
     './components/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {},
   },
   plugins: [],
-};-e 
+};
+-e 
 ---
 File: ./.env.local
 # Created by Vercel CLI
@@ -38,13 +42,8 @@ DEBUG=true
 USE_FALLBACK_DATA=false-e 
 ---
 File: ./app/layout.js
-// app/layout.js
-import './layout.css';
-import { Inter } from 'next/font/google';
-import Navbar from '../components/Navbar';
-import ClientProvider from './ClientProvider';
-
-const inter = Inter({ subsets: ['latin'] });
+import Navbar from '@/components/Navbar';
+// import ClientProvider from './ClientProvider.js';
 
 export default function RootLayout({ children }) {
   return (
@@ -52,15 +51,16 @@ export default function RootLayout({ children }) {
       <head>
         <title>TitanXUtils</title>
       </head>
-      <body className={`${inter.className} bg-gray-900 text-white`}>
-        <ClientProvider>
+      <body>
+        {/* <ClientProvider> */}
           <Navbar />
-          <main className="pt-16">{children}</main>
-        </ClientProvider>
+          <main>{children}</main>
+        {/* </ClientProvider> */}
       </body>
     </html>
   );
-}-e 
+}
+-e 
 ---
 File: ./app/page.js
 // app/page.js
@@ -459,6 +459,28 @@ export async function generateStaticParams() {
 // Enable Incremental Static Regeneration (ISR)
 export const revalidate = 60; // Revalidate every 60 seconds-e 
 ---
+File: ./app/global.css
+/* app/layout.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.highlight-row-bold {
+  background-color: #fef08a; /* Bold yellow */
+  font-weight: 600;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.3s ease;
+}-e 
+---
 File: ./app/store.js
 // app/store.js
 'use client';
@@ -519,7 +541,7 @@ export default function AboutPage() {
           This is a continuos development project, and we are always looking for ways to improve the user experience. If you have any suggestions or feedback, please feel free to reach out to us on Twitter.
         </p>
         <p className="text-lg text-gray-300 leading-relaxed mt-4">
-          I&apos; like to add sections on our lending and farms protocols.  to be continued...
+          May add sections on our lending and farms protocols.  to be continued...
         </p>
       </div>
     </div>
@@ -3145,6 +3167,21 @@ File: ./app/layout.css
 @tailwind components;
 @tailwind utilities;
 
+/* Global resets */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background-color: #111827; /* Gray-900 */
+  color: #ffffff; /* White text */
+  min-height: 100vh;
+}
+
+/* Animation for fade-in */
 .animate-fade-in {
   animation: fadeIn 0.5s ease-in;
 }
@@ -3154,6 +3191,7 @@ File: ./app/layout.css
   to { opacity: 1; }
 }
 
+/* Highlight row for tables */
 .highlight-row-bold {
   background-color: #fef08a; /* Bold yellow */
   font-weight: 600;
@@ -3274,11 +3312,11 @@ export default function ClientProvider({ children }) {
 ---
 File: ./postcss.config.mjs
 // This file is used to configure PostCSS, a tool for transforming CSS with JavaScript.
-
 const config = {
   plugins: ["tailwindcss"],
 };
-export default config;-e 
+export default config;
+-e 
 ---
 File: ./next.config.mjs
 /** @type {import('next').NextConfig} */
@@ -3576,6 +3614,14 @@ const config = {
 };
 
 export default config;-e 
+---
+File: ./next-env.d.ts
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/building-your-application/configuring/typescript for more information.
+-e 
 ---
 File: ./README.md
 Please find below my Nextjs project TitanXUtils.  This part is concentrating on 4 NFT colections and analysing their data.
@@ -5601,13 +5647,13 @@ File: ./components/NFTPage.js
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import LoadingIndicator from './LoadingIndicator';
-import config from '../config.js';
+import config from '@/config.js';
 import { Bar } from 'react-chartjs-2';
 import Chart from 'chart.js/auto';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
-import { useNFTStore } from '../app/store';
+import { useNFTStore } from '@/app/store';
 
 // Retry utility
 async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
@@ -7632,22 +7678,35 @@ UPSTASH_REDIS_REST_TOKEN="AWeIAAIjcDE5ODI2M2QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YX
 UPSTASH_REDIS_REST_URL="https://splendid-sunbird-26504.upstash.io"
 -e 
 ---
-File: ./eslint.config.mjs
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
-const eslintConfig = [...compat.extends("next/core-web-vitals")];
-
-export default eslintConfig;
+File: ./postcss.config.js
+export default {
+  plugins: {
+    '@tailwindcss/postcss': {},
+    autoprefixer: {},
+  },
+};
 -e 
+---
+File: ./eslint.config.mjs
+// eslint.config.mjs
+import eslint from '@eslint/js';
+import nextPlugin from 'eslint-config-next';
+
+export default [
+  eslint.configs.recommended,
+  {
+    files: ['**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx'],
+    plugins: {
+      next: nextPlugin,
+    },
+    rules: {
+      ...nextPlugin.rules,
+      'react/display-name': 'off',
+      'no-unused-vars': 'warn',
+      'react/prop-types': 'off',
+    },
+  },
+];-e 
 ---
 File: ./ORXFunctions.js
 // tokenFunctions.js
@@ -7859,9 +7918,4 @@ const tokenFunctions = [
     },
   ];
   
-  export default tokenFunctions;-e 
----
-File: ./.env.local.bak
-NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=1dd2a69d54ac94fdefad918243183710
-NEXT_PUBLIC_ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI
-ETHERSCAN_API_KEY=GZDQAWE7C9MKSWQ3ANT2BFPUW8SXXZJ9MF
+  export default tokenFunctions;

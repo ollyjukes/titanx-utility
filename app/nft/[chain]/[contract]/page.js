@@ -1,28 +1,36 @@
+'use client';
+
 import { notFound } from 'next/navigation';
+import { motion } from 'framer-motion';
 import NFTPage from '@/components/NFTPage';
-import config from '@/config'; // Use @/ alias for config.js
+import config from '@/config';
 
 export default function Page({ params }) {
   const { chain, contract } = params;
-  console.log('[Page] Received params:', params); // Debug params
+  console.log('[Page] Received params:', params);
 
-  // Validate chain and contract
-  const supportedContracts = Object.keys(config.contractDetails).map(key => key.toLowerCase());
+  const supportedContracts = Object.keys(config.contractDetails).map((key) => key.toLowerCase());
   if (!config.supportedChains.includes(chain) || !supportedContracts.includes(contract.toLowerCase())) {
-    notFound(); // Render 404 for invalid chain or contract
+    notFound();
   }
 
-  return <NFTPage chain={chain} contract={contract} />;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="container page-content"
+    >
+      <NFTPage chain={chain} contract={contract} />
+    </motion.div>
+  );
 }
 
-// Define static paths for SSG
 export async function generateStaticParams() {
-  // Generate paths from config.contractDetails
   return Object.entries(config.contractDetails).map(([contractId, details]) => ({
     chain: details.chain,
-    contract: contractId.charAt(0).toUpperCase() + contractId.slice(1), // Capitalize first letter (e.g., 'element280' -> 'Element280')
+    contract: contractId.charAt(0).toUpperCase() + contractId.slice(1),
   }));
 }
 
-// Enable Incremental Static Regeneration (ISR)
-export const revalidate = 60; // Revalidate every 60 seconds
+export const revalidate = 60;

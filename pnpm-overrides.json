@@ -1,0 +1,7 @@
+{
+  "pnpm": {
+    "overrides": {
+      "@rushstack/eslint-patch": false
+    }
+  }
+}

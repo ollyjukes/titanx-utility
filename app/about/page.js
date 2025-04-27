@@ -21,7 +21,7 @@ export default function AboutPage() {
           This is a continuos development project, and we are always looking for ways to improve the user experience. If you have any suggestions or feedback, please feel free to reach out to us on Twitter.
         </p>
         <p className="text-lg text-gray-300 leading-relaxed mt-4">
-          I&apos; like to add sections on our lending and farms protocols.  to be continued...
+          May add sections on our lending and farms protocols.  to be continued...
         </p>
       </div>
     </div>
