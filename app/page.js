@@ -27,7 +27,7 @@ export default function Home() {
                 Welcome to TitanXUtils
               </h1>
               <p className="mt-4 text-lg sm:text-xl text-gray-300">
-                Your gateway to exploring the TitanX ecosystem. Dive into NFT protocols, auctions, and more.
+                Your gateway to exploring the TitanX ecosystem. Dive into NFT protocols, auctions, mining, and more.
               </p>
               <div className="mt-8 flex flex-col sm:flex-row justify-center gap-4">
                 <motion.div
@@ -43,6 +43,13 @@ export default function Home() {
                   whileTap={{ scale: 0.95 }}
                 >
                   <Link href="/auctions">TitanX Auctions</Link>
+                </motion.div>
+                <motion.div
+                  className="inline-block bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-green-600 transition-colors duration-200"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Link href="/mining">Mining</Link>
                 </motion.div>
               </div>
             </motion.section>

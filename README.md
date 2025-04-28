@@ -678,7 +678,7 @@ app/api/utils.js: Converted to ES Modules, uses config.js for Alchemy and cache 
 
 app/api/holders/Stax/route.js: Updated to use config.js for contract details, tiers, and ABIs (config.abis.stax.main, config.abis.stax.vault).
 
-Files Pending Update (from find command):
+Files Pending Update (from find command):  THIS IS NOW DONE, so we can move on
 app/api/holders/Element280/route.js
 
 app/api/holders/Element280/validate-burned/route.js
@@ -875,4 +875,6 @@ ABI Files: The config.js assumes ABI files are in ../abi/. If the path differs, 
 
 Scripts: The scripts/ directory was excluded, but files like trackElement280NFTs.js may need updates later. Let me know if you want to address these.
 
-CURRENT status:  trying to get the project to build: pleasse help
+CURRENT status:  trying to get the project to build: 
+I'd like to add the mining link to the home page much like auctions and NFTs are. I also want to remove alchemy-sdk ( as it includes a very troublesome solana library that I want to remove) and use viem possibly instead  ( or eithers if thats more robust)
+

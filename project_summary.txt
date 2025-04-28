@@ -4,14 +4,15 @@ Project Summary
 Directory Tree: (Install 'tree' with 'brew install tree' for this feature)
 
 Dependencies from package.json:
+  - @heroicons/react
   - @tanstack/react-query
   - @upstash/redis
-  - alchemy-sdk
   - async-mutex
   - chart.js
   - dotenv
   - framer-motion
   - next
+  - nextjs
   - node-cache
   - node-fetch
   - p-limit
@@ -33,4 +34,3 @@ Dev Dependencies from package.json:
 
 Referenced Files Not Found:
 ---------------------------
-- ./app/nft/[chain]/[contract]/page.js (Referenced but not found in project structure)

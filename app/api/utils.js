@@ -1,6 +1,6 @@
-import { createPublicClient, http } from 'viem';
+// app/api/utils.js
+import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
-import { Alchemy, Network } from 'alchemy-sdk';
 import { Redis } from '@upstash/redis';
 import NodeCache from 'node-cache';
 import pino from 'pino';
@@ -12,13 +12,8 @@ const ALCHEMY_API_KEY = config.alchemy.apiKey || process.env.NEXT_PUBLIC_ALCHEMY
 export const client = createPublicClient({
   chain: mainnet,
   transport: http(`https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, {
-    timeout: 60000, // Default timeout (60 seconds)
+    timeout: 60000,
   }),
-});
-
-export const alchemy = new Alchemy({
-  apiKey: ALCHEMY_API_KEY,
-  network: config.alchemy.network || Network.ETH_MAINNET,
 });
 
 export const logger = pino({
@@ -47,7 +42,7 @@ const redis = config.cache.redis.disableElement280
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export async function batchMulticall(calls, batchSize = config.alchemy.batchSize) {
+export async function batchMulticall(calls, batchSize = config.alchemy.batchSize, options = { retryCount: 0 }) {
   const batches = [];
   for (let i = 0; i < calls.length; i += batchSize) {
     batches.push(calls.slice(i, i + batchSize));
@@ -62,7 +57,7 @@ export async function batchMulticall(calls, batchSize = config.alchemy.batchSize
       log(`[utils] [ERROR] batchMulticall failed: ${error.message}`);
       if (options.retryCount < config.alchemy.maxRetries) {
         await delay(config.alchemy.retryMaxDelayMs / config.alchemy.maxRetries);
-        return batchMulticall(calls, { ...options, retryCount: (options.retryCount || 0) + 1 });
+        return batchMulticall(calls, batchSize, { retryCount: options.retryCount + 1 });
       }
       throw error;
     }
@@ -86,11 +81,11 @@ export async function getCache(key) {
   return data;
 }
 
-export async function setCache(key, value) {
-  cache.set(key, value);
+export async function setCache(key, value, ttl = config.cache.nodeCache.stdTTL) {
+  cache.set(key, value, ttl);
   if (!config.cache.redis.disableElement280) {
     try {
-      await redis?.set(key, JSON.stringify(value), 'EX', config.cache.nodeCache.stdTTL); // Fixed: config.cache.ttl -> config.cache.nodeCache.stdTTL
+      await redis?.set(key, JSON.stringify(value), 'EX', ttl);
     } catch (error) {
       log(`[utils] [ERROR] Redis set failed for key ${key}: ${error.message}`);
     }
@@ -107,7 +102,7 @@ export async function loadCacheState(contractAddress) {
     state = await redis?.get(cacheKey);
     state = state ? JSON.parse(state) : null;
   }
-  if (!state) {
+  if (!state && process.env.NODE_ENV !== 'production') {
     try {
       state = JSON.parse(await fs.readFile(`./cache_state_${contractAddress}.json`, 'utf8'));
     } catch (error) {
@@ -135,12 +130,89 @@ export async function saveCacheState(contractAddress, state) {
       log(`[utils] [ERROR] Redis set failed for key ${cacheKey}: ${error.message}`);
     }
   }
-  try {
-    await fs.writeFile(`./cache_state_${contractAddress}.json`, JSON.stringify(state, null, 2));
-  } catch (error) {
-    log(`[utils] [ERROR] Failed to write cache state to file: ${error.message}`);
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      await fs.writeFile(`./cache_state_${contractAddress}.json`, JSON.stringify(state, null, 2));
+    } catch (error) {
+      log(`[utils] [ERROR] Failed to write cache state to file: ${error.message}`);
+    }
   }
   if (config.debug.enabled) {
     log(`[utils] [DEBUG] Saved cache state for ${cacheKey}`);
   }
+}
+
+export async function getNftsForOwner(ownerAddress, contractAddress, abi) {
+  try {
+    const contract = {
+      address: contractAddress,
+      abi: parseAbi(abi),
+    };
+    const balance = await client.readContract({
+      ...contract,
+      functionName: 'balanceOf',
+      args: [ownerAddress],
+    });
+    const tokenIds = [];
+    for (let i = 0; i < Number(balance); i++) {
+      const tokenId = await client.readContract({
+        ...contract,
+        functionName: 'tokenOfOwnerByIndex',
+        args: [ownerAddress, BigInt(i)],
+      });
+      tokenIds.push(tokenId);
+    }
+    if (config.debug.enabled) {
+      log(`[utils] [DEBUG] Fetched ${tokenIds.length} NFTs for owner ${ownerAddress} at contract ${contractAddress}`);
+    }
+    return tokenIds.map(id => ({ tokenId: id.toString(), balance: 1 }));
+  } catch (error) {
+    log(`[utils] [ERROR] Failed to fetch NFTs for owner ${ownerAddress}: ${error.message}`);
+    throw error;
+  }
+}
+
+export async function getOwnersForContract(contractAddress, abi, fromBlock = 0n) {
+  try {
+    const logs = await client.getLogs({
+      address: contractAddress,
+      event: parseAbi(['event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)']),
+      fromBlock,
+    });
+    const owners = {};
+    logs.forEach(log => {
+      const { tokenId, to } = log.args;
+      if (to !== '0x0000000000000000000000000000000000000000') {
+        owners[tokenId.toString()] = { ownerAddress: to, tokenId: tokenId.toString() };
+      } else {
+        delete owners[tokenId.toString()];
+      }
+    });
+    if (config.debug.enabled) {
+      log(`[utils] [DEBUG] Fetched ${Object.keys(owners).length} owners for contract ${contractAddress}`);
+    }
+    return Object.values(owners);
+  } catch (error) {
+    log(`[utils] [ERROR] Failed to fetch owners for contract ${contractAddress}: ${error.message}`);
+    throw error;
+  }
+}
+
+export async function getTransactionReceipt(txHash) {
+  try {
+    const receipt = await client.getTransactionReceipt({ hash: txHash });
+    if (config.debug.enabled) {
+      log(`[utils] [DEBUG] Fetched transaction receipt for hash ${txHash}`);
+    }
+    return receipt;
+  } catch (error) {
+    log(`[utils] [ERROR] Failed to fetch transaction receipt for hash ${txHash}: ${error.message}`);
+    throw error;
+  }
+}
+
+export async function safeSerialize(obj) {
+  return JSON.parse(
+    JSON.stringify(obj, (key, value) => (typeof value === 'bigint' ? value.toString() : value))
+  );
 }

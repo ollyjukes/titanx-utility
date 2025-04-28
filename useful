@@ -123,7 +123,7 @@ REFERENCED_FILES=(
 "./app/auctions/page.js"
 "./app/layout.js"
 "./app/mining/page.js"
-"./app/nft/[chain]/[contract]/page.js"
+"./app/nft/\[chain\]/\[contract\]/page.js"
 "./app/nft/layout.js"
 "./app/page.js"
 "./app/store.js"

@@ -1,33 +1,18 @@
+// app/api/holders/Stax/route.js
 import { NextResponse } from 'next/server';
 import config from '@/config.js';
-import { client, alchemy, log, batchMulticall, getCache, setCache } from '../../utils.js'; // Removed CACHE_TTL
+import { client, log, batchMulticall, getCache, setCache, safeSerialize } from '../../utils.js';
 import NodeCache from 'node-cache';
+import staxNFT from '@/abi/staxNFT.json';
 
-// Use config.cache.nodeCache.stdTTL instead of CACHE_TTL
 const CACHE_TTL = config.cache.nodeCache.stdTTL;
-
-// Redis toggle
 const DISABLE_REDIS = process.env.DISABLE_STAX_REDIS === 'true';
-
-// In-memory cache when Redis is disabled
 const inMemoryCache = new NodeCache({ stdTTL: CACHE_TTL });
 
 const contractAddress = config.contractAddresses.stax.address;
 const vaultAddress = config.vaultAddresses.stax.address;
 const tiersConfig = config.contractTiers.stax;
 const defaultPageSize = config.contractDetails.stax.pageSize || 1000;
-
-async function retryAlchemy(fn, attempts = config.alchemy.maxRetries, delayMs = config.alchemy.batchDelayMs) {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      log(`[Stax] Alchemy retry ${i + 1}/${attempts}: ${error.message}`);
-      if (i === attempts - 1) throw error;
-      await new Promise(resolve => setTimeout(resolve, delayMs * (i + 1)));
-    }
-  }
-}
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -62,7 +47,6 @@ export async function GET(request) {
     }
     log(`[Stax] Cache miss for ${cacheKey}`);
 
-    // Clear cache for wallet-specific queries
     if (wallet) {
       try {
         if (DISABLE_REDIS) {
@@ -76,7 +60,6 @@ export async function GET(request) {
       }
     }
 
-    // Fetch totalBurned
     let totalBurned = 0;
     try {
       const burnedResult = await client.readContract({
@@ -91,44 +74,36 @@ export async function GET(request) {
       totalBurned = 0;
     }
 
-    // Fetch owners
-    const ownersResponse = await retryAlchemy(() =>
-      alchemy.nft.getOwnersForContract(contractAddress, {
-        block: 'latest',
-        withTokenBalances: true,
-      })
-    );
-    log(`[Stax] Owners fetched: ${ownersResponse.owners.length}`);
+    const owners = await getOwnersForContract(contractAddress, staxNFT.abi);
+    log(`[Stax] Owners fetched: ${owners.length}`);
 
     const burnAddresses = [
       '0x0000000000000000000000000000000000000000',
       '0x000000000000000000000000000000000000dead',
     ];
     const filteredOwners = wallet
-      ? ownersResponse.owners.filter(
-          owner => owner.ownerAddress.toLowerCase() === wallet && !burnAddresses.includes(owner.ownerAddress.toLowerCase()) && owner.tokenBalances.length > 0
+      ? owners.filter(
+          owner => owner.ownerAddress.toLowerCase() === wallet && !burnAddresses.includes(owner.ownerAddress.toLowerCase())
         )
-      : ownersResponse.owners.filter(
-          owner => !burnAddresses.includes(owner.ownerAddress.toLowerCase()) && owner.tokenBalances.length > 0
+      : owners.filter(
+          owner => !burnAddresses.includes(owner.ownerAddress.toLowerCase())
         );
     log(`[Stax] Live owners after filter: ${filteredOwners.length}`);
 
-    // Build token-to-owner map
     const tokenOwnerMap = new Map();
     const ownerTokens = new Map();
     let totalTokens = 0;
     filteredOwners.forEach(owner => {
       const walletAddr = owner.ownerAddress.toLowerCase();
-      const tokenIds = owner.tokenBalances.map(tb => BigInt(tb.tokenId));
-      tokenIds.forEach(tokenId => {
-        tokenOwnerMap.set(tokenId, walletAddr);
-        totalTokens++;
-      });
-      ownerTokens.set(walletAddr, tokenIds);
+      const tokenId = BigInt(owner.tokenId);
+      tokenOwnerMap.set(tokenId, walletAddr);
+      totalTokens++;
+      const tokens = ownerTokens.get(walletAddr) || [];
+      tokens.push(tokenId);
+      ownerTokens.set(walletAddr, tokens);
     });
     log(`[Stax] Total tokens: ${totalTokens}`);
 
-    // Paginate
     let paginatedTokenIds = Array.from(tokenOwnerMap.keys());
     if (!wallet) {
       const start = page * pageSize;
@@ -137,7 +112,6 @@ export async function GET(request) {
     }
     log(`[Stax] Paginated tokens: ${paginatedTokenIds.length}`);
 
-    // Fetch tiers
     const tierCalls = paginatedTokenIds.map(tokenId => ({
       address: contractAddress,
       abi: config.abis.stax.main,
@@ -151,7 +125,6 @@ export async function GET(request) {
     }
     log(`[Stax] Tiers fetched for ${tierResults.length} tokens`);
 
-    // Log tier results
     tierResults.forEach((result, i) => {
       const tokenId = paginatedTokenIds[i];
       if (result?.status === 'success') {
@@ -161,7 +134,6 @@ export async function GET(request) {
       }
     });
 
-    // Build holders
     const maxTier = Math.max(...Object.keys(tiersConfig).map(Number));
     const holdersMap = new Map();
 
@@ -193,7 +165,6 @@ export async function GET(request) {
       }
     });
 
-    // Fetch rewards
     let holders = Array.from(holdersMap.values());
     const rewardCalls = holders.map(holder => {
       const tokenIds = ownerTokens.get(holder.wallet) || [];
@@ -242,10 +213,9 @@ export async function GET(request) {
       }
       holder.percentage = totalRewardPool ? (holder.claimableRewards / totalRewardPool) * 100 : 0;
       holder.rank = 0;
-      holder.displayMultiplierSum = holder.multiplierSum / 10; // Adjust for Stax display
+      holder.displayMultiplierSum = holder.multiplierSum / 10;
     });
 
-    // Calculate ranks
     holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
     holders.forEach((holder, index) => {
       holder.rank = index + 1;
@@ -284,7 +254,7 @@ export async function GET(request) {
     let message = 'Failed to fetch Stax data';
     if (error.message.includes('Rate limit')) {
       status = 429;
-      message = 'Alchemy rate limit exceeded';
+      message = 'Rate limit exceeded';
     }
     return NextResponse.json({ error: message, details: error.message }, { status });
   }

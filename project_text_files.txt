@@ -8,15 +8,16 @@ File: ./tailwind.config.js
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    './app/**/*.{js,ts,jsx,tsx}',
-    './components/**/*.{js,ts,jsx,tsx}',
+    './app/**/*.{js,jsx,ts,tsx,mdx}',
+    './components/**/*.{js,jsx,ts,tsx,mdx}',
+    './pages/**/*.{js,jsx,ts,tsx,mdx}',
   ],
   theme: {
     extend: {},
   },
   plugins: [],
-};
--e 
+  darkMode: 'class', // Enable dark mode with 'class' strategy
+};-e 
 ---
 File: ./.env.local
 # Created by Vercel CLI
@@ -42,8 +43,16 @@ DEBUG=true
 USE_FALLBACK_DATA=false-e 
 ---
 File: ./app/layout.js
+import './global.css';
 import Navbar from '@/components/Navbar';
-// import ClientProvider from './ClientProvider.js';
+import { Inter } from 'next/font/google';
+
+const inter = Inter({ subsets: ['latin'] });
+
+export const metadata = {
+  title: 'TitanXUtils',
+  description: 'NFT tracking and management platform for TitanX ecosystem',
+};
 
 export default function RootLayout({ children }) {
   return (
@@ -51,16 +60,16 @@ export default function RootLayout({ children }) {
       <head>
         <title>TitanXUtils</title>
       </head>
-      <body>
-        {/* <ClientProvider> */}
-          <Navbar />
-          <main>{children}</main>
-        {/* </ClientProvider> */}
+      <body className={inter.className}>
+        <Navbar />
+        <main className="flex-grow container page-content">{children}</main>
+        <footer className="footer">
+          <p>© {new Date().getFullYear()} TitanXUtils. All rights reserved.</p>
+        </footer>
       </body>
     </html>
   );
-}
--e 
+}-e 
 ---
 File: ./app/page.js
 // app/page.js
@@ -430,59 +439,253 @@ export default function NFTOverview() {
 }-e 
 ---
 File: ./app/nft/[chain]/[contract]/page.js
+//'use client';
+
 import { notFound } from 'next/navigation';
+import { motion } from 'framer-motion';
 import NFTPage from '@/components/NFTPage';
-import config from '@/config'; // Use @/ alias for config.js
+import config from '@/config';
 
 export default function Page({ params }) {
   const { chain, contract } = params;
-  console.log('[Page] Received params:', params); // Debug params
+  console.log('[Page] Received params:', params);
 
-  // Validate chain and contract
-  const supportedContracts = Object.keys(config.contractDetails).map(key => key.toLowerCase());
+  const supportedContracts = Object.keys(config.contractDetails).map((key) => key.toLowerCase());
   if (!config.supportedChains.includes(chain) || !supportedContracts.includes(contract.toLowerCase())) {
-    notFound(); // Render 404 for invalid chain or contract
+    notFound();
   }
 
-  return <NFTPage chain={chain} contract={contract} />;
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="container page-content"
+    >
+      <NFTPage chain={chain} contract={contract} />
+    </motion.div>
+  );
 }
 
-// Define static paths for SSG
 export async function generateStaticParams() {
-  // Generate paths from config.contractDetails
   return Object.entries(config.contractDetails).map(([contractId, details]) => ({
     chain: details.chain,
-    contract: contractId.charAt(0).toUpperCase() + contractId.slice(1), // Capitalize first letter (e.g., 'element280' -> 'Element280')
+    contract: contractId.charAt(0).toUpperCase() + contractId.slice(1),
   }));
 }
 
-// Enable Incremental Static Regeneration (ISR)
-export const revalidate = 60; // Revalidate every 60 seconds-e 
+export const revalidate = 60;-e 
 ---
 File: ./app/global.css
-/* app/layout.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-.animate-fade-in {
-  animation: fadeIn 0.5s ease-in;
+/* Base Styles */
+html {
+  @apply scroll-smooth;
 }
 
-@keyframes fadeIn {
+body {
+  @apply min-h-screen flex flex-col bg-gray-100 text-gray-900 antialiased;
+}
+
+.dark body {
+  @apply bg-gray-900 text-gray-100;
+}
+
+/* Component Classes */
+@layer components {
+  /* Layout */
+  .container {
+    @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .page-content {
+    @apply py-8;
+  }
+
+  /* Cards */
+  .card {
+    @apply rounded-lg shadow-lg p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
+    /* Orange theme: @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500; */
+  }
+
+  .btn-primary {
+    @apply bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600;
+    /* Orange theme: @apply bg-orange-600 text-white hover:bg-orange-700 dark:bg-orange-500 dark:hover:bg-orange-600; */
+  }
+
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600;
+  }
+
+  /* Typography */
+  .title {
+    @apply text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100;
+  }
+
+  .subtitle {
+    @apply text-2xl font-semibold text-gray-900 dark:text-gray-100;
+  }
+
+  .text-body {
+    @apply text-sm sm:text-base text-gray-600 dark:text-gray-300;
+  }
+
+  .text-error {
+    @apply text-red-500 dark:text-red-400;
+  }
+
+  /* Tables */
+  .table-container {
+    @apply overflow-x-auto w-full rounded-lg shadow-lg animate-fade-in;
+  }
+
+  .table {
+    @apply w-full table-auto md:table-fixed bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100;
+  }
+
+  .table-head {
+    @apply bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base text-white;
+    /* Orange theme: @apply bg-gradient-to-r from-orange-600 to-orange-800 text-sm md:text-base text-white; */
+  }
+
+  .table-body {
+    @apply text-xs md:text-sm text-gray-600 dark:text-gray-300;
+  }
+
+  .table-row {
+    @apply transition-colors border-b border-gray-200 dark:border-gray-700;
+  }
+
+  .table-row-even {
+    @apply bg-white dark:bg-gray-800;
+  }
+
+  .table-row-odd {
+    @apply bg-gray-50 dark:bg-gray-900;
+  }
+
+  .table-row:hover {
+    @apply bg-blue-900/30 shadow-sm;
+    /* Orange theme: @apply bg-orange-900/30 shadow-sm; */
+  }
+
+  .table-cell {
+    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold;
+  }
+
+  .table-link {
+    @apply text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 hover:underline break-all;
+    /* Orange theme: @apply text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 hover:underline break-all; */
+  }
+
+  .table-pulse {
+    @apply animate-pulse;
+  }
+
+  .table-pulse-placeholder {
+    @apply h-4 bg-gray-300 dark:bg-gray-600 rounded w-3/4;
+  }
+
+  /* Reward Columns (for Element369.js) */
+  .reward-cell {
+    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-blue-600 dark:text-blue-400;
+    /* Orange theme: @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-orange-600 dark:text-orange-400; */
+  }
+
+  /* Chart Container */
+  .chart-container {
+    @apply bg-gray-800 p-4 rounded-lg;
+  }
+
+  /* Loading Indicator */
+  .loading-container {
+    @apply flex flex-col items-center justify-center gap-3 w-full flex-1;
+  }
+
+  .spinner {
+    @apply h-6 w-6 sm:h-8 sm:w-8 text-blue-500 dark:text-blue-400;
+    /* Orange theme: @apply h-6 w-6 sm:h-8 sm:w-8 text-orange-500 dark:text-orange-400; */
+  }
+
+  .progress-bar {
+    @apply w-64 bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-2;
+  }
+
+  .progress-fill {
+    @apply bg-blue-600 dark:bg-blue-400 h-2.5 rounded-full;
+    /* Orange theme: @apply bg-orange-600 dark:bg-orange-400 h-2.5 rounded-full; */
+  }
+
+  /* Navbar */
+  .nav {
+    @apply bg-gray-900 text-gray-100 sticky top-0 z-50 shadow-lg;
+  }
+
+  .nav-container {
+    @apply container py-4 flex justify-between items-center;
+  }
+
+  .nav-logo {
+    @apply text-2xl font-bold;
+  }
+
+  .nav-link {
+    @apply text-gray-300 hover:text-blue-400 transition-colors duration-200;
+    /* Orange theme: @apply text-gray-300 hover:text-orange-400 transition-colors duration-200; */
+  }
+
+  .nav-dropdown {
+    @apply absolute left-0 mt-2 w-56 bg-gray-800 rounded-lg shadow-xl;
+  }
+
+  .nav-dropdown-item {
+    @apply block px-4 py-2 text-gray-300 hover:bg-gray-700 hover:text-white rounded-md transition-colors;
+  }
+
+  .nav-toggle {
+    @apply p-2 rounded-full bg-gray-700 text-gray-100 hover:bg-gray-600 transition-colors;
+  }
+
+  /* Footer */
+  .footer {
+    @apply bg-gray-800 py-4 text-center text-gray-400;
+  }
+
+  /* Animations */
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+}
+
+@keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-.highlight-row-bold {
-  background-color: #fef08a; /* Bold yellow */
-  font-weight: 600;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  transition: background-color 0.3s ease;
+/* Utility Classes */
+@layer utilities {
+  .grid-responsive {
+    @apply grid grid-cols-1 sm:grid-cols-2 gap-4;
+  }
+
+  .space-y-section {
+    @apply space-y-6;
+  }
+
+  .text-center-section {
+    @apply text-center py-12;
+  }
 }-e 
 ---
 File: ./app/store.js
-// app/store.js
 'use client';
 import { create } from 'zustand';
 
@@ -515,6 +718,18 @@ export const useNFTStore = create((set, get) => ({
     console.log(`[NFTStore] Returning cached data for ${contractKey}: ${cachedEntry.data.holders.length} holders`);
     return cachedEntry.data;
   },
+}));
+
+export const useThemeStore = create((set) => ({
+  isDarkMode: true, // Default to dark mode
+  toggleTheme: () =>
+    set((state) => {
+      const isDarkMode = !state.isDarkMode;
+      if (typeof window !== 'undefined') {
+        document.documentElement.classList.toggle('dark', isDarkMode);
+      }
+      return { isDarkMode };
+    }),
 }));-e 
 ---
 File: ./app/about/page.js
@@ -4304,7 +4519,7 @@ app/api/utils.js: Converted to ES Modules, uses config.js for Alchemy and cache 
 
 app/api/holders/Stax/route.js: Updated to use config.js for contract details, tiers, and ABIs (config.abis.stax.main, config.abis.stax.vault).
 
-Files Pending Update (from find command):
+Files Pending Update (from find command):  THIS IS NOW DONE, so we can move on
 app/api/holders/Element280/route.js
 
 app/api/holders/Element280/validate-burned/route.js
@@ -4501,7 +4716,22 @@ ABI Files: The config.js assumes ABI files are in ../abi/. If the path differs, 
 
 Scripts: The scripts/ directory was excluded, but files like trackElement280NFTs.js may need updates later. Let me know if you want to address these.
 
-CURRENT status:  trying to get the project to build: pleasse help-e 
+CURRENT status:  trying to get the project to build: I'd linke to add the mining link to the hiome page much like auctions and NFTs are. I also want to remove alchemy-sdk ( as it includes a very troublesome solana library that I want to remove) and use viem possibly instead. 
+
+ollyjukes@MacBookPro titanx-utility % npm run build 
+
+> titanx-utility@0.1.0 build
+> next build
+
+   ▲ Next.js 15.3.1
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+
+> Build error occurred
+[Error: Page "/nft/[chain]/[contract]/page" cannot use both "use client" and export function "generateStaticParams()".] {
+  type: 'Error'
+}-e 
 ---
 File: ./components/loadElement280NFTsDB.js
 // components/loadElement280NFTsDB.js
@@ -5613,10 +5843,11 @@ import { motion } from 'framer-motion';
 
 export default function LoadingIndicator({ status, progress }) {
   const percentage = progress?.totalOwners > 0 ? (progress.totalWallets / progress.totalOwners) * 100 : 0;
+
   return (
-    <div className="flex flex-col items-center justify-center gap-3 animate-fade-in w-full flex-1">
+    <div className="loading-container">
       <motion.svg
-        className="h-6 w-6 sm:h-8 sm:w-8 text-blue-400"
+        className="spinner"
         animate={{ scale: [1, 1.2, 1], rotate: 360 }}
         transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
         xmlns="http://www.w3.org/2000/svg"
@@ -5630,10 +5861,10 @@ export default function LoadingIndicator({ status, progress }) {
           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
         />
       </motion.svg>
-      <p className="text-sm sm:text-base text-gray-300">{status}</p>
+      <p className="text-body">{status}</p>
       {progress?.totalOwners > 0 && (
-        <div className="w-64 bg-gray-700 rounded-full h-2.5 mt-2">
-          <div className="bg-blue-400 h-2.5 rounded-full" style={{ width: `${percentage}%` }}></div>
+        <div className="progress-bar">
+          <div className="progress-fill" style={{ width: `${percentage}%` }}></div>
         </div>
       )}
     </div>
@@ -5641,7 +5872,6 @@ export default function LoadingIndicator({ status, progress }) {
 }-e 
 ---
 File: ./components/NFTPage.js
-// components/NFTPage.js
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -5654,6 +5884,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { useNFTStore } from '@/app/store';
+import { barChartOptions } from '@/lib/chartOptions';
 
 // Retry utility
 async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
@@ -5764,17 +5995,16 @@ async function fetchContractData() {
 
 // Map contract to HolderTable component
 const holderTableComponents = {
+  e280: dynamic(() => import('./HolderTable/E280'), { ssr: false }),
+  ascendant: dynamic(() => import('./HolderTable/Ascendant'), { ssr: false }),
   element280: dynamic(() => import('./HolderTable/Element280'), { ssr: false }),
   element369: dynamic(() => import('./HolderTable/Element369'), { ssr: false }),
   stax: dynamic(() => import('./HolderTable/Stax'), { ssr: false }),
-  ascendant: dynamic(() => import('./HolderTable/Ascendant'), { ssr: false }),
-  e280: dynamic(() => import('./HolderTable/E280'), { ssr: false }),
 };
 
 export default function NFTPage({ chain, contract }) {
   console.log(`[NFTPage] [INFO] Received props: chain=${chain}, contract=${contract}`);
 
-  // **State and Hooks moved to the top**
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -5784,7 +6014,6 @@ export default function NFTPage({ chain, contract }) {
 
   const { getCache, setCache } = useNFTStore();
 
-  // **Derive contract identifier**
   const contractId = contract ? contract.toLowerCase() : null;
   console.log(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
 
@@ -5792,7 +6021,6 @@ export default function NFTPage({ chain, contract }) {
   const { name, apiEndpoint, rewardToken, pageSize, disabled } = contractConfig;
   const isElement280 = contractId === 'element280';
 
-  // **Memoized fetch functions**
   const fetchData = useCallback(async () => {
     if (!apiEndpoint) {
       console.error(`[NFTPage] [ERROR] Invalid contract configuration for ${contractId}`);
@@ -5946,7 +6174,7 @@ export default function NFTPage({ chain, contract }) {
             page++;
             success = true;
             if (!newHolders.length && json.totalPages === 0) {
-              console.log(`[NFTPage] [INFO] Empty holders with zero pages, accepting as valid`);
+              console.log(`[NFTPage] [] Empty holders with zero pages, accepting as valid`);
               break;
             }
           } catch (err) {
@@ -5988,7 +6216,6 @@ export default function NFTPage({ chain, contract }) {
     }
   }, [apiEndpoint, contractId, getCache, setCache, name, pageSize]);
 
-  // **Validate contract and handle disabled state**
   useEffect(() => {
     if (!contractId || !config.contractDetails[contractId]) {
       console.error(`[NFTPage] [ERROR] Invalid or missing contract: chain=${chain}, contract=${contract}`);
@@ -6005,48 +6232,76 @@ export default function NFTPage({ chain, contract }) {
     }
   }, [contractId, chain, contract, disabled, name, fetchData, fetchAllHolders]);
 
-  // **Load HolderTable**
   const HolderTable = holderTableComponents[contractId] || null;
 
-  // **Chart data**
   const chartData = data && isElement280 ? {
     labels: ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Tier 5', 'Tier 6'],
     datasets: [
       {
         label: 'Live NFTs',
         data: data.tierDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+        backgroundColor: 'rgba(59, 130, 246, 0.6)', // Blue-500
+        /* Orange theme: backgroundColor: 'rgba(249, 115, 22, 0.6)', // Orange-500 */
       },
       {
         label: 'Burned NFTs',
         data: data.burnedDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(255, 99, 132, 0.6)',
+        backgroundColor: 'rgba(239, 68, 68, 0.6)', // Red-500
       },
     ],
   } : null;
 
-  // **Render logic**
   if (isInvalidContract) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-        <h1 className="text-4xl font-bold mb-6">Error</h1>
-        <p className="text-red-500 text-lg">Invalid contract: {contractId || 'none specified'}</p>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="container text-center-section"
+      >
+        <h1 className="title mb-4">Invalid Contract</h1>
+        <p className="text-error text-lg">
+          The contract "{contractId || 'none specified'}" is not supported.
+        </p>
+      </motion.div>
     );
   }
 
   if (!HolderTable) {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-        <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
-        <p className="text-red-500 text-lg">Error: Holder table component for {contractId} not found</p>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="container text-center-section"
+      >
+        <h1 className="title mb-4">{name || 'Unknown Contract'} Holders</h1>
+        <p className="text-error text-lg">
+          Error: Holder table component for {contractId} not found.
+        </p>
+      </motion.div>
     );
   }
 
+  // Define props for each HolderTable component
+  const holderTableProps = {
+    e280: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    ascendant: { holders: data?.holders || [], loading, totalShares: data?.totalShares || 0, totalTokens: data?.totalTokens || 0, rewardToken },
+    element280: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    element369: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    stax: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+  };
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-      <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
+    <div className="container page-content">
+      <motion.h1
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="title mb-6"
+      >
+        {name || 'Unknown Contract'} Holders
+      </motion.h1>
 
       <AnimatePresence>
         {loading && (
@@ -6054,9 +6309,15 @@ export default function NFTPage({ chain, contract }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="w-full max-w-4xl"
+            transition={{ duration: 0.3 }}
+            className="card text-center-section"
           >
-            <LoadingIndicator message={`Loading ${name} data... ${isElement280 ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`} />
+            <LoadingIndicator
+              status={`Loading ${name} data... ${
+                isElement280 ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''
+              }`}
+              progress={progress}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -6065,7 +6326,8 @@ export default function NFTPage({ chain, contract }) {
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="text-red-500 text-lg mb-6"
+          transition={{ duration: 0.3 }}
+          className="text-error text-lg mb-6 text-center"
         >
           {error}
         </motion.p>
@@ -6076,75 +6338,72 @@ export default function NFTPage({ chain, contract }) {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="w-full max-w-4xl"
+          className="space-y-section"
         >
-          <div className="bg-gray-800 p-6 rounded-lg shadow-lg mb-6">
-            <h2 className="text-2xl font-semibold mb-4">Contract Summary</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="card">
+            <h2 className="subtitle mb-4">Contract Summary</h2>
+            <div className="grid-responsive text-body">
               <div>
-                <p><strong>Total Minted:</strong> {data.totalMinted?.toLocaleString() || 'N/A'}</p>
-                <p><strong>Total Live:</strong> {data.totalLive?.toLocaleString() || 'N/A'}</p>
-                <p><strong>Total Burned:</strong> {data.totalBurned?.toLocaleString() || 'N/A'}</p>
+                <p>
+                  <strong>Total Minted:</strong> {data.totalMinted?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Live:</strong> {data.totalLive?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Burned:</strong> {data.totalBurned?.toLocaleString() || 'N/A'}
+                </p>
               </div>
               <div>
-                <p><strong>Multiplier Pool:</strong> {data.multiplierPool?.toLocaleString() || 'N/A'}</p>
-                <p><strong>Total Reward Pool:</strong> {data.totalRewardPool?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'} {rewardToken}</p>
-                <p><strong>Total Holders:</strong> {progress.totalOwners?.toLocaleString() || 'N/A'}</p>
+                <p>
+                  <strong>Multiplier Pool:</strong>{' '}
+                  {data.multiplierPool?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Reward Pool:</strong>{' '}
+                  {data.totalRewardPool?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) || 'N/A'}{' '}
+                  {rewardToken}
+                </p>
+                <p>
+                  <strong>Total Holders:</strong>{' '}
+                  {progress.totalOwners?.toLocaleString() || 'N/A'}
+                </p>
               </div>
             </div>
             {isElement280 && (
-              <div className="mt-4">
-                <button
+              <div className="mt-6">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
                   onClick={() => setShowChart(!showChart)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-200"
+                  className="btn btn-primary"
                 >
                   {showChart ? 'Hide Tier Distribution' : 'Show Tier Distribution'}
-                </button>
-                {showChart && chartData && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mt-4"
-                  >
-                    <Bar
-                      data={chartData}
-                      options={{
-                        responsive: true,
-                        plugins: {
-                          legend: { position: 'top' },
-                          title: { display: true, text: 'NFT Tier Distribution' },
-                        },
-                        scales: {
-                          y: { beginAtZero: true, title: { display: true, text: 'Number of NFTs' } },
-                          x: { title: { display: true, text: 'Tiers' } },
-                        },
-                      }}
-                    />
-                  </motion.div>
-                )}
+                </motion.button>
+                <AnimatePresence>
+                  {showChart && chartData && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="chart-container mt-6"
+                    >
+                      <Bar data={chartData} options={barChartOptions} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
           </div>
 
-          <HolderTable
-            holders={data.holders || []}
-            totalPages={data.totalPages || 1}
-            totalTokens={data.totalTokens || 0}
-            totalLockedAscendant={data.totalLockedAscendant || 0}
-            totalShares={data.totalShares || 0}
-            toDistributeDay8={data.toDistributeDay8 || 0}
-            toDistributeDay28={data.toDistributeDay28 || 0}
-            toDistributeDay90={data.toDistributeDay90 || 0}
-            pendingRewards={data.pendingRewards || 0}
-            totalClaimableRewards={data.totalClaimableRewards || 0}
-            totalInfernoRewards={data.totalInfernoRewards || 0}
-            totalFluxRewards={data.totalFluxRewards || 0}
-            totalE280Rewards={data.totalE280Rewards || 0}
-            summary={data.summary || {}}
-            burnedNfts={data.burnedNfts || []}
-            rewardToken={rewardToken}
-          />
+          <div className="card">
+            <h2 className="subtitle mb-4">Holders</h2>
+            <HolderTable {...holderTableProps[contractId]} />
+          </div>
         </motion.div>
       )}
     </div>
@@ -6315,15 +6574,18 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
 }-e 
 ---
 File: ./components/Navbar.jsx
-// components/Navbar.jsx
 'use client';
+
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import { useThemeStore } from '@/app/store';
+import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isNFTDropdownOpen, setIsNFTDropdownOpen] = useState(false);
+  const { isDarkMode, toggleTheme } = useThemeStore();
 
   const menuVariants = {
     hidden: { opacity: 0, y: -20 },
@@ -6335,12 +6597,12 @@ function Navbar() {
   };
 
   const itemVariants = {
-    hidden: { opacity: 0, y: -10 },
-    visible: { opacity: 1, y: 0 },
+    hidden: { opacity: 0, y: -10, scale: 0.95 },
+    visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.2 } },
   };
 
   const dropdownVariants = {
-    hidden: { opacity: 0, height: 0 },
+    hidden: { opacity: 0, height: 0, transition: { duration: 0.2 } },
     visible: { opacity: 1, height: 'auto', transition: { duration: 0.2 } },
   };
 
@@ -6363,9 +6625,7 @@ function Navbar() {
         },
         {
           name: 'BASE',
-          subItems: [
-            { name: 'E280', href: '/nft/BASE/E280' },
-          ],
+          subItems: [{ name: 'E280', href: '/nft/BASE/E280' }],
         },
       ],
     },
@@ -6373,61 +6633,51 @@ function Navbar() {
   ];
 
   return (
-    <nav className="bg-gradient-to-r from-gray-900 to-gray-800 text-white p-4 sticky top-0 z-50 shadow-md">
-      <div className="max-w-7xl mx-auto flex justify-between items-center">
-        {/* Logo */}
+    <nav className="nav">
+      <div className="nav-container">
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5 }}
-          className="text-2xl font-bold"
+          className="nav-logo"
         >
-          <Link href="/">TitanXUtils</Link>
+          <Link href="/" className="nav-link">
+            TitanXUtils
+          </Link>
         </motion.div>
 
-        {/* Desktop Links */}
         <div className="hidden md:flex space-x-6 items-center">
           {navItems.map((item) => (
             <motion.div
               key={item.name}
-              className="relative text-gray-300 hover:text-white transition-colors duration-200 group"
-              whileHover={{ scale: 1.1, color: '#f97316' }}
+              className="relative group"
+              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              {item.external ? (
-                <a href={item.href} target="_blank" rel="noopener noreferrer">
-                  {item.name}
-                </a>
-              ) : (
-                <Link href={item.href}>{item.name}</Link>
-              )}
+              <Link href={item.href} className="nav-link">
+                {item.name}
+              </Link>
               {item.subItems && (
                 <motion.div
-                  className="absolute left-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg hidden group-hover:block"
+                  className="nav-dropdown opacity-0 group-hover:opacity-100 group-hover:mt-3 transition-all duration-200 pointer-events-none group-hover:pointer-events-auto"
                   variants={dropdownVariants}
                   initial="hidden"
+                  animate="hidden"
                   whileHover="visible"
                 >
                   {item.subItems.map((subItem) => (
                     <div key={subItem.name} className="py-1">
-                      <div className="px-4 py-2 text-gray-300 hover:bg-gray-700 hover:text-white">
-                        {subItem.href ? (
-                          <Link href={subItem.href}>{subItem.name}</Link>
-                        ) : (
-                          <span>{subItem.name}</span>
-                        )}
-                      </div>
+                      <div className="nav-dropdown-item font-semibold">{subItem.name}</div>
                       {subItem.subItems && (
                         <div className="pl-4">
                           {subItem.subItems.map((nestedItem) => (
-                            <div
+                            <Link
                               key={nestedItem.name}
-                              className="px-4 py-2 text-gray-300 hover:bg-gray-700 hover:text-white"
+                              href={nestedItem.href}
+                              className="nav-dropdown-item"
                             >
-                              <Link href={nestedItem.href}>
-                                {nestedItem.name}
-                              </Link>
-                            </div>
+                              {nestedItem.name}
+                            </Link>
                           ))}
                         </div>
                       )}
@@ -6437,11 +6687,19 @@ function Navbar() {
               )}
             </motion.div>
           ))}
+          <motion.button
+            onClick={toggleTheme}
+            className="nav-toggle"
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
+            aria-label="Toggle theme"
+          >
+            {isDarkMode ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
+          </motion.button>
         </div>
 
-        {/* Mobile Menu Toggle */}
         <button
-          className="md:hidden p-2 focus:outline-none"
+          className="md:hidden p-2 focus:outline-none text-gray-300 hover:text-white"
           onClick={() => setIsOpen(!isOpen)}
         >
           <motion.svg
@@ -6462,7 +6720,6 @@ function Navbar() {
         </button>
       </div>
 
-      {/* Mobile Menu */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -6470,13 +6727,13 @@ function Navbar() {
             initial="hidden"
             animate="visible"
             exit="hidden"
-            className="md:hidden mt-4 space-y-2"
+            className="md:hidden mt-4 space-y-2 px-4"
           >
             {navItems.map((item) => (
               <motion.div
                 key={item.name}
                 variants={itemVariants}
-                className="block py-2 px-4 text-gray-300 hover:text-white hover:bg-gray-700 rounded-md transition-colors duration-200"
+                className="nav-dropdown-item"
               >
                 {item.subItems ? (
                   <>
@@ -6487,7 +6744,7 @@ function Navbar() {
                         setIsNFTDropdownOpen(!isNFTDropdownOpen)
                       }
                     >
-                      {item.name}
+                      <span>{item.name}</span>
                       {item.name === 'NFT' && (
                         <motion.svg
                           className="w-4 h-4"
@@ -6495,6 +6752,7 @@ function Navbar() {
                           stroke="currentColor"
                           viewBox="0 0 24 24"
                           animate={{ rotate: isNFTDropdownOpen ? 180 : 0 }}
+                          transition={{ duration: 0.2 }}
                         >
                           <path
                             strokeLinecap="round"
@@ -6515,27 +6773,20 @@ function Navbar() {
                       >
                         {item.subItems.map((subItem) => (
                           <div key={subItem.name}>
-                            <div className="py-2">
-                              {subItem.href ? (
-                                <Link href={subItem.href} onClick={() => setIsOpen(false)}>
-                                  {subItem.name}
-                                </Link>
-                              ) : (
-                                <span>{subItem.name}</span>
-                              )}
+                            <div className="py-2 text-gray-300 font-semibold">
+                              {subItem.name}
                             </div>
                             {subItem.subItems && (
                               <div className="pl-4 space-y-2">
                                 {subItem.subItems.map((nestedItem) => (
-                                  <div
+                                  <Link
                                     key={nestedItem.name}
-                                    className="py-2"
+                                    href={nestedItem.href}
+                                    className="nav-dropdown-item"
                                     onClick={() => setIsOpen(false)}
                                   >
-                                    <Link href={nestedItem.href}>
-                                      {nestedItem.name}
-                                    </Link>
-                                  </div>
+                                    {nestedItem.name}
+                                  </Link>
                                 ))}
                               </div>
                             )}
@@ -6544,22 +6795,24 @@ function Navbar() {
                       </motion.div>
                     )}
                   </>
-                ) : item.external ? (
-                  <a
+                ) : (
+                  <Link
                     href={item.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    className="block"
                     onClick={() => setIsOpen(false)}
                   >
-                    {item.name}
-                  </a>
-                ) : (
-                  <Link href={item.href} onClick={() => setIsOpen(false)}>
                     {item.name}
                   </Link>
                 )}
               </motion.div>
             ))}
+            <motion.button
+              onClick={toggleTheme}
+              className="w-full text-left nav-dropdown-item"
+              variants={itemVariants}
+            >
+              {isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            </motion.button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -6570,7 +6823,6 @@ function Navbar() {
 export default Navbar;-e 
 ---
 File: ./components/HolderTable/E280.js
-// components/HolderTable/E280.js
 'use client';
 
 import { memo } from 'react';
@@ -6582,56 +6834,55 @@ const rowVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function HolderTable({ holders, loading }) {
+function HolderTable({ holders, loading, totalTokens, rewardToken }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
 
-  // Define E280 tier order (same as Element280; adjust if different)
   const e280TierOrder = [
-    { tierId: '6', name: 'Legendary Amped', index: 5 },
-    { tierId: '5', name: 'Legendary', index: 4 },
-    { tierId: '4', name: 'Rare Amped', index: 3 },
-    { tierId: '2', name: 'Common Amped', index: 1 },
-    { tierId: '3', name: 'Rare', index: 2 },
-    { tierId: '1', name: 'Common', index: 0 },
+    { tierId: '1', name: 'Common' },
+    { tierId: '2', name: 'Common Amped' },
+    { tierId: '3', name: 'Rare' },
+    { tierId: '4', name: 'Rare Amped' },
+    { tierId: '5', name: 'Legendary' },
+    { tierId: '6', name: 'Legendary Amped' },
   ];
 
   if (!safeHolders.length) {
     if (loading) {
       return (
-        <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-          <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-            <thead>
-              <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+        <div className="table-container">
+          <table className="table">
+            <thead className="table-head">
+              <tr>
+                <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+                <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
                 {e280TierOrder.map(tier => (
-                  <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                  <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                     {tier.name}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="text-gray-300 text-xs md:text-sm">
+            <tbody className="table-body">
               {Array(5).fill().map((_, i) => (
                 <motion.tr
                   key={i}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.1, duration: 0.5 }}
-                  className="animate-pulse"
+                  className="table-row table-pulse"
                 >
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   {e280TierOrder.map(tier => (
-                    <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                    <td key={tier.tierId} className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   ))}
                 </motion.tr>
               ))}
@@ -6640,66 +6891,72 @@ function HolderTable({ holders, loading }) {
         </div>
       );
     }
-    return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
+    return <div className="text-body text-center py-4 w-full">No holders found.</div>;
   }
 
   const tiers = config.contractTiers.e280;
   if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for E280.</div>;
+    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for E280.</div>;
   }
 
   return (
-    <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-      <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-        <thead>
-          <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+    <div className="table-container">
+      {safeHolders.length > 0 && (
+        <div className="text-body mb-4">
+          <p><strong>Total Tokens:</strong> {totalTokens?.toLocaleString() || 'N/A'}</p>
+          <p><strong>Reward Token:</strong> {rewardToken || 'N/A'}</p>
+        </div>
+      )}
+      <table className="table">
+        <thead className="table-head">
+          <tr>
+            <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+            <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
             {e280TierOrder.map(tier => (
-              <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+              <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                 {tier.name}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="text-gray-300 text-xs md:text-sm">
+        <tbody className="table-body">
           {safeHolders.map((holder, index) => (
             <motion.tr
               key={holder.wallet}
               variants={rowVariants}
               initial="hidden"
               animate="visible"
-              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              whileHover={{ scale: 1.02 }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
+              className={`table-row ${index % 2 === 0 ? 'table-row-even' : 'table-row-odd'}`}
             >
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.rank || '-'}</td>
+              <td className="table-cell">
                 <a
                   href={`https://etherscan.io/address/${holder.wallet}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 hover:underline break-all"
+                  className="table-link"
                 >
                   {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
                 </a>
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total || 0}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.total || 0}</td>
+              <td className="table-cell">
                 {(holder.claimableRewards || 0).toFixed(2).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {typeof holder.percentage === 'number' ? holder.percentage.toFixed(2) + '%' : '-'}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {typeof holder.displayMultiplierSum === 'number' ? holder.displayMultiplierSum.toFixed(2) : '-'}
               </td>
               {e280TierOrder.map(tier => (
-                <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                <td key={tier.tierId} className="table-cell">
                   {holder.tiers?.[Number(tier.tierId) - 1] || 0}
                 </td>
               ))}
@@ -6714,7 +6971,6 @@ function HolderTable({ holders, loading }) {
 export default memo(HolderTable);-e 
 ---
 File: ./components/HolderTable/Ascendant.js
-// components/HolderTable/Ascendant.js
 'use client';
 
 import { memo } from 'react';
@@ -6726,10 +6982,9 @@ const rowVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function HolderTable({ holders, loading, totalShares }) {
+function HolderTable({ holders, loading, totalShares, totalTokens, rewardToken }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
 
-  // Define Ascendant tier order (descending: Tier 8 to Tier 1)
   const ascendantTierOrder = [
     { tierId: '8', name: 'Tier 8', index: 7 },
     { tierId: '7', name: 'Tier 7', index: 6 },
@@ -6749,14 +7004,10 @@ function HolderTable({ holders, loading, totalShares }) {
       console.log('[Ascendant] Holder Data for Wallet:', targetHolder);
       console.log('[Ascendant] Tiers Raw Data:', targetHolder.tiers);
       console.log('[Ascendant] Tiers Length:', targetHolder.tiers?.length);
-      // Compute tier counts and sum
       const tierCounts = ascendantTierOrder.map(tier => {
         const count =
-          // Try one-based array (tiers[8] = Tier 8)
           (Array.isArray(targetHolder.tiers) && targetHolder.tiers[Number(tier.tierId)]) ||
-          // Try zero-based array (tiers[7] = Tier 8)
           (Array.isArray(targetHolder.tiers) && targetHolder.tiers[Number(tier.tierId) - 1]) ||
-          // Try object (tiers["8"] = Tier 8)
           (targetHolder.tiers && typeof targetHolder.tiers === 'object' && targetHolder.tiers[tier.tierId]) ||
           0;
         return { tier: tier.name, count };
@@ -6776,46 +7027,46 @@ function HolderTable({ holders, loading, totalShares }) {
   if (!safeHolders.length) {
     if (loading) {
       return (
-        <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-          <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-            <thead>
-              <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Shares</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY8 Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY28 Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY90 Rewards</th>
+        <div className="table-container">
+          <table className="table">
+            <thead className="table-head">
+              <tr>
+                <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+                <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">% Share of Shares</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Shares</th>
+                <th className="table-cell w-[80px] md:w-[120px]">DAY8 Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">DAY28 Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">DAY90 Rewards</th>
                 {ascendantTierOrder.map(tier => (
-                  <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                  <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                     {tier.name}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="text-gray-300 text-xs md:text-sm">
+            <tbody className="table-body">
               {Array(5).fill().map((_, i) => (
                 <motion.tr
                   key={i}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.1, duration: 0.5 }}
-                  className="animate-pulse"
+                  className="table-row table-pulse"
                 >
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   {ascendantTierOrder.map(tier => (
-                    <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                    <td key={tier.tierId} className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   ))}
                 </motion.tr>
               ))}
@@ -6824,86 +7075,89 @@ function HolderTable({ holders, loading, totalShares }) {
         </div>
       );
     }
-    return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
+    return <div className="text-body text-center py-4 w-full">No holders found.</div>;
   }
 
   const tiers = config.contractTiers.ascendant;
   if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Ascendant.</div>;
+    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for Ascendant.</div>;
   }
 
   return (
-    <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-      <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-        <thead>
-          <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">% Share of Shares</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Shares</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY8 Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY28 Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">DAY90 Rewards</th>
+    <div className="table-container">
+      {safeHolders.length > 0 && (
+        <div className="text-body mb-4">
+          <p><strong>Total Tokens:</strong> {totalTokens?.toLocaleString() || 'N/A'}</p>
+          <p><strong>Reward Token:</strong> {rewardToken || 'N/A'}</p>
+          <p><strong>Total Shares:</strong> {totalShares?.toLocaleString() || 'N/A'}</p>
+        </div>
+      )}
+      <table className="table">
+        <thead className="table-head">
+          <tr>
+            <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+            <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">% Share of Shares</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Shares</th>
+            <th className="table-cell w-[80px] md:w-[120px]">DAY8 Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">DAY28 Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">DAY90 Rewards</th>
             {ascendantTierOrder.map(tier => (
-              <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+              <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                 {tier.name}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="text-gray-300 text-xs md:text-sm">
+        <tbody className="table-body">
           {safeHolders.map((holder, index) => (
             <motion.tr
               key={holder.wallet}
               variants={rowVariants}
               initial="hidden"
               animate="visible"
-              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              whileHover={{ scale: 1.02 }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
+              className={`table-row ${index % 2 === 0 ? 'table-row-even' : 'table-row-odd'}`}
             >
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.rank || '-'}</td>
+              <td className="table-cell">
                 <a
                   href={`https://etherscan.io/address/${holder.wallet}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 hover:underline break-all"
+                  className="table-link"
                 >
                   {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
                 </a>
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total || 0}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.total || 0}</td>
+              <td className="table-cell">
                 {Math.floor(holder.claimableRewards || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {totalShares ? ((holder.shares || 0) / totalShares * 100).toFixed(2) : '0.00'}%
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {Math.floor(holder.shares || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {Math.floor(holder.pendingDay8 || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {Math.floor(holder.pendingDay28 || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {Math.floor(holder.pendingDay90 || 0).toLocaleString()}
               </td>
               {ascendantTierOrder.map(tier => (
-                <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                <td key={tier.tierId} className="table-cell">
                   {
-                    // Try one-based array (tiers[8] = Tier 8)
                     (Array.isArray(holder.tiers) && holder.tiers[Number(tier.tierId)]) ||
-                    // Try zero-based array (tiers[7] = Tier 8)
                     (Array.isArray(holder.tiers) && holder.tiers[Number(tier.tierId) - 1]) ||
-                    // Try object (tiers["8"] = Tier 8)
                     (holder.tiers && typeof holder.tiers === 'object' && holder.tiers[tier.tierId]) ||
-                    // Fallback to 0
                     0
                   }
                 </td>
@@ -6919,7 +7173,6 @@ function HolderTable({ holders, loading, totalShares }) {
 export default memo(HolderTable);-e 
 ---
 File: ./components/HolderTable/Stax.js
-// components/HolderTable/Stax.js
 'use client';
 
 import { memo } from 'react';
@@ -6931,10 +7184,9 @@ const rowVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function HolderTable({ holders, loading }) {
+function HolderTable({ holders, loading, totalTokens, rewardToken }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
 
-  // Define Stax tier order (highest to lowest: Legendary LFG to Common)
   const staxTierOrder = [
     { tierId: '12', name: 'Legendary LFG', index: 11 },
     { tierId: '11', name: 'Legendary Super', index: 10 },
@@ -6958,7 +7210,6 @@ function HolderTable({ holders, loading }) {
       console.log('[Stax] Holder Data for Wallet:', targetHolder);
       console.log('[Stax] Tiers Raw Data:', targetHolder.tiers);
       console.log('[Stax] Tiers Length:', targetHolder.tiers?.length);
-      // Compute tier counts
       const tierCounts = staxTierOrder.map(tier => {
         const count =
           (Array.isArray(targetHolder.tiers) && Number(targetHolder.tiers[Number(tier.tierId) - 1]) || 0);
@@ -6967,7 +7218,6 @@ function HolderTable({ holders, loading }) {
       console.log('[Stax] Computed Tier Counts:', tierCounts);
       const tierSum = tierCounts.reduce((sum, { count }) => sum + Number(count), 0);
       console.log('[Stax] Tier Sum vs Total NFTs:', { tierSum, total: targetHolder.total });
-      // Calculate expected multiplier sum
       const multipliers = {
         '12': 200, '11': 140, '10': 120, '9': 100, '8': 20, '7': 14, '6': 12, '5': 10,
         '4': 2, '3': 1.4, '2': 1.2, '1': 1
@@ -7000,40 +7250,40 @@ function HolderTable({ holders, loading }) {
   if (!safeHolders.length) {
     if (loading) {
       return (
-        <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-          <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-            <thead>
-              <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+        <div className="table-container">
+          <table className="table">
+            <thead className="table-head">
+              <tr>
+                <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+                <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
                 {staxTierOrder.map(tier => (
-                  <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                  <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                     {tier.name}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="text-gray-300 text-xs md:text-sm">
+            <tbody className="table-body">
               {Array(5).fill().map((_, i) => (
                 <motion.tr
                   key={i}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.1, duration: 0.5 }}
-                  className="animate-pulse"
+                  className="table-row table-pulse"
                 >
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   {staxTierOrder.map(tier => (
-                    <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                    <td key={tier.tierId} className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   ))}
                 </motion.tr>
               ))}
@@ -7042,66 +7292,72 @@ function HolderTable({ holders, loading }) {
         </div>
       );
     }
-    return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
+    return <div className="text-body text-center py-4 w-full">No holders found.</div>;
   }
 
   const tiers = config.contractTiers.stax;
   if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Stax.</div>;
+    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for Stax.</div>;
   }
 
   return (
-    <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-      <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-        <thead>
-          <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+    <div className="table-container">
+      {safeHolders.length > 0 && (
+        <div className="text-body mb-4">
+          <p><strong>Total Tokens:</strong> {totalTokens?.toLocaleString() || 'N/A'}</p>
+          <p><strong>Reward Token:</strong> {rewardToken || 'N/A'}</p>
+        </div>
+      )}
+      <table className="table">
+        <thead className="table-head">
+          <tr>
+            <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+            <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
             {staxTierOrder.map(tier => (
-              <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+              <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                 {tier.name}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="text-gray-300 text-xs md:text-sm">
+        <tbody className="table-body">
           {safeHolders.map((holder, index) => (
             <motion.tr
               key={holder.wallet}
               variants={rowVariants}
               initial="hidden"
               animate="visible"
-              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              whileHover={{ scale: 1.02 }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
+              className={`table-row ${index % 2 === 0 ? 'table-row-even' : 'table-row-odd'}`}
             >
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.rank || '-'}</td>
+              <td className="table-cell">
                 <a
                   href={`https://etherscan.io/address/${holder.wallet}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 hover:underline break-all"
+                  className="table-link"
                 >
                   {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
                 </a>
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total || 0}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.total || 0}</td>
+              <td className="table-cell">
                 {Math.floor(holder.claimableRewards || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {typeof holder.percentage === 'number' ? holder.percentage.toFixed(2) + '%' : '-'}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {typeof holder.multiplierSum === 'number' ? holder.multiplierSum.toFixed(2) : '-'}
               </td>
               {staxTierOrder.map(tier => (
-                <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                <td key={tier.tierId} className="table-cell">
                   {Array.isArray(holder.tiers) ? Number(holder.tiers[Number(tier.tierId) - 1]) || 0 : 0}
                 </td>
               ))}
@@ -7116,7 +7372,6 @@ function HolderTable({ holders, loading }) {
 export default memo(HolderTable);-e 
 ---
 File: ./components/HolderTable/Element369.js
-// components/HolderTable/Element369.js
 'use client';
 
 import { memo } from 'react';
@@ -7128,57 +7383,56 @@ const rowVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-// Use tierOrder from config or fallback
 const element369TierOrder = config.contractTiers.element369.tierOrder || [
   { tierId: '3', name: 'Legendary' },
   { tierId: '2', name: 'Rare' },
   { tierId: '1', name: 'Common' },
 ];
 
-function HolderTable({ holders, loading }) {
+function HolderTable({ holders, loading, totalTokens, rewardToken }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
 
   if (!safeHolders.length) {
     if (loading) {
       return (
-        <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-          <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-            <thead>
-              <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+        <div className="table-container">
+          <table className="table">
+            <thead className="table-head">
+              <tr>
+                <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+                <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Flux Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">E280 Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
                 {element369TierOrder.map(tier => (
-                  <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                  <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                     {tier.name}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="text-gray-300 text-xs md:text-sm">
+            <tbody className="table-body">
               {Array(5).fill().map((_, i) => (
                 <motion.tr
                   key={i}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.1, duration: 0.5 }}
-                  className="animate-pulse"
+                  className="table-row table-pulse"
                 >
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   {element369TierOrder.map(tier => (
-                    <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                    <td key={tier.tierId} className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   ))}
                 </motion.tr>
               ))}
@@ -7187,74 +7441,80 @@ function HolderTable({ holders, loading }) {
         </div>
       );
     }
-    return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
+    return <div className="text-body text-center py-4 w-full">No holders found.</div>;
   }
 
   const tiers = config.contractTiers.element369;
   if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Element369.</div>;
+    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for Element369.</div>;
   }
 
   return (
-    <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-      <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-        <thead>
-          <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Inferno Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Flux Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">E280 Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+    <div className="table-container">
+      {safeHolders.length > 0 && (
+        <div className="text-body mb-4">
+          <p><strong>Total Tokens:</strong> {totalTokens?.toLocaleString() || 'N/A'}</p>
+          <p><strong>Reward Token:</strong> {rewardToken || 'N/A'}</p>
+        </div>
+      )}
+      <table className="table">
+        <thead className="table-head">
+          <tr>
+            <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+            <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+            <th className="reward-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
+            <th className="reward-cell w-[80px] md:w-[120px]">Flux Rewards</th>
+            <th className="reward-cell w-[80px] md:w-[120px]">E280 Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
             {element369TierOrder.map(tier => (
-              <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+              <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                 {tier.name}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="text-gray-300 text-xs md:text-sm">
+        <tbody className="table-body">
           {safeHolders.map((holder, index) => (
             <motion.tr
               key={holder.wallet}
               variants={rowVariants}
               initial="hidden"
               animate="visible"
-              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              whileHover={{ scale: 1.02 }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
+              className={`table-row ${index % 2 === 0 ? 'table-row-even' : 'table-row-odd'}`}
             >
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.rank || '-'}</td>
+              <td className="table-cell">
                 <a
                   href={`https://etherscan.io/address/${holder.wallet}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 hover:underline break-all"
+                  className="table-link"
                 >
                   {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
                 </a>
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total || 0}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.total || 0}</td>
+              <td className="reward-cell">
                 {(holder.infernoRewards || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="reward-cell">
                 {(holder.fluxRewards || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="reward-cell">
                 {(holder.e280Rewards || 0).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {(holder.percentage || 0).toFixed(2)}%
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {(holder.multiplierSum || 0).toFixed(2)}
               </td>
               {element369TierOrder.map(tier => (
-                <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                <td key={tier.tierId} className="table-cell">
                   {Array.isArray(holder.tiers) ? holder.tiers[Number(tier.tierId) - 1] || 0 : 0}
                 </td>
               ))}
@@ -7269,7 +7529,6 @@ function HolderTable({ holders, loading }) {
 export default memo(HolderTable);-e 
 ---
 File: ./components/HolderTable/Element280.js
-// components/HolderTable/Element280.js
 'use client';
 
 import { memo } from 'react';
@@ -7281,10 +7540,9 @@ const rowVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function HolderTable({ holders, loading }) {
+function HolderTable({ holders, loading, totalTokens, rewardToken }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
 
-  // Define custom tier order for Element280
   const element280TierOrder = [
     { tierId: '6', name: 'Legendary Amped' },
     { tierId: '5', name: 'Legendary' },
@@ -7297,40 +7555,40 @@ function HolderTable({ holders, loading }) {
   if (!safeHolders.length) {
     if (loading) {
       return (
-        <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-          <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-            <thead>
-              <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-                <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+        <div className="table-container">
+          <table className="table">
+            <thead className="table-head">
+              <tr>
+                <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+                <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
                 {element280TierOrder.map(tier => (
-                  <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+                  <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                     {tier.name}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="text-gray-300 text-xs md:text-sm">
+            <tbody className="table-body">
               {Array(5).fill().map((_, i) => (
                 <motion.tr
                   key={i}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.1, duration: 0.5 }}
-                  className="animate-pulse"
+                  className="table-row table-pulse"
                 >
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
-                  <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   {element280TierOrder.map(tier => (
-                    <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700"><div className="h-4 bg-gray-600 rounded w-3/4"></div></td>
+                    <td key={tier.tierId} className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   ))}
                 </motion.tr>
               ))}
@@ -7339,66 +7597,72 @@ function HolderTable({ holders, loading }) {
         </div>
       );
     }
-    return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
+    return <div className="text-body text-center py-4 w-full">No holders found.</div>;
   }
 
   const tiers = config.contractTiers.element280;
   if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for Element280.</div>;
+    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for Element280.</div>;
   }
 
   return (
-    <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-      <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
-        <thead>
-          <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[120px] md:w-[200px]">Wallet</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Claimable Rewards</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Reward %</th>
-            <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">Total Multiplier</th>
+    <div className="table-container">
+      {safeHolders.length > 0 && (
+        <div className="text-body mb-4">
+          <p><strong>Total Tokens:</strong> {totalTokens?.toLocaleString() || 'N/A'}</p>
+          <p><strong>Reward Token:</strong> {rewardToken || 'N/A'}</p>
+        </div>
+      )}
+      <table className="table">
+        <thead className="table-head">
+          <tr>
+            <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
+            <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
             {element280TierOrder.map(tier => (
-              <th key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[80px] md:w-[120px]">
+              <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                 {tier.name}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="text-gray-300 text-xs md:text-sm">
+        <tbody className="table-body">
           {safeHolders.map((holder, index) => (
             <motion.tr
               key={holder.wallet}
               variants={rowVariants}
               initial="hidden"
               animate="visible"
-              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              whileHover={{ scale: 1.02 }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
+              className={`table-row ${index % 2 === 0 ? 'table-row-even' : 'table-row-odd'}`}
             >
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank || '-'}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.rank || '-'}</td>
+              <td className="table-cell">
                 <a
                   href={`https://etherscan.io/address/${holder.wallet}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-400 hover:text-blue-300 hover:underline break-all"
+                  className="table-link"
                 >
                   {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
                 </a>
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.total || 0}</td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">{holder.total || 0}</td>
+              <td className="table-cell">
                 {(holder.claimableRewards || 0).toFixed(2).toLocaleString()}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {typeof holder.percentage === 'number' ? holder.percentage.toFixed(2) + '%' : '-'}
               </td>
-              <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+              <td className="table-cell">
                 {typeof holder.displayMultiplierSum === 'number' ? holder.displayMultiplierSum.toFixed(2) : '-'}
               </td>
               {element280TierOrder.map(tier => (
-                <td key={tier.tierId} className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">
+                <td key={tier.tierId} className="table-cell">
                   {holder.tiers?.[Number(tier.tierId) - 1] || 0}
                 </td>
               ))}
@@ -7665,6 +7929,31 @@ scripts/backups/
 cache_*.json
 burned_events_*.json-e 
 ---
+File: ./lib/chartOptions.js
+export const barChartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top', labels: { color: '#e5e7eb' } }, // Gray-200
+      title: {
+        display: true,
+        text: 'NFT Tier Distribution',
+        color: '#e5e7eb',
+        font: { size: 16, weight: 'bold' },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: { display: true, text: 'Number of NFTs', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' }, // Gray-300
+      },
+      x: {
+        title: { display: true, text: 'Tiers', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' },
+      },
+    },
+  };-e 
+---
 File: ./.env.development.local
 # Created by Vercel CLI
 KV_REST_API_READ_ONLY_TOKEN="AmeIAAIgcDFuapUIQ7Gfl8xCFpd9nryMqcpkq_DbU-d9DkuesRnhQg"
@@ -7681,11 +7970,10 @@ UPSTASH_REDIS_REST_URL="https://splendid-sunbird-26504.upstash.io"
 File: ./postcss.config.js
 export default {
   plugins: {
-    '@tailwindcss/postcss': {},
+    tailwindcss: {},
     autoprefixer: {},
   },
-};
--e 
+};-e 
 ---
 File: ./eslint.config.mjs
 // eslint.config.mjs

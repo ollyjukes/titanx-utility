@@ -1,16 +1,13 @@
 // app/api/holders/Element280/route.js
-
-
 import { NextResponse } from 'next/server';
-import { log, saveCacheState, getCache, setCache, loadCacheState, batchMulticall } from '../../utils.js';
+import { log, saveCacheState, getCache, setCache, loadCacheState, batchMulticall, safeSerialize, getOwnersForContract, getNftsForOwner } from '@/app/api/utils.js';
 import config from '@/config';
-import { alchemy, client } from '../../utils.js';
+import { client } from '@/app/api/utils.js';
 import pLimit from 'p-limit';
 import { parseAbiItem } from 'viem';
 import NodeCache from 'node-cache';
-import fs from 'fs/promises';
+import element280 from '@/abi/element280.json';
 
-// Use config.cache.nodeCache.stdTTL instead of CACHE_TTL
 const CACHE_TTL = config.cache.nodeCache.stdTTL;
 const CACHE_STATE_KEY = 'element280_cache_state';
 const HOLDERS_CACHE_KEY = 'element280_holders_map';
@@ -18,11 +15,9 @@ const TOKEN_CACHE_KEY = 'element280_token_cache';
 const BURNED_EVENTS_CACHE_KEY = 'element280_burned_events';
 const DISABLE_REDIS = process.env.DISABLE_ELEMENT280_REDIS === 'true';
 
-// Initialize node-cache
 const cache = new NodeCache({ stdTTL: CACHE_TTL });
 cache.setMaxListeners(20);
 
-// Initialize storage for a contract
 function initStorage(contractAddress) {
   const cacheKey = `storage_${contractAddress}`;
   let storage = cache.get(cacheKey);
@@ -39,13 +34,11 @@ function initStorage(contractAddress) {
       burnedEventsCache: null,
     };
     cache.set(cacheKey, storage);
-    cache.removeAllListeners('set');
     log(`[element280] [INIT] Initialized node-cache for ${contractAddress}, debugId=${storage.cacheState.debugId}`);
   }
   return storage;
 }
 
-// Cache state
 export async function getCacheState(contractAddress) {
   const storage = initStorage(contractAddress);
   if (DISABLE_REDIS) {
@@ -83,14 +76,6 @@ export async function getCacheState(contractAddress) {
   }
 }
 
-// Serialize BigInt
-function serializeBigInt(obj) {
-  return JSON.parse(
-    JSON.stringify(obj, (key, value) => (typeof value === 'bigint' ? value.toString() : value))
-  );
-}
-
-// Retry utility
 async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
   for (let i = 0; i < attempts; i++) {
     try {
@@ -106,7 +91,6 @@ async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCou
   }
 }
 
-// Count burned NFTs from Transfer events
 async function getBurnedCountFromEvents(contractAddress, errorLog) {
   const burnAddress = '0x0000000000000000000000000000000000000000';
   const storage = initStorage(contractAddress);
@@ -184,7 +168,6 @@ async function getBurnedCountFromEvents(contractAddress, errorLog) {
   }
 }
 
-// Fetch total supply and burned count
 async function getTotalSupply(contractAddress, errorLog) {
   const cacheKey = `element280_total_supply_${contractAddress}`;
   if (!DISABLE_REDIS) {
@@ -243,7 +226,6 @@ async function getTotalSupply(contractAddress, errorLog) {
   }
 }
 
-// Fetch NFT ownership
 async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
   const ownershipByToken = new Map();
   const ownershipByWallet = new Map();
@@ -258,87 +240,44 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
   }
 
   const tokenIdStart = Date.now();
-  let pageKey = null;
-  let tokenIds = [];
-  try {
-    do {
-      const response = await retry(() =>
-        alchemy.nft.getNftsForContract(contractAddress, { pageKey })
-      );
-      if (!response.nfts || !Array.isArray(response.nfts)) {
-        const errorMsg = `Invalid NFT response: nfts array missing`;
-        log(`[element280] [ERROR] ${errorMsg}`);
-        errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_token_ids', error: errorMsg });
-        throw new Error(errorMsg);
-      }
-      response.nfts.forEach(nft => {
-        const tokenId = nft.tokenId || nft.id || nft.token_id;
-        if (tokenId) tokenIds.push(tokenId);
-      });
-      pageKey = response.pageKey;
-    } while (pageKey);
-    timings.tokenIdFetch = Date.now() - tokenIdStart;
-  } catch (error) {
-    log(`[element280] [ERROR] Alchemy error fetching NFTs for ${contractAddress}: ${error.message}, stack: ${error.stack}`);
-    errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_token_ids', error: error.message });
-    throw error;
-  }
+  const owners = await retry(() => getOwnersForContract(contractAddress, element280.abi));
+  timings.tokenIdFetch = Date.now() - tokenIdStart;
 
-  if (tokenIds.length === 0) {
-    const errorMsg = `No token IDs found for contract ${contractAddress}`;
+  if (owners.length === 0) {
+    const errorMsg = `No owners found for contract ${contractAddress}`;
     log(`[element280] [ERROR] ${errorMsg}`);
     errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_token_ids', error: errorMsg });
     throw new Error(errorMsg);
   }
 
   const ownerFetchStart = Date.now();
-  const ownerCalls = tokenIds.map(tokenId => ({
+  const ownerCalls = owners.map(owner => ({
     address: contractAddress,
     abi: config.abis.element280.main,
     functionName: 'ownerOf',
-    args: [BigInt(tokenId)],
+    args: [BigInt(owner.tokenId)],
   }));
-  const limit = pLimit(config.alchemy.batchSize);
-  const chunkSize = config.nftContracts.element280.maxTokensPerOwnerQuery;
-  const ownerResults = [];
-  for (let i = 0; i < ownerCalls.length; i += chunkSize) {
-    const chunk = ownerCalls.slice(i, i + chunkSize);
-    const results = await limit(() => retry(() => client.multicall({ contracts: chunk })));
-    ownerResults.push(...results);
-  }
-  timings.ownerFetch = Date.now() - ownerFetchStart;
-
-  const ownerProcessStart = Date.now();
-  let invalidTokens = 0;
-  let nonExistentTokens = 0;
-  tokenIds.forEach((tokenId, index) => {
-    const result = ownerResults[index];
-    if (result.status === 'success') {
-      const owner = result.result.toLowerCase();
-      if (owner && owner !== burnAddress) {
-        ownershipByToken.set(tokenId, owner);
-        const walletTokens = ownershipByWallet.get(owner) || [];
-        walletTokens.push(tokenId);
-        ownershipByWallet.set(owner, walletTokens);
-      } else {
-        invalidTokens++;
-      }
+  const ownerResults = await retry(() => batchMulticall(ownerCalls));
+  owners.forEach((owner, index) => {
+    const tokenId = owner.tokenId;
+    const ownerAddr = owner.ownerAddress.toLowerCase();
+    const verifiedOwner = ownerResults[index]?.status === 'success' ? ownerResults[index].result.toLowerCase() : null;
+    if (verifiedOwner && verifiedOwner === ownerAddr && ownerAddr !== burnAddress) {
+      ownershipByToken.set(tokenId, ownerAddr);
+      const walletTokens = ownershipByWallet.get(ownerAddr) || [];
+      walletTokens.push(tokenId);
+      ownershipByWallet.set(ownerAddr, walletTokens);
     } else {
-      if (result.error?.message.includes('0xdf2d9b42')) {
-        nonExistentTokens++;
-        failedTokens.add(tokenId);
-      } else {
-        log(`[element280] [ERROR] Failed to fetch owner for token ${tokenId}: ${result.error || 'unknown error'}`);
-        errorLog.push({ timestamp: new Date().toISOString(), phase: 'process_owners', error: `Failed to fetch owner for token ${tokenId}: ${result.error || 'unknown error'}` });
-        failedTokens.add(tokenId);
+      failedTokens.add(tokenId);
+      if (!verifiedOwner) {
+        log(`[element280] [WARN] Failed to verify owner for token ${tokenId}`);
+      } else if (verifiedOwner !== ownerAddr) {
+        log(`[element280] [WARN] Owner mismatch for token ${tokenId}: event=${ownerAddr}, ownerOf=${verifiedOwner}`);
       }
     }
   });
-  timings.ownerProcess = Date.now() - ownerProcessStart;
-
-  if (failedTokens.size > 0) {
-    log(`[element280] [WARN] Failed to fetch owners for ${failedTokens.size} tokens: ${[...failedTokens].join(', ')}`);
-  }
+  timings.ownerFetch = Date.now() - ownerFetchStart;
+  timings.ownerProcess = timings.ownerFetch;
 
   const { totalSupply, totalBurned } = await getTotalSupply(contractAddress, errorLog);
   if (ownershipByToken.size > totalSupply) {
@@ -357,7 +296,6 @@ async function fetchAllNftOwnership(contractAddress, errorLog, timings) {
   return { ownershipByToken, ownershipByWallet, totalSupply, totalBurned };
 }
 
-// Populate holders cache
 async function populateHoldersMapCache(contractAddress, tiers) {
   log(`[element280] [STAGE] Starting populateHoldersMapCache for contract: ${contractAddress}`);
   const storage = initStorage(contractAddress);
@@ -407,7 +345,7 @@ async function populateHoldersMapCache(contractAddress, tiers) {
     } else {
       await setCache(`${CACHE_STATE_KEY}_${contractAddress}`, state);
     }
-    log(`[element280] [STAGE] Ownership fetched for ${contractAddress}: ${ownershipByToken.size} NFTs, ${ownershipByWallet.size} wallets, totalSupply=${totalSupply}, totalBurned=${totalBurned}, duration: ${timings.totalSupply + timings.tokenIdFetch + timings.ownerFetch + timings.ownerProcess}ms`);
+    log(`[element280] [STAGE] Ownership fetched for ${contractAddress}: ${ownershipByToken.size} NFTs, ${ownershipByWallet.size} wallets, totalSupply=${totalSupply}, totalBurned=${totalBurned}, duration: ${timings.totalSupply + timings.tokenIdFetch + timings.ownerFetch}ms`);
 
     const holderInitStart = Date.now();
     log(`[element280] [DEBUG] Initializing holders for ${contractAddress}`);
@@ -457,7 +395,7 @@ async function populateHoldersMapCache(contractAddress, tiers) {
       for (let i = 0; i < tierCalls.length; i += chunkSize) {
         const chunk = tierCalls.slice(i, i + chunkSize);
         log(`[element280] [DEBUG] Processing tier batch ${i}-${i + chunkSize - 1} of ${tierCalls.length}`);
-        const results = await limit(() => retry(() => client.multicall({ contracts: chunk })));
+        const results = await limit(() => retry(() => batchMulticall(chunk)));
         tierResults.push(...results);
         state.progressState = {
           step: 'fetching_tiers',
@@ -522,7 +460,7 @@ async function populateHoldersMapCache(contractAddress, tiers) {
       for (let i = 0; i < rewardCalls.length; i += chunkSize) {
         const chunk = rewardCalls.slice(i, i + chunkSize);
         log(`[element280] [DEBUG] Processing reward batch ${i}-${i + chunkSize - 1} of ${rewardCalls.length}`);
-        const results = await limit(() => retry(() => client.multicall({ contracts: chunk })));
+        const results = await limit(() => retry(() => batchMulticall(chunk)));
         rewardResults.push(...results);
         state.progressState = {
           step: 'fetching_rewards',
@@ -594,7 +532,6 @@ async function populateHoldersMapCache(contractAddress, tiers) {
     if (DISABLE_REDIS) {
       storage.holdersMap = holdersMap;
       cache.set(`storage_${contractAddress}`, storage);
-      // Save holdersMap to file
       await saveCacheState(`holders_${contractAddress}`, Array.from(holdersMap.entries()));
       log(`[element280] [DEBUG] Saved holdersMap to file for ${contractAddress}: ${holdersMap.size} holders`);
     }
@@ -640,7 +577,6 @@ async function populateHoldersMapCache(contractAddress, tiers) {
   }
 }
 
-// Fetch holder data
 async function getHolderData(contractAddress, wallet, tiers) {
   const cacheKey = `element280_holder_${contractAddress}-${wallet.toLowerCase()}`;
   const storage = initStorage(contractAddress);
@@ -677,44 +613,30 @@ async function getHolderData(contractAddress, wallet, tiers) {
   const walletLower = wallet.toLowerCase();
   if (holdersMap.has(walletLower)) {
     const holder = holdersMap.get(walletLower);
-    if (!DISABLE_REDIS) await setCache(cacheKey, serializeBigInt(holder), CACHE_TTL);
-    return serializeBigInt(holder);
+    if (!DISABLE_REDIS) await setCache(cacheKey, safeSerialize(holder), CACHE_TTL);
+    return safeSerialize(holder);
   }
 
+  const nfts = await retry(() => getNftsForOwner(walletLower, contractAddress, element280.abi));
   const holder = {
     wallet: walletLower,
-    total: 0,
-    totalLive: 0,
+    total: nfts.length,
+    totalLive: nfts.length,
     multiplierSum: 0,
     displayMultiplierSum: 0,
     tiers: Array(6).fill(0),
-    tokenIds: [],
+    tokenIds: nfts.map(nft => BigInt(nft.tokenId)),
     claimableRewards: 0,
     percentage: 0,
     rank: 0,
   };
 
-  const tokenIdsResponse = await retry(() =>
-    client.readContract({
-      address: contractAddress,
-      abi: config.abis.element280.main,
-      functionName: 'tokenIdsOf',
-      args: [walletLower],
-    })
-  );
-  const tokenIds = tokenIdsResponse.map(id => id.toString());
-  const nfts = tokenIds.map(tokenId => ({ tokenId, tier: 0 }));
-  holder.total = nfts.length;
-  holder.totalLive = nfts.length;
-  if (!DISABLE_REDIS) await setCache(`${TOKEN_CACHE_KEY}_${contractAddress}-${walletLower}-nfts`, nfts, CACHE_TTL);
-
   if (nfts.length === 0) {
     return null;
   }
 
-  const bigIntTokenIds = nfts.map(nft => BigInt(nft.tokenId));
   const calls = [];
-  bigIntTokenIds.forEach(tokenId => {
+  holder.tokenIds.forEach(tokenId => {
     calls.push({
       address: contractAddress,
       abi: config.abis.element280.main,
@@ -729,7 +651,7 @@ async function getHolderData(contractAddress, wallet, tiers) {
     });
   });
 
-  const results = await retry(() => client.multicall({ contracts: calls }));
+  const results = await retry(() => batchMulticall(calls));
   const finalTokenIds = [];
   let totalRewards = 0n;
   nfts.forEach((nft, index) => {
@@ -756,7 +678,7 @@ async function getHolderData(contractAddress, wallet, tiers) {
   if (isNaN(holder.claimableRewards)) {
     holder.claimableRewards = 0;
   }
-  if (!DISABLE_REDIS) await setCache(`${TOKEN_CACHE_KEY}_element280-${walletLower}-reward`, holder.claimableRewards, CACHE_TTL);
+  if (!DISABLE_REDIS) setCache(`${TOKEN_CACHE_KEY}_element280-${walletLower}-reward`, holder.claimableRewards, CACHE_TTL);
 
   const multipliers = Object.values(tiers).map(t => t.multiplier);
   holder.multiplierSum = holder.tiers.reduce(
@@ -765,18 +687,16 @@ async function getHolderData(contractAddress, wallet, tiers) {
   );
   holder.displayMultiplierSum = holder.multiplierSum / 10;
 
-  if (!DISABLE_REDIS) await setCache(cacheKey, serializeBigInt(holder), CACHE_TTL);
-  return serializeBigInt(holder);
+  if (!DISABLE_REDIS) await setCache(cacheKey, safeSerialize(holder), CACHE_TTL);
+  return safeSerialize(holder);
 }
 
-// Fetch all holders
 async function getAllHolders(contractAddress, page = 0, pageSize = 100) {
   log(`[element280] [DEBUG] getAllHolders: contract=${contractAddress}, page=${page}, pageSize=${pageSize}`);
   const storage = initStorage(contractAddress);
   let state = await getCacheState(contractAddress);
   log(`[element280] [DEBUG] Cache state: totalOwners=${state.totalOwners}, step=${state.progressState.step}, isCachePopulating=${state.isCachePopulating}`);
 
-  // Reload holdersMap if completed but empty
   if (state.progressState.step === 'completed' && (!storage.holdersMap || storage.holdersMap.size === 0)) {
     log(`[element280] [DEBUG] Completed state but empty holdersMap, reloading cache`);
     const persistedHolders = await loadCacheState(`holders_${contractAddress}`);
@@ -813,7 +733,6 @@ async function getAllHolders(contractAddress, page = 0, pageSize = 100) {
     log(`[element280] [DEBUG] node-cache holdersMap size: ${holdersMap.size}`);
   }
 
-  // Trigger population if cache is empty and not completed
   if (holdersMap.size === 0 && state.progressState.step !== 'completed') {
     log(`[element280] [DEBUG] Empty holdersMap and cache not completed, triggering population`);
     await populateHoldersMapCache(contractAddress, config.contractTiers.element280).catch(err => {
@@ -888,7 +807,7 @@ async function getAllHolders(contractAddress, page = 0, pageSize = 100) {
   const startIndex = page * pageSize;
   const paginatedHolders = holders.slice(startIndex, startIndex + pageSize);
   const response = {
-    holders: serializeBigInt(paginatedHolders),
+    holders: safeSerialize(paginatedHolders),
     totalPages,
     totalTokens,
     totalShares: multiplierPool,
@@ -906,7 +825,6 @@ async function getAllHolders(contractAddress, page = 0, pageSize = 100) {
   return response;
 }
 
-// API handlers
 export async function GET(request) {
   const address = config.contractAddresses.element280.address;
   if (!address) {
@@ -925,7 +843,7 @@ export async function GET(request) {
       if (!holder) {
         return NextResponse.json({ message: 'No holder data found for wallet' }, { status: 404 });
       }
-      return NextResponse.json(serializeBigInt(holder));
+      return NextResponse.json(safeSerialize(holder));
     }
 
     const data = await getAllHolders(address, page, pageSize);

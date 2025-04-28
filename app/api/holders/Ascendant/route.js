@@ -1,24 +1,15 @@
+// app/api/holders/Ascendant/route.js
 import { NextResponse } from 'next/server';
 import config from '@/config.js';
-import { alchemy, client, log, batchMulticall, getCache, setCache } from '@/app/api/utils.js';
+import { client, getOwnersForContract, getNftsForOwner, log, batchMulticall, getCache, setCache, safeSerialize } from '@/app/api/utils.js';
 import { formatUnits, getAddress } from 'viem';
 import { v4 as uuidv4 } from 'uuid';
 import NodeCache from 'node-cache';
+import ascendant from '@/abi/ascendantNFT.json'; // Fixed import
 
-// Redis toggle
 const DISABLE_REDIS = process.env.DISABLE_ASCENDANT_REDIS === 'true';
+const inMemoryCache = new NodeCache({ stdTTL: config.cache.nodeCache.stdTTL });
 
-// In-memory cache when Redis is disabled
-const inMemoryCache = new NodeCache({ stdTTL: config.cache.nodeCache.stdTTL }); // Fixed: config.cache.ttl -> config.cache.nodeCache.stdTTL
-
-// Utility to serialize BigInt values
-function safeSerialize(obj) {
-  return JSON.parse(
-    JSON.stringify(obj, (key, value) => (typeof value === 'bigint' ? value.toString() : value))
-  );
-}
-
-// Retry utility
 async function retry(
   fn,
   attempts = config.alchemy.maxRetries,
@@ -36,7 +27,6 @@ async function retry(
   }
 }
 
-// Fetch data for all holders with pagination
 async function getAllHolders(page = 0, pageSize = config.contractDetails.ascendant.pageSize, requestId = '') {
   const contractAddress = config.contractAddresses.ascendant.address;
   const tiers = config.contractTiers.ascendant;
@@ -63,26 +53,10 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
     throw new Error('Missing contract address or tiers');
   }
 
-  let owners = [];
-  let pageKey = null;
-  do {
-    const response = await retry(() =>
-      alchemy.nft.getOwnersForContract(contractAddress, {
-        block: 'latest',
-        withTokenBalances: true,
-        pageKey,
-      })
-    );
-    owners = owners.concat(response.owners);
-    pageKey = response.pageKey;
-  } while (pageKey);
-
+  const owners = await retry(() => getOwnersForContract(contractAddress, ascendant.abi));
   const burnAddress = '0x0000000000000000000000000000000000000000';
   const filteredOwners = owners.filter(
-    owner =>
-      owner?.ownerAddress &&
-      owner.ownerAddress.toLowerCase() !== burnAddress &&
-      owner.tokenBalances?.length > 0
+    owner => owner.ownerAddress && owner.ownerAddress.toLowerCase() !== burnAddress
   );
 
   const tokenOwnerMap = new Map();
@@ -96,12 +70,9 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
       log(`[Ascendant] Invalid wallet address: ${owner.ownerAddress}`);
       return;
     }
-    owner.tokenBalances.forEach(tb => {
-      if (!tb.tokenId) return;
-      const tokenId = Number(tb.tokenId);
-      tokenOwnerMap.set(tokenId, wallet);
-      totalTokens++;
-    });
+    const tokenId = Number(owner.tokenId);
+    tokenOwnerMap.set(tokenId, wallet);
+    totalTokens++;
   });
 
   const allTokenIds = Array.from(tokenOwnerMap.keys());
@@ -306,7 +277,7 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
     holder.displayMultiplierSum = holder.multiplierSum;
   });
 
-  holders.sort((a, b) => b.shares - a.shares || b.multiplierSum - a.multiplierSum || b.total - a.total);
+  holders.sort((a, b) => b.shares - a.shares || b.multiplierSum - a.shares || b.total - a.total);
   holders.forEach((holder, index) => (holder.rank = index + 1));
 
   const result = {
@@ -334,10 +305,10 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
     log(`[Ascendant] Cache write error: ${cacheError.message}`);
   }
 
+  log(`[Ascendant] Success: ${holders.length} holders, totalTokens=${totalTokens}, totalLockedAscendant=${totalLockedAscendant}`);
   return result;
 }
 
-// Fetch data for a specific wallet
 async function getHolderData(wallet, requestId = '') {
   const contractAddress = config.contractAddresses.ascendant.address;
   const tiers = config.contractTiers.ascendant;
@@ -351,100 +322,112 @@ async function getHolderData(wallet, requestId = '') {
       cached = await getCache(cacheKey);
     }
     if (cached) {
-      log(`[Ascendant] Cache hit: ${cacheKey} (Redis=${!DISABLE_REDIS})`);
+      log(`[Ascendant] Cache hit for holder: ${cacheKey} (Redis=${!DISABLE_REDIS})`);
       return cached;
     }
-    log(`[Ascendant] Cache miss: ${cacheKey}`);
+    log(`[Ascendant] Cache miss for holder: ${cacheKey}`);
   } catch (cacheError) {
     log(`[Ascendant] Cache read error: ${cacheError.message}`);
   }
 
-  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
-    throw new Error('Invalid wallet address');
+  if (!contractAddress || !tiers) {
+    log(`[Ascendant] Config error: contractAddress=${contractAddress}, tiers=${JSON.stringify(tiers)}`);
+    throw new Error('Missing contract address or tiers');
   }
 
-  const checksummedWallet = getAddress(wallet);
+  const nfts = await retry(() => getNftsForOwner(wallet.toLowerCase(), contractAddress, ascendant.abi));
+  if (nfts.length === 0) {
+    log(`[Ascendant] No NFTs found for wallet ${wallet}`);
+    return null;
+  }
 
-  const nfts = await retry(() =>
-    alchemy.nft.getNftsForOwner(checksummedWallet, { contractAddresses: [contractAddress] })
-  );
+  const maxTier = Math.max(...Object.keys(tiers).map(Number));
+  const holder = {
+    wallet: wallet.toLowerCase(),
+    total: 0,
+    multiplierSum: 0,
+    tiers: Array(maxTier + 1).fill(0),
+    shares: 0,
+    lockedAscendant: 0,
+    pendingDay8: 0,
+    pendingDay28: 0,
+    pendingDay90: 0,
+    claimableRewards: 0,
+    percentage: 0,
+    rank: 0,
+    displayMultiplierSum: 0,
+  };
 
-  if (nfts.totalCount === 0) return null;
-
-  const tokenIds = nfts.ownedNfts
-    .filter(nft => nft.contract.address.toLowerCase() === contractAddress.toLowerCase())
-    .map(nft => Number(nft.tokenId));
-
-  if (tokenIds.length === 0) return null;
-
+  const tokenIds = nfts.map(nft => BigInt(nft.tokenId));
   const tierCalls = tokenIds.map(tokenId => ({
     address: contractAddress,
     abi: config.abis.ascendant.main,
     functionName: 'getNFTAttribute',
-    args: [BigInt(tokenId)],
+    args: [tokenId],
   }));
   const recordCalls = tokenIds.map(tokenId => ({
     address: contractAddress,
     abi: config.abis.ascendant.main,
     functionName: 'userRecords',
-    args: [BigInt(tokenId)],
+    args: [tokenId],
   }));
-  const claimableCall = [
-    {
-      address: contractAddress,
-      abi: config.abis.ascendant.main,
-      functionName: 'batchClaimableAmount',
-      args: [tokenIds.map(id => BigInt(id))],
-    },
-  ];
+  const claimableCall = {
+    address: contractAddress,
+    abi: config.abis.ascendant.main,
+    functionName: 'batchClaimableAmount',
+    args: [tokenIds],
+  };
 
   const [tierResults, recordResults, claimableResults] = await Promise.all([
     retry(() => batchMulticall(tierCalls, config.alchemy.batchSize)),
     retry(() => batchMulticall(recordCalls, config.alchemy.batchSize)),
-    retry(() => batchMulticall(claimableCall, config.alchemy.batchSize)),
+    retry(() => batchMulticall([claimableCall], config.alchemy.batchSize)),
   ]);
 
-  let claimableRewards = 0;
-  if (claimableResults[0]?.status === 'success') {
-    const claimableRaw = claimableResults[0].result || '0';
-    claimableRewards = parseFloat(formatUnits(claimableRaw, 18));
-  }
-
-  const maxTier = Math.max(...Object.keys(tiers).map(Number));
-  const tiersArray = Array(maxTier + 1).fill(0);
-  let total = 0;
-  let multiplierSum = 0;
-  let shares = 0;
-  let lockedAscendant = 0;
-
-  tokenIds.forEach((tokenId, i) => {
-    const tierResult = tierResults[i];
-    let tier;
-    if (tierResult?.status === 'success') {
-      if (Array.isArray(tierResult.result) && tierResult.result.length >= 2) {
-        tier = Number(tierResult.result[1]);
-      } else if (typeof tierResult.result === 'object' && tierResult.result.tier !== undefined) {
-        tier = Number(tierResult.result.tier);
+  tierResults.forEach((result, i) => {
+    if (result?.status === 'success') {
+      let tier;
+      if (Array.isArray(result.result) && result.result.length >= 2) {
+        tier = Number(result.result[1]);
+      } else if (typeof result.result === 'object' && result.result.tier !== undefined) {
+        tier = Number(result.result.tier);
       } else {
-        log(`[Ascendant] Unexpected tier result format for token ${tokenId}: ${JSON.stringify(tierResult.result)}`);
+        log(`[Ascendant] Unexpected tier result format for token ${tokenIds[i]}: ${JSON.stringify(result.result)}`);
+        return;
       }
-    }
-    if (tier >= 1 && tier <= maxTier) {
-      tiersArray[tier] += 1;
-      total += 1;
-      multiplierSum += tiers[tier]?.multiplier || 0;
-    }
-
-    const recordResult = recordResults[i];
-    if (recordResult?.status === 'success' && Array.isArray(recordResult.result)) {
-      const sharesRaw = recordResult.result[0] || '0';
-      const lockedAscendantRaw = recordResult.result[1] || '0';
-      const tokenShares = parseFloat(formatUnits(sharesRaw, 18));
-      const tokenLockedAscendant = parseFloat(formatUnits(lockedAscendantRaw, 18));
-      shares += tokenShares;
-      lockedAscendant += tokenLockedAscendant;
+      if (tier >= 1 && tier <= maxTier) {
+        holder.tiers[tier] += 1;
+        holder.total += 1;
+        holder.multiplierSum += tiers[tier]?.multiplier || 0;
+      }
+    } else {
+      log(`[Ascendant] Tier fetch failed for token ${tokenIds[i]}: ${result?.error || 'Unknown'}`);
     }
   });
+
+  let totalShares = 0;
+  let totalLockedAscendant = 0;
+  recordResults.forEach((result, i) => {
+    if (result?.status === 'success' && Array.isArray(result.result)) {
+      const sharesRaw = result.result[0] || '0';
+      const lockedAscendantRaw = result.result[1] || '0';
+      const shares = parseFloat(formatUnits(sharesRaw, 18));
+      const lockedAscendant = parseFloat(formatUnits(lockedAscendantRaw, 18));
+      holder.shares += shares;
+      holder.lockedAscendant += lockedAscendant;
+      totalShares += shares;
+      totalLockedAscendant += lockedAscendant;
+    } else {
+      log(`[Ascendant] Record fetch failed for token ${tokenIds[i]}: ${result?.error || 'Unknown'}`);
+    }
+  });
+
+  if (claimableResults[0]?.status === 'success') {
+    const claimableRaw = claimableResults[0].result || '0';
+    holder.claimableRewards = parseFloat(formatUnits(claimableRaw, 18));
+  } else {
+    log(`[Ascendant] Claimable fetch failed for wallet ${wallet}: ${claimableResults[0]?.error || 'Unknown'}`);
+  }
 
   const totalSharesRaw = await retry(() =>
     client.readContract({
@@ -453,7 +436,7 @@ async function getHolderData(wallet, requestId = '') {
       functionName: 'totalShares',
     })
   );
-  const totalShares = parseFloat(formatUnits(totalSharesRaw.toString(), 18));
+  const totalMultiplierSum = parseFloat(formatUnits(totalSharesRaw.toString(), 18));
 
   const toDistributeDay8Raw = await retry(() =>
     client.readContract({
@@ -489,64 +472,56 @@ async function getHolderData(wallet, requestId = '') {
   const pendingRewardPerShareDay28 = totalShares > 0 ? toDistributeDay28 / totalShares : 0;
   const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
 
-  const totalMultiplierSum = multiplierSum || 1;
-  const percentage = (multiplierSum / totalMultiplierSum) * 100;
-  const rank = 1;
-
-  const result = {
-    wallet: checksummedWallet,
-    rank,
-    total,
-    multiplierSum,
-    displayMultiplierSum: multiplierSum,
-    percentage,
-    tiers: tiersArray,
-    shares,
-    lockedAscendant,
-    pendingDay8: shares * pendingRewardPerShareDay8,
-    pendingDay28: shares * pendingRewardPerShareDay28,
-    pendingDay90: shares * pendingRewardPerShareDay90,
-    claimableRewards,
-  };
+  holder.pendingDay8 = holder.shares * pendingRewardPerShareDay8;
+  holder.pendingDay28 = holder.shares * pendingRewardPerShareDay28;
+  holder.pendingDay90 = holder.shares * pendingRewardPerShareDay90;
+  holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+  holder.displayMultiplierSum = holder.multiplierSum;
 
   try {
     if (DISABLE_REDIS) {
-      inMemoryCache.set(cacheKey, result);
+      inMemoryCache.set(cacheKey, holder);
     } else {
-      await setCache(cacheKey, result);
+      await setCache(cacheKey, holder);
     }
-    log(`[Ascendant] Cached response: ${cacheKey} (Redis=${!DISABLE_REDIS})`);
+    log(`[Ascendant] Cached holder response: ${cacheKey} (Redis=${!DISABLE_REDIS})`);
   } catch (cacheError) {
     log(`[Ascendant] Cache write error: ${cacheError.message}`);
   }
 
-  return result;
+  return holder;
 }
 
-// API endpoint handler
 export async function GET(request) {
   const requestId = uuidv4();
   const { searchParams } = new URL(request.url);
-  const wallet = searchParams.get('wallet');
   const page = parseInt(searchParams.get('page') || '0', 10);
   const pageSize = parseInt(searchParams.get('pageSize') || config.contractDetails.ascendant.pageSize, 10);
-
-  log(`[Ascendant] GET Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}, Redis=${!DISABLE_REDIS}`);
+  const wallet = searchParams.get('wallet');
 
   try {
     if (wallet) {
-      const holderData = await getHolderData(wallet, requestId);
-      const response = { holders: holderData ? [holderData] : [] };
-      log(`[Ascendant] GET /api/holders/Ascendant?wallet=${wallet} completed`);
-      return NextResponse.json(safeSerialize(response));
+      const holder = await getHolderData(wallet, requestId);
+      if (!holder) {
+        log(`[Ascendant] No holder data found for wallet ${wallet} (${requestId})`);
+        return NextResponse.json({ message: 'No holder data found for wallet' }, { status: 404 });
+      }
+      log(`[Ascendant] Success: Holder data for ${wallet} (${requestId})`);
+      return NextResponse.json(safeSerialize(holder));
     }
 
-    const result = await getAllHolders(page, pageSize, requestId);
-    log(`[Ascendant] GET /api/holders/Ascendant?page=${page}&pageSize=${pageSize} completed`);
-    return NextResponse.json(safeSerialize(result));
+    const data = await getAllHolders(page, pageSize, requestId);
+    log(`[Ascendant] Success: ${data.holders.length} holders, page=${page}, pageSize=${pageSize} (${requestId})`);
+    return NextResponse.json(safeSerialize(data));
   } catch (error) {
-    log(`[${requestId}] [Ascendant] Error: ${error.message}`);
-    console.error(`[${requestId}] [Ascendant] Error stack:`, error.stack);
-    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
+    log(`[Ascendant] Error (${requestId}): ${error.message}`);
+    console.error('[Ascendant] Error stack:', error.stack);
+    let status = 500;
+    let message = 'Failed to fetch Ascendant data';
+    if (error.message.includes('Rate limit')) {
+      status = 429;
+      message = 'Rate limit exceeded';
+    }
+    return NextResponse.json({ error: message, details: error.message }, { status });
   }
 }

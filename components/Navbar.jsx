@@ -1,15 +1,18 @@
+// components/Navbar.jsx
 'use client';
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useThemeStore } from '@/app/store';
-import { SunIcon, MoonIcon } from '@heroicons/react/24/solid';
+import { SunIcon, MoonIcon, CurrencyDollarIcon } from '@heroicons/react/24/solid';
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isNFTDropdownOpen, setIsNFTDropdownOpen] = useState(false);
   const { isDarkMode, toggleTheme } = useThemeStore();
+  const pathname = usePathname();
 
   const menuVariants = {
     hidden: { opacity: 0, y: -20 },
@@ -33,7 +36,7 @@ function Navbar() {
   const navItems = [
     { name: 'Home', href: '/' },
     { name: 'Auctions', href: '/auctions' },
-    { name: 'Mining', href: '/mining' },
+    { name: 'Mining', href: '/mining', icon: CurrencyDollarIcon },
     {
       name: 'NFT',
       href: '/nft',
@@ -78,8 +81,14 @@ function Navbar() {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Link href={item.href} className="nav-link">
-                {item.name}
+              <Link
+                href={item.href}
+                className={`nav-link flex items-center space-x-1 ${
+                  pathname === item.href ? 'text-orange-500' : ''
+                }`}
+              >
+                {item.icon && <item.icon className="h-5 w-5" />}
+                <span>{item.name}</span>
               </Link>
               {item.subItems && (
                 <motion.div
@@ -222,10 +231,13 @@ function Navbar() {
                 ) : (
                   <Link
                     href={item.href}
-                    className="block"
+                    className={`block flex items-center space-x-1 ${
+                      pathname === item.href ? 'text-orange-500' : ''
+                    }`}
                     onClick={() => setIsOpen(false)}
                   >
-                    {item.name}
+                    {item.icon && <item.icon className="h-5 w-5" />}
+                    <span>{item.name}</span>
                   </Link>
                 )}
               </motion.div>

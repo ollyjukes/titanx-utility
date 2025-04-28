@@ -1,13 +1,12 @@
+// app/api/holders/Element369/route.js
 import { NextResponse } from 'next/server';
 import config from '@/config.js';
-import { client, alchemy, getCache, setCache, log, batchMulticall } from '@/app/api/utils.js';
+import { client, getOwnersForContract, log, batchMulticall, getCache, setCache, safeSerialize } from '@/app/api/utils.js';
 import NodeCache from 'node-cache';
+import element369 from '@/abi/element369.json';
 
-// Redis toggle
 const DISABLE_REDIS = process.env.DISABLE_ELEMENT369_REDIS === 'true';
-
-// In-memory cache when Redis is disabled
-const inMemoryCache = new NodeCache({ stdTTL: config.cache.nodeCache.stdTTL }); // Fixed: config.cache.ttl -> config.cache.nodeCache.stdTTL
+const inMemoryCache = new NodeCache({ stdTTL: config.cache.nodeCache.stdTTL });
 
 const contractAddress = config.contractAddresses.element369.address;
 const vaultAddress = config.vaultAddresses.element369.address;
@@ -45,42 +44,35 @@ export async function GET(request) {
       log(`[Element369] Cache read error: ${cacheError.message}`);
     }
 
-    // Fetch owners
-    const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
-      block: 'latest',
-      withTokenBalances: true,
-    });
-    log(`[Element369] Owners fetched: ${ownersResponse.owners.length}`);
+    const owners = await getOwnersForContract(contractAddress, element369.abi);
+    log(`[Element369] Owners fetched: ${owners.length}`);
 
     const burnAddress = '0x0000000000000000000000000000000000000000';
     const filteredOwners = wallet
-      ? ownersResponse.owners.filter(owner => owner.ownerAddress.toLowerCase() === wallet && owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0)
-      : ownersResponse.owners.filter(owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0);
+      ? owners.filter(owner => owner.ownerAddress.toLowerCase() === wallet && owner.ownerAddress.toLowerCase() !== burnAddress)
+      : owners.filter(owner => owner.ownerAddress.toLowerCase() !== burnAddress);
     log(`[Element369] Live owners: ${filteredOwners.length}`);
 
-    // Build token-to-owner map
     const tokenOwnerMap = new Map();
     const ownerTokens = new Map();
     let totalTokens = 0;
     filteredOwners.forEach(owner => {
       const walletAddr = owner.ownerAddress.toLowerCase();
-      const tokenIds = owner.tokenBalances.map(tb => BigInt(tb.tokenId));
-      tokenIds.forEach(tokenId => {
-        tokenOwnerMap.set(tokenId, walletAddr);
-        totalTokens++;
-      });
-      ownerTokens.set(walletAddr, tokenIds);
+      const tokenId = BigInt(owner.tokenId);
+      tokenOwnerMap.set(tokenId, walletAddr);
+      totalTokens++;
+      const tokens = ownerTokens.get(walletAddr) || [];
+      tokens.push(tokenId);
+      ownerTokens.set(walletAddr, tokens);
     });
     log(`[Element369] Total tokens: ${totalTokens}`);
 
-    // Paginate
     const allTokenIds = Array.from(tokenOwnerMap.keys());
     const start = page * pageSize;
     const end = Math.min(start + pageSize, allTokenIds.length);
     const paginatedTokenIds = allTokenIds.slice(start, end);
     log(`[Element369] Paginated tokens: ${paginatedTokenIds.length}`);
 
-    // Fetch tiers
     const tierCalls = paginatedTokenIds.map(tokenId => ({
       address: contractAddress,
       abi: config.abis.element369.main,
@@ -90,8 +82,7 @@ export async function GET(request) {
     const tierResults = await batchMulticall(tierCalls);
     log(`[Element369] Tiers fetched for ${tierResults.length} tokens`);
 
-    // Build holders
-    const maxTier = Math.max(...Object.keys(tiersConfig).map(Number)); // maxTier = 3
+    const maxTier = Math.max(...Object.keys(tiersConfig).map(Number));
     const holdersMap = new Map();
 
     tierResults.forEach((result, i) => {
@@ -106,7 +97,7 @@ export async function GET(request) {
               wallet: walletAddr,
               total: 0,
               multiplierSum: 0,
-              tiers: Array(maxTier).fill(0), // [Common, Rare, Legendary]
+              tiers: Array(maxTier).fill(0),
               infernoRewards: 0,
               fluxRewards: 0,
               e280Rewards: 0,
@@ -115,7 +106,7 @@ export async function GET(request) {
           const holder = holdersMap.get(walletAddr);
           holder.total += 1;
           holder.multiplierSum += tiersConfig[tier]?.multiplier || 0;
-          holder.tiers[tier - 1] += 1; // Zero-based: tiers[0] = Common
+          holder.tiers[tier - 1] += 1;
         } else {
           log(`[Element369] Invalid tier ${tier} for token ${tokenId}`);
         }
@@ -124,7 +115,6 @@ export async function GET(request) {
       }
     });
 
-    // Fetch current cycle for debugging
     let currentCycle = 0;
     try {
       currentCycle = await client.readContract({
@@ -137,7 +127,6 @@ export async function GET(request) {
       log(`[Element369] Error fetching cycle: ${error.message}`);
     }
 
-    // Fetch rewards
     let holders = Array.from(holdersMap.values());
     const rewardCalls = holders.map(holder => {
       const tokenIds = ownerTokens.get(holder.wallet) || [];
@@ -145,7 +134,7 @@ export async function GET(request) {
         address: vaultAddress,
         abi: config.abis.element369.vault,
         functionName: 'getRewards',
-        args: [tokenIds, holder.wallet, false], // isBacking: false for claimable rewards
+        args: [tokenIds, holder.wallet, false],
       };
     });
 
@@ -180,7 +169,6 @@ export async function GET(request) {
       holder.rank = 0;
     });
 
-    // Calculate percentages and ranks
     const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
     holders.forEach((holder, index) => {
       holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
@@ -188,7 +176,6 @@ export async function GET(request) {
       holder.displayMultiplierSum = holder.multiplierSum;
     });
 
-    // Sort holders
     holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
 
     const response = {
