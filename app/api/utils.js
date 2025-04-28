@@ -18,10 +18,12 @@ export const client = createPublicClient({
 
 export const logger = pino({
   level: 'info',
-  transport: {
-    target: 'pino-pretty',
-    options: { colorize: true, translateTime: 'SYS:standard' },
-  },
+  ...(process.env.NODE_ENV !== 'production' && {
+    transport: {
+      target: 'pino-pretty',
+      options: { colorize: true, translateTime: 'SYS:standard' },
+    },
+  }),
 });
 
 export function log(message) {
