@@ -1,30 +1,38 @@
-// app/nft/page.js
-import NFTSummary from '@/components/NFTSummary';
-import config from '@/config';
+// File: app/nft/page.js
 
-// Fetch data for a single collection
+'use client';
+
+import { useState } from 'react';
+import nextDynamic from 'next/dynamic';
+import config from '@/config';
+import LoadingIndicator from '@/components/LoadingIndicator';
+import { motion } from 'framer-motion';
+import { useNFTStore } from '@/app/store';
+
+// Dynamically import NFTSummary
+const NFTSummary = nextDynamic(() => import('@/components/NFTSummary'), { ssr: false });
+
+// Force dynamic rendering to skip static prerendering
+export const dynamic = 'force-dynamic';
+
 async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
   console.log(`[NFTOverview] Fetching data for ${apiKey} from ${apiEndpoint}`);
   try {
     if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
       console.log(`[NFTOverview] ${apiKey} is disabled, returning empty data`);
-      return { holders: [], totalTokens: 0, error: 'Contract not deployed' };
+      return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' };
     }
 
     let endpoint = apiEndpoint;
     if (!endpoint || !endpoint.startsWith('http')) {
       const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
-      endpoint = `${baseUrl}/api/holders/${apiKey}`;
+      endpoint = `${baseUrl}${apiEndpoint}`;
       console.log(`[NFTOverview] Adjusted endpoint to ${endpoint}`);
     }
 
     let allHolders = [];
     let totalTokens = 0;
-    let totalLockedAscendant = 0;
-    let toDistributeDay8 = 0;
-    let toDistributeDay28 = 0;
-    let toDistributeDay90 = 0;
-    let pendingRewards = 0;
+    let totalBurned = 0;
     let summary = {};
     let page = 0;
     let totalPages = Infinity;
@@ -36,26 +44,22 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       if (!res.ok) {
         const errorText = await res.text();
         console.error(`[NFTOverview] Failed to fetch ${url}: ${res.status} ${errorText}`);
-        return { holders: [], totalTokens: 0, error: `API request failed: ${res.status}` };
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: `API request failed: ${res.status}` };
       }
 
       const json = await res.json();
       if (json.error) {
         console.log(`[NFTOverview] API error for ${apiKey}: ${json.error}`);
-        return { holders: [], totalTokens: 0, error: json.error };
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: json.error };
       }
       if (!json.holders || !Array.isArray(json.holders)) {
         console.error(`[NFTOverview] Invalid holders data for ${url}`);
-        return { holders: [], totalTokens: 0, error: 'Invalid holders data' };
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Invalid holders data' };
       }
 
       allHolders = allHolders.concat(json.holders);
       totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
-      totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
-      toDistributeDay8 = json.toDistributeDay8 || toDistributeDay8;
-      toDistributeDay28 = json.toDistributeDay28 || toDistributeDay28;
-      toDistributeDay90 = json.toDistributeDay90 || toDistributeDay90;
-      pendingRewards = json.pendingRewards || pendingRewards;
+      totalBurned = json.totalBurned || totalBurned;
       summary = json.summary || summary;
       totalPages = json.totalPages || 1;
       page++;
@@ -65,55 +69,75 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     return {
       holders: allHolders,
       totalTokens,
-      totalLockedAscendant,
-      toDistributeDay8,
-      toDistributeDay28,
-      toDistributeDay90,
-      pendingRewards,
+      totalBurned,
       summary,
     };
   } catch (error) {
     console.error(`[NFTOverview] Error fetching ${apiKey}: ${error.message}`);
-    return { holders: [], totalTokens: 0, error: error.message };
+    return { holders: [], totalTokens: 0, totalBurned: 0, error: error.message };
   }
 }
 
-// Fetch data for all collections
-async function fetchCollectionsData() {
+export default function NFTOverview() {
+  const [collectionsData, setCollectionsData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const { getCache, setCache } = useNFTStore();
+
   const collections = Object.keys(config.contractDetails).map((key) => ({
     apiKey: key,
     ...config.contractDetails[key],
   }));
 
-  const collectionsData = await Promise.all(
-    collections.map(async ({ apiKey, apiEndpoint, pageSize, disabled }) => {
+  const handleCollectionClick = async (apiKey, apiEndpoint, pageSize, disabled) => {
+    setLoading(true);
+    setError(null);
+    setCollectionsData([]);
+
+    try {
       if (disabled) {
-        console.log(`[NFTOverview] ${apiKey} is disabled, returning empty data`);
-        return { apiKey, data: { holders: [], totalTokens: 0, error: 'Contract not deployed' } };
+        setCollectionsData([{ apiKey, data: { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' } }]);
+        setLoading(false);
+        return;
       }
-      const data = await fetchCollectionData(apiKey, apiEndpoint, pageSize || 1000);
-      return { apiKey, data };
-    })
-  );
 
-  return collectionsData;
-}
-
-export const revalidate = 60; // Revalidate every 60 seconds
-
-export default async function NFTOverview() {
-  const collectionsData = await fetchCollectionsData();
+      const cachedData = getCache(apiKey);
+      if (cachedData) {
+        console.log(`[NFTOverview] Cache hit for ${apiKey}`);
+        setCollectionsData([{ apiKey, data: cachedData }]);
+      } else {
+        console.log(`[NFTOverview] Cache miss for ${apiKey}, fetching data`);
+        const data = await fetchCollectionData(apiKey, apiEndpoint, pageSize || 1000);
+        setCache(apiKey, data);
+        setCollectionsData([{ apiKey, data }]);
+      }
+    } catch (err) {
+      setError(`Failed to load ${apiKey}: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6 flex flex-col items-center">
       <h1 className="title mb-6">NFT Collections</h1>
-      {collectionsData.every(({ data }) => data.error) ? (
-        <p className="text-error">
-          Error fetching data: {collectionsData.find(({ data }) => data.error)?.data.error}
-        </p>
-      ) : (
-        <NFTSummary collectionsData={collectionsData} />
-      )}
+      <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl mb-6">
+        {collections.map(({ apiKey, name, apiEndpoint, pageSize, disabled }) => (
+          <motion.button
+            key={apiKey}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => handleCollectionClick(apiKey, apiEndpoint, pageSize, disabled)}
+            className={`btn btn-secondary w-full ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={disabled}
+          >
+            {name}
+          </motion.button>
+        ))}
+      </div>
+      {loading && <LoadingIndicator status="Loading collection..." />}
+      {error && <p className="text-error">{error}</p>}
+      {collectionsData.length > 0 && !loading && <NFTSummary collectionsData={collectionsData} />}
     </div>
   );
 }

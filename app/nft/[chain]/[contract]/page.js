@@ -1,7 +1,19 @@
-// app/nft/[chain]/[contract]/page.js
+// File: app/nft/[chain]/[contract]/page.js
+
+'use client';
+
+import { useState, useEffect } from 'react';
 import { notFound } from 'next/navigation';
-import NFTPageWrapper from '@/components/NFTPageWrapper';
+import nextDynamic from 'next/dynamic';
 import config from '@/config';
+import LoadingIndicator from '@/components/LoadingIndicator';
+import { useNFTStore } from '@/app/store';
+
+// Dynamically import NFTPageWrapper
+const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), { ssr: false });
+
+// Force dynamic rendering to skip static prerendering
+export const dynamic = 'force-dynamic';
 
 async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
   console.log(`[NFTContractPage] Fetching data for ${apiKey} from ${apiEndpoint}`);
@@ -21,6 +33,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     let allHolders = [];
     let totalTokens = 0;
     let totalShares = 0;
+    let totalBurned = 0;
     let summary = {};
     let page = 0;
     let totalPages = Infinity;
@@ -44,8 +57,9 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       }
 
       allHolders = allHolders.concat(json.holders);
-      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
-      totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+      totalTokens = json.totalTokens || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalTokens;
+      totalBurned = json.totalBurned || totalBurned;
       summary = json.summary || summary;
       totalPages = json.totalPages || 1;
       page++;
@@ -56,6 +70,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       holders: allHolders,
       totalTokens,
       totalShares,
+      totalBurned,
       summary,
     };
   } catch (error) {
@@ -64,10 +79,13 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
   }
 }
 
-export const revalidate = 60;
-
-export default async function NFTContractPage({ params }) {
+export default function NFTContractPage({ params }) {
   const { chain, contract } = params;
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const { getCache, setCache } = useNFTStore();
 
   const apiKeyMap = {
     Element280: 'element280',
@@ -78,19 +96,61 @@ export default async function NFTContractPage({ params }) {
   };
   const apiKey = apiKeyMap[contract];
 
+  useEffect(() => {
+    if (!config.supportedChains.includes(chain) || !apiKey) {
+      console.log(`[NFTContractPage] Not found: chain=${chain}, contract=${contract}`);
+      notFound();
+    }
+
+    async function fetchData() {
+      setLoading(true);
+      setError(null);
+      setData(null);
+
+      const contractConfig = config.contractDetails[apiKey] || {};
+
+      // Check cache first
+      const cachedData = getCache(apiKey);
+      if (cachedData) {
+        console.log(`[NFTContractPage] Cache hit for ${apiKey}`);
+        setData(cachedData);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch data if not cached
+      console.log(`[NFTContractPage] Cache miss for ${apiKey}, fetching data`);
+      const result = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setCache(apiKey, result);
+        setData(result);
+      }
+      setLoading(false);
+    }
+
+    fetchData();
+  }, [chain, contract, apiKey, getCache, setCache]);
+
   if (!config.supportedChains.includes(chain) || !apiKey) {
-    console.log(`[NFTContractPage] Not found: chain=${chain}, contract=${contract}`);
     notFound();
   }
 
-  const contractConfig = config.contractDetails[apiKey] || {};
-  const data = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
-
-  if (data.error) {
+  if (loading) {
     return (
       <div className="container page-content">
         <h1 className="title mb-6">{contract} Collection</h1>
-        <p className="text-error">{data.error}</p>
+        <LoadingIndicator status="Loading collection..." />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container page-content">
+        <h1 className="title mb-6">{contract} Collection</h1>
+        <p className="text-error">{error}</p>
       </div>
     );
   }

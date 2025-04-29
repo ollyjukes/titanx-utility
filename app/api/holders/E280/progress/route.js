@@ -1,15 +1,19 @@
-// ./app/api/holders/E280/progress/route.js
+// app/api/holders/E280/progress/route.js
 import { NextResponse } from 'next/server';
 import { log } from '@/app/api/utils';
 
-export async function GET() {
-  log(`[E280] [VALIDATION] E280 is disabled`);
-  return NextResponse.json({
-    isPopulating: false,
-    totalLiveHolders: 0,
-    totalOwners: 0,
-    phase: 'Disabled',
-    progressPercentage: '0.0',
-    debugId: `state-e280-${Math.random().toString(36).slice(2)}`,
-  });
+export async function GET(_request) {
+  try {
+    log('[E280] [INFO] Progress: Contract not yet deployed');
+    return NextResponse.json({
+      isPopulating: false,
+      totalLiveHolders: 0,
+      totalOwners: 0,
+      phase: 'Not Deployed',
+      progressPercentage: '0.0',
+    });
+  } catch (error) {
+    log(`[E280] [ERROR] Progress endpoint error: ${error.message}`);
+    return NextResponse.json({ error: 'Failed to fetch progress state' }, { status: 500 });
+  }
 }

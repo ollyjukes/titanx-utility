@@ -1,4 +1,4 @@
-// ./app/api/utils.js
+// app/api/utils.js
 import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
 import { Redis } from '@upstash/redis';
@@ -8,7 +8,6 @@ import { promises as fs } from 'fs';
 import config from '@/config.js';
 import { Network, Alchemy } from 'alchemy-sdk';
 
-// Singleton logger instance
 let loggerInstance = null;
 
 const ALCHEMY_API_KEY = config.alchemy.apiKey || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
@@ -39,7 +38,6 @@ export const logger = (() => {
       level: (label) => ({ level: label.toUpperCase() }),
     },
     timestamp: pino.stdTimeFunctions.isoTime,
-    // Conditionally apply pino-pretty in development only
     ...(!isProduction
       ? {
           transport: {
@@ -56,8 +54,8 @@ export const logger = (() => {
   try {
     if (DEBUG) loggerInstance.debug('[utils] Pino logger initialized');
     console.log('[utils] Pino logger initialized (console)');
-  } catch (error) {
-    console.error('[utils] Failed to initialize logger:', error.message);
+  } catch (_error) {
+    console.error('[utils] Failed to initialize logger:', _error.message);
   }
   return loggerInstance;
 })();
@@ -69,24 +67,46 @@ export function log(message) {
     } else if (DEBUG) {
       logger.debug(message);
     }
-  } catch (error) {
-    console.error('[utils] Logger error:', error.message);
+  } catch (_error) {
+    console.error('[utils] Logger error:', _error.message);
   }
 }
-
-// ... (rest of utils.js remains unchanged)
 
 const cache = new NodeCache({
   stdTTL: config.cache.nodeCache.stdTTL,
   checkperiod: config.cache.nodeCache.checkperiod,
 });
 
-const redis = config.cache.redis.disableElement280
-  ? null
-  : new Redis({
-      url: process.env.REDIS_URL || config.redis.url,
-      token: process.env.REDIS_TOKEN || config.redis.token,
-    });
+const redisDisableFlags = {
+  element280: process.env.DISABLE_ELEMENT280_REDIS === 'true',
+  element369: process.env.DISABLE_ELEMENT369_REDIS === 'true',
+  stax: process.env.DISABLE_STAX_REDIS === 'true',
+  ascendant: process.env.DISABLE_ASCENDANT_REDIS === 'true',
+  e280: process.env.DISABLE_E280_REDIS === 'true' || true,
+};
+
+let redis = null;
+const allRedisDisabled = Object.values(redisDisableFlags).every(flag => flag);
+if (!allRedisDisabled) {
+  try {
+    const redisUrl = process.env.UPSTASH_REDIS_REST_URL || config.redis?.url;
+    const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || config.redis?.token;
+    if (redisUrl && redisToken) {
+      redis = new Redis({
+        url: redisUrl,
+        token: redisToken,
+      });
+      if (DEBUG) log('[utils] [DEBUG] Upstash Redis initialized');
+    } else {
+      log('[utils] [ERROR] Redis initialization skipped: missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN');
+    }
+  } catch (_error) {
+    log(`[utils] [ERROR] Failed to initialize Redis: ${_error.message}`);
+    redis = null;
+  }
+} else {
+  if (DEBUG) log('[utils] [DEBUG] Redis skipped: all collections have Redis disabled');
+}
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -115,10 +135,11 @@ export async function batchMulticall(calls, batchSize = config.alchemy.batchSize
 
 export async function getCache(key) {
   let data = cache.get(key);
-  if (!data && !config.cache.redis.disableElement280) {
+  if (!data && redis && !redisDisableFlags[key.split('_')[0]]) {
     try {
-      data = await redis?.get(key);
+      data = await redis.get(key);
       data = data ? JSON.parse(data) : null;
+      if (data) cache.set(key, data);
     } catch (error) {
       log(`[utils] [ERROR] Redis get failed for key ${key}: ${error.message}`);
     }
@@ -131,9 +152,9 @@ export async function getCache(key) {
 
 export async function setCache(key, value, ttl = config.cache.nodeCache.stdTTL) {
   cache.set(key, value, ttl);
-  if (!config.cache.redis.disableElement280) {
+  if (redis && !redisDisableFlags[key.split('_')[0]]) {
     try {
-      await redis?.set(key, JSON.stringify(value), 'EX', ttl);
+      await redis.set(key, JSON.stringify(value), { ex: ttl });
     } catch (error) {
       log(`[utils] [ERROR] Redis set failed for key ${key}: ${error.message}`);
     }
@@ -146,19 +167,26 @@ export async function setCache(key, value, ttl = config.cache.nodeCache.stdTTL) 
 export async function loadCacheState(contractAddress) {
   const cacheKey = `state_${contractAddress}`;
   let state = cache.get(cacheKey);
-  if (!state && !config.cache.redis.disableElement280) {
-    state = await redis?.get(cacheKey);
-    state = state ? JSON.parse(state) : null;
+  const collection = Object.keys(config.contractAddresses).find(col => config.contractAddresses[col].address === contractAddress);
+  const disableRedis = collection ? redisDisableFlags[collection] : true;
+  if (!state && redis && !disableRedis) {
+    try {
+      state = await redis.get(cacheKey);
+      state = state ? JSON.parse(state) : null;
+    } catch (error) {
+      log(`[utils] [ERROR] Redis get failed for key ${cacheKey}: ${error.message}`);
+    }
   }
   if (!state && process.env.NODE_ENV !== 'production') {
     try {
       state = JSON.parse(await fs.readFile(`./cache_state_${contractAddress}.json`, 'utf8'));
-    } catch (error) {
+    } catch (_error) {
+      log(`[utils] [ERROR] Failed to read cache state file for ${contractAddress}: ${_error.message}`);
       state = {
         isCachePopulating: false,
         holdersMapCache: null,
         totalOwners: 0,
-        progressState: { step: 'fetching_supply', processedNfts: 0, totalNfts: 0 },
+        progressState: { step: 'idle', processedNfts: 0, totalNfts: 0 },
       };
     }
   }
@@ -171,9 +199,11 @@ export async function loadCacheState(contractAddress) {
 export async function saveCacheState(contractAddress, state) {
   const cacheKey = `state_${contractAddress}`;
   cache.set(cacheKey, state);
-  if (!config.cache.redis.disableElement280) {
+  const collection = Object.keys(config.contractAddresses).find(col => config.contractAddresses[col].address === contractAddress);
+  const disableRedis = collection ? redisDisableFlags[collection] : true;
+  if (redis && !disableRedis) {
     try {
-      await redis?.set(cacheKey, JSON.stringify(state));
+      await redis.set(cacheKey, JSON.stringify(state));
     } catch (error) {
       log(`[utils] [ERROR] Redis set failed for key ${cacheKey}: ${error.message}`);
     }
@@ -181,8 +211,8 @@ export async function saveCacheState(contractAddress, state) {
   if (process.env.NODE_ENV !== 'production') {
     try {
       await fs.writeFile(`./cache_state_${contractAddress}.json`, JSON.stringify(state, null, 2));
-    } catch (error) {
-      log(`[utils] [ERROR] Failed to write cache state to file: ${error.message}`);
+    } catch (_error) {
+      log(`[utils] [ERROR] Failed to write cache state to file: ${_error.message}`);
     }
   }
   if (DEBUG) {
@@ -214,83 +244,79 @@ export async function getNftsForOwner(ownerAddress, contractAddress, abi) {
       log(`[utils] [DEBUG] Fetched ${tokenIds.length} NFTs for owner ${ownerAddress} at contract ${contractAddress}`);
     }
     return tokenIds.map(id => ({ tokenId: id.toString(), balance: 1 }));
-  } catch (error) {
-    log(`[utils] [ERROR] Failed to fetch NFTs for owner ${ownerAddress}: ${error.message}`);
-    throw error;
+  } catch (_error) {
+    log(`[utils] [ERROR] Failed to fetch NFTs for owner ${ownerAddress}: ${_error.message}`);
+    throw _error;
   }
 }
 
-export async function getOwnersForContract(contractAddress, abi, fromBlock = 0n) {
-  const useAlchemy = process.env.USE_ALCHEMY_FOR_OWNERS === 'true';
-  log(`[utils] [INFO] Fetching owners for contract ${contractAddress} using ${useAlchemy ? 'Alchemy SDK' : 'viem'}`);
-
-  if (useAlchemy) {
-    try {
-      const response = await alchemy.nft.getOwnersForContract(contractAddress, {
-        withTokenBalances: true,
-      });
-      const owners = response.owners.flatMap(owner => {
-        const tokenBalances = owner.tokenBalances || [];
-        return tokenBalances.map(balance => ({
-          ownerAddress: owner.ownerAddress.toLowerCase(),
-          tokenId: balance.tokenId,
-        }));
-      });
-      if (DEBUG) {
-        log(`[utils] [DEBUG] Fetched ${owners.length} owner-token pairs via Alchemy for contract ${contractAddress}`);
-      }
-      return owners;
-    } catch (alchemyError) {
-      log(`[utils] [ERROR] Alchemy failed for contract ${contractAddress}: ${alchemyError.message}`);
-      throw new Error(`Failed to fetch owners via Alchemy: ${alchemyError.message}`);
-    }
-  } else {
-    try {
-      const fromBlockValue = config.deploymentBlocks.element369?.block || 0n;
-      if (DEBUG) {
-        log(`[utils] [DEBUG] Fetching logs for contract ${contractAddress} from block ${fromBlockValue}`);
-        log(`[utils] [DEBUG] ABI passed: ${JSON.stringify(abi.filter(item => item.type === 'event').map(item => item.name))}`);
-      }
-      const logs = await client.getLogs({
-        address: contractAddress,
-        event: parseAbi(['event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)']),
-        fromBlock: BigInt(fromBlockValue),
-      });
-      const owners = {};
-      logs.forEach(log => {
-        const { tokenId, to } = log.args;
-        if (to !== '0x0000000000000000000000000000000000000000') {
-          owners[tokenId.toString()] = { ownerAddress: to, tokenId: tokenId.toString() };
-        } else {
-          delete owners[tokenId.toString()];
-        }
-      });
-      if (DEBUG) {
-        log(`[utils] [DEBUG] Fetched ${Object.keys(owners).length} owners for contract ${contractAddress}`);
-      }
-      return Object.values(owners);
-    } catch (error) {
-      log(`[utils] [ERROR] Failed to fetch owners for contract ${contractAddress}: ${error.message}`);
-      throw error;
-    }
-  }
-}
-
-export async function getTransactionReceipt(txHash) {
+export async function getOwnersForContract(contractAddress, _abi, _fromBlock) {
   try {
-    const receipt = await client.getTransactionReceipt({ hash: txHash });
+    const nfts = await alchemy.nft.getNftsForContract(contractAddress, {
+      contractAddress,
+      withMetadata: false,
+    });
+    const owners = nfts.nfts.map(nft => ({
+      tokenId: nft.tokenId,
+      ownerAddress: nft.owner || '0x0000000000000000000000000000000000000000',
+    }));
     if (DEBUG) {
-      log(`[utils] [DEBUG] Fetched transaction receipt for hash ${txHash}`);
+      log(`[utils] [DEBUG] Fetched ${owners.length} owners for contract ${contractAddress}`);
+    }
+    return owners;
+  } catch (_error) {
+    log(`[utils] [ERROR] Failed to fetch owners for contract ${contractAddress}: ${_error.message}`);
+    throw _error;
+  }
+}
+
+export async function getTransactionReceipt(transactionHash) {
+  const cacheKey = `element280_receipt_${transactionHash}`;
+  let receipt = await getCache(cacheKey);
+  if (receipt) {
+    if (DEBUG) {
+      log(`[utils] [DEBUG] Cache hit for transaction receipt: ${transactionHash}`);
     }
     return receipt;
-  } catch (error) {
-    log(`[utils] [ERROR] Failed to fetch transaction receipt for hash ${txHash}: ${error.message}`);
-    throw error;
+  }
+
+  try {
+    receipt = await retry(() => client.getTransactionReceipt({ hash: transactionHash }));
+    if (!receipt) {
+      throw new Error('Transaction receipt not found');
+    }
+    await setCache(cacheKey, receipt, config.cache.nodeCache.stdTTL);
+    if (DEBUG) {
+      log(`[utils] [DEBUG] Fetched and cached transaction receipt: ${transactionHash}`);
+    }
+    return receipt;
+  } catch (_error) {
+    log(`[utils] [ERROR] Failed to fetch transaction receipt for ${transactionHash}: ${_error.message}`);
+    throw _error;
   }
 }
 
-export async function safeSerialize(obj) {
-  return JSON.parse(
-    JSON.stringify(obj, (key, value) => (typeof value === 'bigint' ? value.toString() : value))
-  );
+export async function retry(fn, retries = config.alchemy.maxRetries, delayMs = config.alchemy.retryMaxDelayMs / config.alchemy.maxRetries) {
+  let lastError;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      log(`[utils] [ERROR] Retry ${i + 1}/${retries} failed: ${error.message}`);
+      if (i < retries - 1) {
+        await delay(delayMs);
+      }
+    }
+  }
+  throw lastError;
+}
+
+export function safeSerialize(obj) {
+  return JSON.parse(JSON.stringify(obj, (key, value) => {
+    if (typeof value === 'bigint') {
+      return value.toString();
+    }
+    return value;
+  }));
 }

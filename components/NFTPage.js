@@ -1,7 +1,8 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
-import LoadingIndicator from './LoadingIndicator';
+import LoadingIndicator from '@/components/LoadingIndicator';
 import config from '@/config.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
@@ -140,8 +141,17 @@ export default function NFTPage({ chain, contract }) {
   const [showChart, setShowChart] = useState(false);
   const [progress, setProgress] = useState({ isPopulating: true, totalWallets: 0, totalOwners: 0, phase: 'Initializing', progressPercentage: 0 });
   const [isInvalidContract, setIsInvalidContract] = useState(false);
+  const [isClient, setIsClient] = useState(false);
 
+  // Call useNFTStore unconditionally
   const { getCache, setCache } = useNFTStore();
+  // Use useMemo to stabilize effectiveGetCache and effectiveSetCache
+  const effectiveGetCache = useMemo(() => (isClient ? getCache : () => null), [isClient, getCache]);
+  const effectiveSetCache = useMemo(() => (isClient ? setCache : () => {}), [isClient, setCache]);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const contractId = contract ? contract.toLowerCase() : null;
   console.log(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
@@ -185,7 +195,7 @@ export default function NFTPage({ chain, contract }) {
       }
 
       const cacheKey = `contract_data_${contractId}`;
-      const cachedData = getCache(cacheKey);
+      const cachedData = isClient ? effectiveGetCache(cacheKey) : null;
       if (cachedData && cachedData.totalMinted > 0) {
         console.log(`[NFTPage] [INFO] Cache hit for ${cacheKey}`);
         setData(cachedData);
@@ -209,7 +219,9 @@ export default function NFTPage({ chain, contract }) {
         console.log(`[NFTPage] [INFO] Using placeholder data for non-Element280 contract: ${contractId}`);
       }
 
-      setCache(cacheKey, contractData);
+      if (isClient) {
+        effectiveSetCache(cacheKey, contractData);
+      }
       setData(contractData);
       setLoading(false);
     } catch (err) {
@@ -217,11 +229,11 @@ export default function NFTPage({ chain, contract }) {
       setError(`Failed to load ${name} data: ${err.message}. Please try again later.`);
       setLoading(false);
     }
-  }, [apiEndpoint, contractId, isElement280, getCache, setCache, name]);
+  }, [apiEndpoint, contractId, isElement280, isClient, effectiveGetCache, effectiveSetCache, name]);
 
   const fetchAllHolders = useCallback(async () => {
     const cacheKey = `holders_${contractId}`;
-    const cachedData = getCache(cacheKey);
+    const cachedData = isClient ? effectiveGetCache(cacheKey) : null;
     if (cachedData) {
       console.log(`[NFTPage] [INFO] Cache hit for ${cacheKey}, holders: ${cachedData.holders.length}`);
       setData(prev => ({ ...prev, holders: cachedData.holders, summary: cachedData.summary }));
@@ -335,7 +347,9 @@ export default function NFTPage({ chain, contract }) {
       };
 
       console.log(`[NFTPage] [INFO] Fetched ${allHolders.length} holders for ${contractId}`);
-      setCache(cacheKey, holdersData);
+      if (isClient) {
+        effectiveSetCache(cacheKey, holdersData);
+      }
       setData(prev => ({ ...prev, ...holdersData }));
       setLoading(false);
     } catch (err) {
@@ -343,7 +357,7 @@ export default function NFTPage({ chain, contract }) {
       setError(`Failed to load ${name} data: ${err.message}. Please try again later.`);
       setLoading(false);
     }
-  }, [apiEndpoint, contractId, getCache, setCache, name, pageSize]);
+  }, [apiEndpoint, contractId, isClient, effectiveGetCache, effectiveSetCache, name, pageSize]);
 
   useEffect(() => {
     if (!contractId || !config.contractDetails[contractId]) {
@@ -360,6 +374,15 @@ export default function NFTPage({ chain, contract }) {
       fetchAllHolders();
     }
   }, [contractId, chain, contract, disabled, name, fetchData, fetchAllHolders]);
+
+  if (!isClient) {
+    return (
+      <div className="container page-content">
+        <h1 className="title mb-6">{name || 'Unknown Contract'} Holders</h1>
+        <p>Loading...</p>
+      </div>
+    );
+  }
 
   const HolderTable = holderTableComponents[contractId] || null;
 

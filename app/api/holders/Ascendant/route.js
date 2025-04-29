@@ -1,14 +1,9 @@
-// ./app/api/holders/Ascendant/route.js
+// app/api/holders/Ascendant/route.js
 import { NextResponse } from 'next/server';
 import config from '@/config.js';
-import { client, getOwnersForContract, getNftsForOwner, log, batchMulticall, getCache, setCache, safeSerialize } from '@/app/api/utils.js';
+import { client, getOwnersForContract, getNftsForOwner, log, batchMulticall, getCache, setCache, safeSerialize, retry } from '@/app/api/utils';
 import { formatUnits, getAddress } from 'viem';
-import { v4 as uuidv4 } from 'uuid';
-import NodeCache from 'node-cache';
 import ascendant from '@/abi/ascendantNFT.json';
-
-const DISABLE_REDIS = process.env.DISABLE_ASCENDANT_REDIS === 'true';
-const inMemoryCache = new NodeCache({ stdTTL: config.cache.nodeCache.stdTTL });
 
 let cacheState = {
   isPopulating: false,
@@ -19,7 +14,7 @@ let cacheState = {
   debugId: `state-${Math.random().toString(36).slice(2)}`,
 };
 
-export async function getCacheState(address) {
+export async function getCacheState(_address) {
   return {
     isCachePopulating: cacheState.isPopulating,
     totalOwners: cacheState.totalOwners,
@@ -32,24 +27,7 @@ export async function getCacheState(address) {
   };
 }
 
-async function retry(
-  fn,
-  attempts = config.alchemy.maxRetries,
-  delay = (retryCount, error) =>
-    error?.details?.code === 429 ? config.alchemy.batchDelayMs * 2 ** retryCount : config.alchemy.batchDelayMs
-) {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      log(`[Ascendant] [ERROR] Retry ${i + 1}/${attempts}: ${error.message}`);
-      if (i === attempts - 1) throw error;
-      await new Promise(resolve => setTimeout(resolve, delay(i, error)));
-    }
-  }
-}
-
-async function getAllHolders(page = 0, pageSize = config.contractDetails.ascendant.pageSize, requestId = '') {
+async function getAllHolders(page = 0, pageSize = config.contractDetails.ascendant.pageSize, _requestId = '') {
   const contractAddress = config.contractAddresses.ascendant.address;
   const tiers = config.contractTiers.ascendant;
   const cacheKey = `ascendant_holders_${contractAddress}-${page}-${pageSize}`;
@@ -59,11 +37,7 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
     if (cacheState.isPopulating) {
       return { message: 'Cache is populating', ...await getCacheState(contractAddress) };
     }
-    if (DISABLE_REDIS) {
-      cached = inMemoryCache.get(cacheKey);
-    } else {
-      cached = await getCache(cacheKey);
-    }
+    cached = await getCache(cacheKey);
     if (cached) {
       return cached;
     }
@@ -87,13 +61,14 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
 
   const tokenOwnerMap = new Map();
   let totalTokens = 0;
+
   filteredOwners.forEach(owner => {
     if (!owner.ownerAddress) return;
     let wallet;
     try {
       wallet = getAddress(owner.ownerAddress);
-    } catch (e) {
-      log(`[Ascendant] [ERROR] Invalid wallet address: ${owner.ownerAddress}`);
+    } catch (error) {
+      log(`[Ascendant] [ERROR] Invalid wallet address: ${owner.ownerAddress}, Error: ${error.message}`);
       return;
     }
     const tokenId = Number(owner.tokenId);
@@ -111,7 +86,6 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
     const result = {
       holders: [],
       totalTokens,
-      totalLockedAscendant: 0,
       totalShares: 0,
       toDistributeDay8: 0,
       toDistributeDay28: 0,
@@ -121,15 +95,7 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
       pageSize,
       totalPages: Math.ceil(totalTokens / pageSize),
     };
-    try {
-      if (DISABLE_REDIS) {
-        inMemoryCache.set(cacheKey, result);
-      } else {
-        await setCache(cacheKey, result);
-      }
-    } catch (cacheError) {
-      log(`[Ascendant] [ERROR] Cache write error: ${cacheError.message}`);
-    }
+    await setCache(cacheKey, result);
     cacheState = { ...cacheState, isPopulating: false, step: 'completed' };
     return result;
   }
@@ -195,7 +161,6 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
 
   const maxTier = Math.max(...Object.keys(tiers).map(Number));
   const holdersMap = new Map();
-  let totalLockedAscendant = 0;
 
   cacheState = { ...cacheState, step: 'processing_holders', processedNfts: paginatedTokenIds.length };
   const walletTokenIds = new Map();
@@ -208,7 +173,7 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
     walletTokenIds.get(wallet).push(tokenId);
   });
 
-  const claimableCalls = Array.from(walletTokenIds.entries()).map(([wallet, tokenIds]) => ({
+  const claimableCalls = Array.from(walletTokenIds.entries()).map(([_wallet, tokenIds]) => ({
     address: contractAddress,
     abi: config.abis.ascendant.main,
     functionName: 'batchClaimableAmount',
@@ -261,13 +226,12 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
       const lockedAscendant = parseFloat(formatUnits(lockedAscendantRaw, 18));
       holder.shares += shares;
       holder.lockedAscendant += lockedAscendant;
-      totalLockedAscendant += lockedAscendant;
     }
   });
 
   let claimableIndex = 0;
-  for (const [wallet, tokenIds] of walletTokenIds.entries()) {
-    const holder = holdersMap.get(wallet);
+  for (const [_wallet, _tokenIds] of walletTokenIds.entries()) {
+    const holder = holdersMap.get(_wallet);
     if (!holder) {
       claimableIndex++;
       continue;
@@ -300,7 +264,6 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
   const result = {
     holders,
     totalTokens,
-    totalLockedAscendant,
     totalShares,
     toDistributeDay8,
     toDistributeDay28,
@@ -311,35 +274,24 @@ async function getAllHolders(page = 0, pageSize = config.contractDetails.ascenda
     totalPages: Math.ceil(totalTokens / pageSize),
   };
 
-  try {
-    if (DISABLE_REDIS) {
-      inMemoryCache.set(cacheKey, result);
-    } else {
-      await setCache(cacheKey, result);
-    }
-  } catch (cacheError) {
-    log(`[Ascendant] [ERROR] Cache write error: ${cacheError.message}`);
-  }
-
+  await setCache(cacheKey, result);
   cacheState = { ...cacheState, isPopulating: false, step: 'completed' };
   return result;
 }
 
-async function getHolderData(wallet, requestId = '') {
+// ... (getHolderData and GET handler remain unchanged)
+
+async function getHolderData(_wallet, _requestId = '') {
   const contractAddress = config.contractAddresses.ascendant.address;
   const tiers = config.contractTiers.ascendant;
-  const cacheKey = `ascendant_holder_${contractAddress}-${wallet.toLowerCase()}`;
+  const cacheKey = `ascendant_holder_${contractAddress}-${_wallet.toLowerCase()}`;
 
   try {
     let cached;
     if (cacheState.isPopulating) {
       return { message: 'Cache is populating', ...await getCacheState(contractAddress) };
     }
-    if (DISABLE_REDIS) {
-      cached = inMemoryCache.get(cacheKey);
-    } else {
-      cached = await getCache(cacheKey);
-    }
+    cached = await getCache(cacheKey);
     if (cached) {
       return cached;
     }
@@ -353,7 +305,7 @@ async function getHolderData(wallet, requestId = '') {
   }
 
   cacheState = { ...cacheState, isPopulating: true, step: 'fetching_nfts', processedNfts: 0, totalNfts: 0, totalOwners: 0 };
-  const nfts = await retry(() => getNftsForOwner(wallet.toLowerCase(), contractAddress, ascendant.abi));
+  const nfts = await retry(() => getNftsForOwner(_wallet.toLowerCase(), contractAddress, ascendant.abi));
   if (nfts.length === 0) {
     cacheState = { ...cacheState, isPopulating: false, step: 'completed' };
     return null;
@@ -362,7 +314,7 @@ async function getHolderData(wallet, requestId = '') {
 
   const maxTier = Math.max(...Object.keys(tiers).map(Number));
   const holder = {
-    wallet: wallet.toLowerCase(),
+    wallet: _wallet.toLowerCase(),
     total: 0,
     multiplierSum: 0,
     tiers: Array(maxTier + 1).fill(0),
@@ -426,7 +378,6 @@ async function getHolderData(wallet, requestId = '') {
   });
 
   let totalShares = 0;
-  let totalLockedAscendant = 0;
   recordResults.forEach((result, i) => {
     if (result?.status === 'success' && Array.isArray(result.result)) {
       const sharesRaw = result.result[0] || '0';
@@ -436,7 +387,6 @@ async function getHolderData(wallet, requestId = '') {
       holder.shares += shares;
       holder.lockedAscendant += lockedAscendant;
       totalShares += shares;
-      totalLockedAscendant += lockedAscendant;
     } else {
       log(`[Ascendant] [ERROR] Record fetch failed for token ${tokenIds[i]}: ${result?.error || 'Unknown'}`);
     }
@@ -446,7 +396,7 @@ async function getHolderData(wallet, requestId = '') {
     const claimableRaw = claimableResults[0].result || '0';
     holder.claimableRewards = parseFloat(formatUnits(claimableRaw, 18));
   } else {
-    log(`[Ascendant] [ERROR] Claimable fetch failed for wallet ${wallet}: ${claimableResults[0]?.error || 'Unknown'}`);
+    log(`[Ascendant] [ERROR] Claimable fetch failed for wallet ${_wallet}: ${claimableResults[0]?.error || 'Unknown'}`);
   }
 
   cacheState = { ...cacheState, step: 'fetching_shares' };
@@ -499,22 +449,13 @@ async function getHolderData(wallet, requestId = '') {
   holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
   holder.displayMultiplierSum = holder.multiplierSum;
 
-  try {
-    if (DISABLE_REDIS) {
-      inMemoryCache.set(cacheKey, holder);
-    } else {
-      await setCache(cacheKey, holder);
-    }
-  } catch (cacheError) {
-    log(`[Ascendant] [ERROR] Cache write error: ${cacheError.message}`);
-  }
-
+  await setCache(cacheKey, holder);
   cacheState = { ...cacheState, isPopulating: false, step: 'completed' };
   return holder;
 }
 
 export async function GET(request) {
-  const requestId = uuidv4();
+  const _requestId = crypto.randomUUID();
   const { searchParams, pathname } = new URL(request.url);
   const page = parseInt(searchParams.get('page') || '0', 10);
   const pageSize = parseInt(searchParams.get('pageSize') || config.contractDetails.ascendant.pageSize, 10);
@@ -536,18 +477,18 @@ export async function GET(request) {
 
   try {
     if (wallet) {
-      const holder = await getHolderData(wallet, requestId);
+      const holder = await getHolderData(wallet);
       if (!holder) {
-        log(`[Ascendant] [ERROR] No holder data found for wallet ${wallet} (${requestId})`);
+        log(`[Ascendant] [ERROR] No holder data found for wallet ${wallet}`);
         return NextResponse.json({ message: 'No holder data found for wallet' }, { status: 404 });
       }
       return NextResponse.json(safeSerialize(holder));
     }
 
-    const data = await getAllHolders(page, pageSize, requestId);
+    const data = await getAllHolders(page, pageSize);
     return NextResponse.json(safeSerialize(data));
   } catch (error) {
-    log(`[Ascendant] [ERROR] Error (${requestId}): ${error.message}, stack: ${error.stack}`);
+    log(`[Ascendant] [ERROR] Error: ${error.message}`);
     let status = 500;
     let message = 'Failed to fetch Ascendant data';
     if (error.message.includes('Rate limit')) {

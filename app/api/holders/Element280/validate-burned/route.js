@@ -1,7 +1,7 @@
-// ./app/api/holders/Element280/validate-burned/route.js
+// app/api/holders/Element280/validate-burned/route.js
 import { NextResponse } from 'next/server';
 import config from '@/config';
-import { getTransactionReceipt, log, client } from '@/app/api/utils.js';
+import { getTransactionReceipt, log, client, getCache, setCache } from '@/app/api/utils.js';
 import { parseAbiItem } from 'viem';
 
 export async function POST(request) {
@@ -20,6 +20,15 @@ export async function POST(request) {
     if (!contractAddress) {
       log(`[validate-burned] [VALIDATION] Element280 contract address not configured in config.js`);
       return NextResponse.json({ error: 'Contract address not configured' }, { status: 500 });
+    }
+
+    const cacheKey = `element280_burn_validation_${transactionHash}`;
+    const cachedResult = await getCache(cacheKey);
+    if (cachedResult) {
+      if (process.env.DEBUG === 'true') {
+        log(`[validate-burned] [DEBUG] Cache hit for burn validation: ${transactionHash}`);
+      }
+      return NextResponse.json(cachedResult);
     }
 
     if (process.env.DEBUG === 'true') {
@@ -49,8 +58,8 @@ export async function POST(request) {
           if (decodedLog.args.to.toLowerCase() === burnAddress) {
             burnedTokenIds.push(decodedLog.args.tokenId.toString());
           }
-        } catch (decodeError) {
-          log(`[validate-burned] [ERROR] Failed to decode log entry for transaction ${transactionHash}: ${decodeError.message}`);
+        } catch (_decodeError) {
+          log(`[validate-burned] [ERROR] Failed to decode log entry for transaction ${transactionHash}: ${_decodeError.message}`);
         }
       }
     }
@@ -60,14 +69,17 @@ export async function POST(request) {
       return NextResponse.json({ error: 'No burn events found in transaction' }, { status: 400 });
     }
 
-    if (process.env.DEBUG === 'true') {
-      log(`[validate-burned] [DEBUG] Found ${burnedTokenIds.length} burned tokens in transaction: ${transactionHash}`);
-    }
-    return NextResponse.json({
+    const result = {
       transactionHash,
       burnedTokenIds,
       blockNumber: receipt.blockNumber.toString(),
-    });
+    };
+
+    await setCache(cacheKey, result, config.cache.nodeCache.stdTTL);
+    if (process.env.DEBUG === 'true') {
+      log(`[validate-burned] [DEBUG] Found ${burnedTokenIds.length} burned tokens in transaction: ${transactionHash}`);
+    }
+    return NextResponse.json(result);
   } catch (error) {
     log(`[validate-burned] [ERROR] Error processing transaction: ${error.message}, stack: ${error.stack}`);
     return NextResponse.json({ error: 'Failed to validate transaction', details: error.message }, { status: 500 });

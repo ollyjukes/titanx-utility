@@ -1,8 +1,7 @@
-// ./app/api/holders/Element369/route.js
+// app/api/holders/Element369/route.js
 import { NextResponse } from 'next/server';
 import config from '@/config.js';
-import { client, getOwnersForContract, log, batchMulticall, getCache, setCache } from '@/app/api/utils.js';
-import NodeCache from 'node-cache';
+import { getOwnersForContract, log, batchMulticall, getCache, setCache } from '@/app/api/utils';
 
 const contractAddress = config.contractAddresses.element369.address;
 const vaultAddress = config.vaultAddresses.element369.address;
@@ -10,11 +9,6 @@ const tiersConfig = config.contractDetails.element369.tiers;
 const defaultPageSize = config.contractDetails.element369.pageSize;
 const element369MinimalAbi = config.abis.element369.main;
 const element369VaultMinimalAbi = config.abis.element369.vault;
-const inMemoryCache = new NodeCache({
-  stdTTL: config.cache.nodeCache.stdTTL,
-  checkperiod: config.cache.nodeCache.checkperiod,
-});
-const DISABLE_REDIS = process.env.DISABLE_ELEMENT369_REDIS === 'true';
 
 let cacheState = {
   isPopulating: false,
@@ -25,7 +19,7 @@ let cacheState = {
   debugId: `state-${Math.random().toString(36).slice(2)}`,
 };
 
-export async function getCacheState(address) {
+export async function getCacheState(_address) {
   return {
     isCachePopulating: cacheState.isPopulating,
     totalOwners: cacheState.totalOwners,
@@ -73,13 +67,9 @@ export async function GET(request) {
         log(`[Element369] [INFO] Waiting for cache population to complete`);
         return NextResponse.json({ message: 'Cache is populating', ...await getCacheState(contractAddress) });
       }
-      if (DISABLE_REDIS) {
-        cachedData = inMemoryCache.get(cacheKey);
-      } else {
-        cachedData = await getCache(cacheKey);
-      }
+      cachedData = await getCache(cacheKey);
       if (cachedData) {
-        log(`[Element369] [INFO] Cache hit: ${cacheKey} (Redis=${!DISABLE_REDIS})`);
+        log(`[Element369] [INFO] Cache hit: ${cacheKey}`);
         return NextResponse.json(cachedData);
       }
       log(`[Element369] [INFO] Cache miss: ${cacheKey}`);
@@ -184,7 +174,7 @@ export async function GET(request) {
 
     holders.forEach((holder, i) => {
       if (rewardsResults[i]?.status === 'success' && rewardsResults[i].result) {
-        const [availability, burned, infernoPool, fluxPool, e280Pool] = rewardsResults[i].result;
+        const [, , infernoPool, fluxPool, e280Pool] = rewardsResults[i].result;
         holder.infernoRewards = Number(infernoPool) / 1e18;
         holder.fluxRewards = Number(fluxPool) / 1e18;
         holder.e280Rewards = Number(e280Pool) / 1e18;
@@ -216,22 +206,14 @@ export async function GET(request) {
       totalPages: wallet ? 1 : Math.ceil(totalTokens / pageSize),
     };
 
-    try {
-      if (DISABLE_REDIS) {
-        inMemoryCache.set(cacheKey, response);
-      } else {
-        await setCache(cacheKey, response);
-      }
-      log(`[Element369] [INFO] Cached response: ${cacheKey} (Redis=${!DISABLE_REDIS})`);
-    } catch (cacheError) {
-      log(`[Element369] [ERROR] Cache write error: ${cacheError.message}`);
-    }
+    await setCache(cacheKey, response);
+    log(`[Element369] [INFO] Cached response: ${cacheKey}`);
 
     cacheState = { ...cacheState, isPopulating: false, step: 'completed' };
     log(`[Element369] Success: ${holders.length} holders`);
     return NextResponse.json(response);
   } catch (error) {
-    log(`[Element369] [ERROR] Error: ${error.message}, stack: ${error.stack}`);
+    log(`[Element369] [ERROR] Error: ${error.message}`);
     cacheState = { ...cacheState, isPopulating: false, step: 'error' };
     return NextResponse.json({ error: 'Failed to fetch Element369 data', details: error.message }, { status: 500 });
   }

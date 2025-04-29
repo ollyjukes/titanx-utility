@@ -1,48 +1,4 @@
-import { motion } from 'framer-motion';
-
-export default function LoadingIndicator({ status, progress }) {
-  const percentage = progress?.totalOwners > 0 ? (progress.totalWallets / progress.totalOwners) * 100 : 0;
-
-  return (
-    <div className="loading-container">
-      <motion.svg
-        className="spinner"
-        animate={{ scale: [1, 1.2, 1], rotate: 360 }}
-        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-      >
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path
-          className="opacity-75"
-          fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-        />
-      </motion.svg>
-      <p className="text-body">{status}</p>
-      {progress?.totalOwners > 0 && (
-        <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${percentage}%` }}></div>
-        </div>
-      )}
-    </div>
-  );
-}// components/NFTLayout.js
 'use client';
-
-import Navbar from './Navbar';
-
-export default function NFTLayout({ children }) {
-  return (
-    <div className="min-h-screen bg-gray-900">
-      <Navbar />
-      <main className="container page-content">
-        {children}
-      </main>
-    </div>
-  );
-}'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
@@ -722,391 +678,6 @@ export default function NFTSummary({ collectionsData }) {
   );
 }'use client';
 
-import { motion } from 'framer-motion';
-import dynamic from 'next/dynamic';
-import config from '@/config.js';
-
-// Loading components
-const Element280Loading = () => <div className="text-body">Loading Element280 data...</div>;
-Element280Loading.displayName = 'Element280Loading';
-
-const Element369Loading = () => <div className="text-body">Loading Element369 data...</div>;
-Element369Loading.displayName = 'Element369Loading';
-
-const StaxNFTLoading = () => <div className="text-body">Loading Stax data...</div>;
-StaxNFTLoading.displayName = 'StaxNFTLoading';
-
-const AscendantNFTLoading = () => <div className="text-body">Loading Ascendant data...</div>;
-AscendantNFTLoading.displayName = 'AscendantNFTLoading';
-
-const E280Loading = () => <div className="text-body">Loading E280 data...</div>;
-E280Loading.displayName = 'E280Loading';
-
-// Fallback components
-const Element280Fallback = () => <div className="text-error">Error loading data for Element280</div>;
-Element280Fallback.displayName = 'Element280ErrorFallback';
-
-const Element369Fallback = () => <div className="text-error">Error loading data for Element369</div>;
-Element369Fallback.displayName = 'Element369ErrorFallback';
-
-const StaxNFTFallback = () => <div className="text-error">Error loading data for Stax</div>;
-StaxNFTFallback.displayName = 'StaxNFTErrorFallback';
-
-const AscendantNFTFallback = () => <div className="text-error">Error loading data for Ascendant</div>;
-AscendantNFTFallback.displayName = 'AscendantNFTErrorFallback';
-
-const E280Fallback = () => <div className="text-error">Error loading data for E280</div>;
-E280Fallback.displayName = 'E280ErrorFallback';
-
-const holderTableComponents = {
-  element280: dynamic(
-    () => import('./HolderTable/Element280').catch((err) => {
-      console.error('Failed to load Element280 HolderTable:', err);
-      return { default: Element280Fallback };
-    }),
-    { ssr: false, loading: Element280Loading }
-  ),
-  element369: dynamic(
-    () => import('./HolderTable/Element369').catch((err) => {
-      console.error('Failed to load Element369 HolderTable:', err);
-      return { default: Element369Fallback };
-    }),
-    { ssr: false, loading: Element369Loading }
-  ),
-  stax: dynamic(
-    () => import('./HolderTable/Stax').catch((err) => {
-      console.error('Failed to load Stax HolderTable:', err);
-      return { default: StaxNFTFallback };
-    }),
-    { ssr: false, loading: StaxNFTLoading }
-  ),
-  ascendantNFT: dynamic(
-    () => import('./HolderTable/Ascendant').catch((err) => {
-      console.error('Failed to load Ascendant HolderTable:', err);
-      return { default: AscendantNFTFallback };
-    }),
-    { ssr: false, loading: AscendantNFTLoading }
-  ),
-  e280: dynamic(
-    () => import('./HolderTable/E280').catch((err) => {
-      console.error('Failed to load E280 HolderTable:', err);
-      return { default: E280Fallback };
-    }),
-    { ssr: false, loading: E280Loading }
-  ),
-};
-
-Object.keys(holderTableComponents).forEach((key) => {
-  holderTableComponents[key].displayName = `${key}HolderTable`;
-});
-
-export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick }) {
-  const modalVariants = {
-    hidden: { opacity: 0, y: -50 },
-    visible: { opacity: 1, y: 0 },
-    exit: { opacity: 0, y: -50 },
-  };
-
-  const collections = [
-    { apiKey: 'element280', name: 'Element280' },
-    { apiKey: 'element369', name: 'Element369' },
-    { apiKey: 'stax', name: 'Stax' },
-    { apiKey: 'ascendantNFT', name: 'Ascendant' },
-    { apiKey: 'e280', name: 'E280' },
-  ];
-
-  return (
-    <div className="modal-overlay" onClick={handleBackgroundClick}>
-      <motion.div
-        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700"
-        variants={modalVariants}
-        initial="hidden"
-        animate="visible"
-        exit="exit"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="subtitle">
-            NFT Ownership for {searchAddress.slice(0, 6)}...{searchAddress.slice(-4)}
-          </h2>
-          <button onClick={closeModal} className="text-gray-300 hover:text-gray-100 text-2xl">
-            ×
-          </button>
-        </div>
-
-        <div className="space-y-section">
-          {collections.map(({ apiKey, name }) => {
-            const data = searchResult[apiKey];
-            const HolderTable = holderTableComponents[apiKey] || (() => <div>Holder table not found for {apiKey}</div>);
-            return (
-              <div key={apiKey} className="border-b border-gray-700 pb-4">
-                <h3 className="subtitle mb-2">{name}</h3>
-                {data === null ? (
-                  <p className="text-body">No NFTs owned in this collection.</p>
-                ) : data?.error ? (
-                  <p className="text-error">Error: {data.error}</p>
-                ) : data?.message ? (
-                  <p className="text-body">{data.message}</p>
-                ) : (
-                  <HolderTable
-                    holders={[data]}
-                    contract={apiKey}
-                    loading={false}
-                    totalTokens={data.totalTokens || 0}
-                    totalShares={data.totalShares}
-                    rewardToken={data.rewardToken || config.contractDetails[apiKey]?.rewardToken}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </motion.div>
-    </div>
-  );
-}'use client';
-
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { CurrencyDollarIcon } from '@heroicons/react/24/solid';
-
-function Navbar() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [isNFTDropdownOpen, setIsNFTDropdownOpen] = useState(false);
-  const pathname = usePathname();
-
-  const menuVariants = {
-    hidden: { opacity: 0, y: -20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.3, ease: 'easeOut', staggerChildren: 0.1 },
-    },
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: -10, scale: 0.95 },
-    visible: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.2 } },
-  };
-
-  const dropdownVariants = {
-    hidden: { opacity: 0, height: 0, transition: { duration: 0.2 } },
-    visible: { opacity: 1, height: 'auto', transition: { duration: 0.2 } },
-  };
-
-  const navItems = [
-    { name: 'Home', href: '/' },
-    { name: 'Auctions', href: '/auctions' },
-    { name: 'Mining', href: '/mining', icon: CurrencyDollarIcon },
-    {
-      name: 'NFT',
-      href: '/nft',
-      subItems: [
-        {
-          name: 'ETH',
-          subItems: [
-            { name: 'Element280', href: '/nft/ETH/Element280' },
-            { name: 'Element369', href: '/nft/ETH/Element369' },
-            { name: 'Stax', href: '/nft/ETH/Stax' },
-            { name: 'Ascendant', href: '/nft/ETH/Ascendant' },
-          ],
-        },
-        {
-          name: 'BASE',
-          subItems: [{ name: 'E280', href: '/nft/BASE/E280' }],
-        },
-      ],
-    },
-    { name: 'About', href: '/about' },
-  ];
-
-  return (
-    <nav className="nav bg-gray-800 text-white">
-      <div className="nav-container">
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.5 }}
-          className="nav-logo"
-        >
-          <Link href="/" className="nav-link">
-            TitanXUtils
-          </Link>
-        </motion.div>
-
-        <div className="hidden md:flex space-x-6 items-center">
-          {navItems.map((item) => (
-            <motion.div
-              key={item.name}
-              className="relative group"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <Link
-                href={item.href}
-                className={`nav-link flex items-center space-x-1 ${
-                  pathname === item.href ? 'text-orange-500' : 'text-gray-300 hover:text-orange-500'
-                }`}
-              >
-                {item.icon && <item.icon className="h-5 w-5" />}
-                <span>{item.name}</span>
-              </Link>
-              {item.subItems && (
-                <motion.div
-                  className="nav-dropdown opacity-0 group-hover:opacity-100 group-hover:mt-3 transition-all duration-200 pointer-events-none group-hover:pointer-events-auto bg-gray-700 text-white"
-                  variants={dropdownVariants}
-                  initial="hidden"
-                  animate="hidden"
-                  whileHover="visible"
-                >
-                  {item.subItems.map((subItem) => (
-                    <div key={subItem.name} className="py-1">
-                      <div className="nav-dropdown-item font-semibold">{subItem.name}</div>
-                      {subItem.subItems && (
-                        <div className="pl-4">
-                          {subItem.subItems.map((nestedItem) => (
-                            <Link
-                              key={nestedItem.name}
-                              href={nestedItem.href}
-                              className="nav-dropdown-item hover:text-orange-500"
-                            >
-                              {nestedItem.name}
-                            </Link>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </motion.div>
-              )}
-            </motion.div>
-          ))}
-          {/* Removed theme toggle button */}
-        </div>
-
-        <button
-          className="md:hidden p-2 focus:outline-none text-gray-300 hover:text-white"
-          onClick={() => setIsOpen(!isOpen)}
-        >
-          <motion.svg
-            className="w-6 h-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            animate={{ rotate: isOpen ? 90 : 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d={isOpen ? 'M6 18L18 6M6 6l12 12' : 'M4 6h16M4 12h16M4 18h16'}
-            />
-          </motion.svg>
-        </button>
-      </div>
-
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            variants={menuVariants}
-            initial="hidden"
-            animate="visible"
-            exit="hidden"
-            className="md:hidden mt-4 space-y-2 px-4"
-          >
-            {navItems.map((item) => (
-              <motion.div
-                key={item.name}
-                variants={itemVariants}
-                className="nav-dropdown-item"
-              >
-                {item.subItems ? (
-                  <>
-                    <div
-                      className="flex justify-between items-center cursor-pointer text-gray-300 hover:text-orange-500"
-                      onClick={() =>
-                        item.name === 'NFT' &&
-                        setIsNFTDropdownOpen(!isNFTDropdownOpen)
-                      }
-                    >
-                      <span>{item.name}</span>
-                      {item.name === 'NFT' && (
-                        <motion.svg
-                          className="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                          animate={{ rotate: isNFTDropdownOpen ? 180 : 0 }}
-                          transition={{ duration: 0.2 }}
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </motion.svg>
-                      )}
-                    </div>
-                    {item.name === 'NFT' && isNFTDropdownOpen && (
-                      <motion.div
-                        variants={dropdownVariants}
-                        initial="hidden"
-                        animate="visible"
-                        exit="hidden"
-                        className="pl-4 space-y-2"
-                      >
-                        {item.subItems.map((subItem) => (
-                          <div key={subItem.name}>
-                            <div className="py-2 text-gray-300 font-semibold">
-                              {subItem.name}
-                            </div>
-                            {subItem.subItems && (
-                              <div className="pl-4 space-y-2">
-                                {subItem.subItems.map((nestedItem) => (
-                                  <Link
-                                    key={nestedItem.name}
-                                    href={nestedItem.href}
-                                    className="nav-dropdown-item hover:text-orange-500"
-                                    onClick={() => setIsOpen(false)}
-                                  >
-                                    {nestedItem.name}
-                                  </Link>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </motion.div>
-                    )}
-                  </>
-                ) : (
-                  <Link
-                    href={item.href}
-                    className={`block flex items-center space-x-1 ${
-                      pathname === item.href ? 'text-orange-500' : 'text-gray-300 hover:text-orange-500'
-                    }`}
-                    onClick={() => setIsOpen(false)}
-                  >
-                    {item.icon && <item.icon className="h-5 w-5" />}
-                    <span>{item.name}</span>
-                  </Link>
-                )}
-              </motion.div>
-            ))}
-            {/* Removed theme toggle button */}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </nav>
-  );
-}
-
-export default Navbar;'use client';
-
 import { memo } from 'react';
 import { motion } from 'framer-motion';
 import config from '@/config.js';
@@ -1315,17 +886,14 @@ const rowVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
+const element369TierOrder = config.contractTiers.element369.tierOrder || [
+  { tierId: '3', name: 'Legendary' },
+  { tierId: '2', name: 'Rare' },
+  { tierId: '1', name: 'Common' },
+];
+
 function HolderTable({ holders, loading, totalTokens, rewardToken }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
-
-  const e280TierOrder = [
-    { tierId: '1', name: 'Common' },
-    { tierId: '2', name: 'Common Amped' },
-    { tierId: '3', name: 'Rare' },
-    { tierId: '4', name: 'Rare Amped' },
-    { tierId: '5', name: 'Legendary' },
-    { tierId: '6', name: 'Legendary Amped' },
-  ];
 
   if (!safeHolders.length) {
     if (loading) {
@@ -1337,10 +905,12 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
                 <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
                 <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
                 <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Flux Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">E280 Rewards</th>
                 <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
                 <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
-                {e280TierOrder.map(tier => (
+                {element369TierOrder.map(tier => (
                   <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                     {tier.name}
                   </th>
@@ -1362,7 +932,9 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
                   <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
-                  {e280TierOrder.map(tier => (
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
+                  {element369TierOrder.map(tier => (
                     <td key={tier.tierId} className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   ))}
                 </motion.tr>
@@ -1375,9 +947,9 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
     return <div className="text-body text-center py-4 w-full">No holders found.</div>;
   }
 
-  const tiers = config.contractTiers.e280;
+  const tiers = config.contractTiers.element369;
   if (!tiers) {
-    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for E280.</div>;
+    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for Element369.</div>;
   }
 
   return (
@@ -1394,10 +966,12 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
             <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
             <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
             <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
+            <th className="reward-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
+            <th className="reward-cell w-[80px] md:w-[120px]">Flux Rewards</th>
+            <th className="reward-cell w-[80px] md:w-[120px]">E280 Rewards</th>
             <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
             <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
-            {e280TierOrder.map(tier => (
+            {element369TierOrder.map(tier => (
               <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                 {tier.name}
               </th>
@@ -1427,18 +1001,24 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
                 </a>
               </td>
               <td className="table-cell">{holder.total || 0}</td>
-              <td className="table-cell">
-                {(holder.claimableRewards || 0).toFixed(2).toLocaleString()}
+              <td className="reward-cell">
+                {(holder.infernoRewards || 0).toLocaleString()}
+              </td>
+              <td className="reward-cell">
+                {(holder.fluxRewards || 0).toLocaleString()}
+              </td>
+              <td className="reward-cell">
+                {(holder.e280Rewards || 0).toLocaleString()}
               </td>
               <td className="table-cell">
-                {typeof holder.percentage === 'number' ? holder.percentage.toFixed(2) + '%' : '-'}
+                {(holder.percentage || 0).toFixed(2)}%
               </td>
               <td className="table-cell">
-                {typeof holder.displayMultiplierSum === 'number' ? holder.displayMultiplierSum.toFixed(2) : '-'}
+                {(holder.multiplierSum || 0).toFixed(2)}
               </td>
-              {e280TierOrder.map(tier => (
+              {element369TierOrder.map(tier => (
                 <td key={tier.tierId} className="table-cell">
-                  {holder.tiers?.[Number(tier.tierId) - 1] || 0}
+                  {Array.isArray(holder.tiers) ? holder.tiers[Number(tier.tierId) - 1] || 0 : 0}
                 </td>
               ))}
             </motion.tr>
@@ -1605,14 +1185,17 @@ const rowVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-const element369TierOrder = config.contractTiers.element369.tierOrder || [
-  { tierId: '3', name: 'Legendary' },
-  { tierId: '2', name: 'Rare' },
-  { tierId: '1', name: 'Common' },
-];
-
 function HolderTable({ holders, loading, totalTokens, rewardToken }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
+
+  const e280TierOrder = [
+    { tierId: '1', name: 'Common' },
+    { tierId: '2', name: 'Common Amped' },
+    { tierId: '3', name: 'Rare' },
+    { tierId: '4', name: 'Rare Amped' },
+    { tierId: '5', name: 'Legendary' },
+    { tierId: '6', name: 'Legendary Amped' },
+  ];
 
   if (!safeHolders.length) {
     if (loading) {
@@ -1624,12 +1207,10 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
                 <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
                 <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
                 <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
-                <th className="table-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
-                <th className="table-cell w-[80px] md:w-[120px]">Flux Rewards</th>
-                <th className="table-cell w-[80px] md:w-[120px]">E280 Rewards</th>
+                <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
                 <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
                 <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
-                {element369TierOrder.map(tier => (
+                {e280TierOrder.map(tier => (
                   <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                     {tier.name}
                   </th>
@@ -1651,9 +1232,7 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
                   <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
-                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
-                  <td className="table-cell"><div className="table-pulse-placeholder"></div></td>
-                  {element369TierOrder.map(tier => (
+                  {e280TierOrder.map(tier => (
                     <td key={tier.tierId} className="table-cell"><div className="table-pulse-placeholder"></div></td>
                   ))}
                 </motion.tr>
@@ -1666,9 +1245,9 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
     return <div className="text-body text-center py-4 w-full">No holders found.</div>;
   }
 
-  const tiers = config.contractTiers.element369;
+  const tiers = config.contractTiers.e280;
   if (!tiers) {
-    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for Element369.</div>;
+    return <div className="text-error text-center py-4 w-full">Error: Contract tiers not found for E280.</div>;
   }
 
   return (
@@ -1685,12 +1264,10 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
             <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
             <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
             <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
-            <th className="reward-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
-            <th className="reward-cell w-[80px] md:w-[120px]">Flux Rewards</th>
-            <th className="reward-cell w-[80px] md:w-[120px]">E280 Rewards</th>
+            <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
             <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
             <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
-            {element369TierOrder.map(tier => (
+            {e280TierOrder.map(tier => (
               <th key={tier.tierId} className="table-cell w-[80px] md:w-[120px]">
                 {tier.name}
               </th>
@@ -1720,24 +1297,18 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
                 </a>
               </td>
               <td className="table-cell">{holder.total || 0}</td>
-              <td className="reward-cell">
-                {(holder.infernoRewards || 0).toLocaleString()}
-              </td>
-              <td className="reward-cell">
-                {(holder.fluxRewards || 0).toLocaleString()}
-              </td>
-              <td className="reward-cell">
-                {(holder.e280Rewards || 0).toLocaleString()}
+              <td className="table-cell">
+                {(holder.claimableRewards || 0).toFixed(2).toLocaleString()}
               </td>
               <td className="table-cell">
-                {(holder.percentage || 0).toFixed(2)}%
+                {typeof holder.percentage === 'number' ? holder.percentage.toFixed(2) + '%' : '-'}
               </td>
               <td className="table-cell">
-                {(holder.multiplierSum || 0).toFixed(2)}
+                {typeof holder.displayMultiplierSum === 'number' ? holder.displayMultiplierSum.toFixed(2) : '-'}
               </td>
-              {element369TierOrder.map(tier => (
+              {e280TierOrder.map(tier => (
                 <td key={tier.tierId} className="table-cell">
-                  {Array.isArray(holder.tiers) ? holder.tiers[Number(tier.tierId) - 1] || 0 : 0}
+                  {holder.tiers?.[Number(tier.tierId) - 1] || 0}
                 </td>
               ))}
             </motion.tr>
@@ -1944,42 +1515,151 @@ function HolderTable({ holders, loading, totalTokens, rewardToken }) {
   );
 }
 
-export default memo(HolderTable);// components/HolderTable/index.js
-'use client';
+export default memo(HolderTable);'use client';
 
-import Element280 from './Element280';
-import Element369 from './Element369';
-import Stax from './Stax';
-import Ascendant from './Ascendant';
-import E280 from './E280';
+import { motion } from 'framer-motion';
+import dynamic from 'next/dynamic';
+import config from '@/config.js';
 
-const HolderTable = ({ chain, contract, holders, totalTokens, totalShares, rewardToken, totalBurned }) => {
-  const components = {
-    element280: Element280,
-    element369: Element369,
-    stax: Stax,
-    ascendant: Ascendant,
-    e280: E280,
-  };
+// Loading components
+const Element280Loading = () => <div className="text-body">Loading Element280 data...</div>;
+Element280Loading.displayName = 'Element280Loading';
 
-  const TableComponent = components[contract];
-  if (!TableComponent) {
-    return <div>Invalid contract: {contract}</div>;
-  }
+const Element369Loading = () => <div className="text-body">Loading Element369 data...</div>;
+Element369Loading.displayName = 'Element369Loading';
 
-  return (
-    <TableComponent
-      chain={chain}
-      holders={holders}
-      totalTokens={totalTokens}
-      totalShares={totalShares}
-      rewardToken={rewardToken}
-      totalBurned={totalBurned}
-    />
-  );
+const StaxNFTLoading = () => <div className="text-body">Loading Stax data...</div>;
+StaxNFTLoading.displayName = 'StaxNFTLoading';
+
+const AscendantNFTLoading = () => <div className="text-body">Loading Ascendant data...</div>;
+AscendantNFTLoading.displayName = 'AscendantNFTLoading';
+
+const E280Loading = () => <div className="text-body">Loading E280 data...</div>;
+E280Loading.displayName = 'E280Loading';
+
+// Fallback components
+const Element280Fallback = () => <div className="text-error">Error loading data for Element280</div>;
+Element280Fallback.displayName = 'Element280ErrorFallback';
+
+const Element369Fallback = () => <div className="text-error">Error loading data for Element369</div>;
+Element369Fallback.displayName = 'Element369ErrorFallback';
+
+const StaxNFTFallback = () => <div className="text-error">Error loading data for Stax</div>;
+StaxNFTFallback.displayName = 'StaxNFTErrorFallback';
+
+const AscendantNFTFallback = () => <div className="text-error">Error loading data for Ascendant</div>;
+AscendantNFTFallback.displayName = 'AscendantNFTErrorFallback';
+
+const E280Fallback = () => <div className="text-error">Error loading data for E280</div>;
+E280Fallback.displayName = 'E280ErrorFallback';
+
+const holderTableComponents = {
+  element280: dynamic(
+    () => import('./HolderTable/Element280').catch((err) => {
+      console.error('Failed to load Element280 HolderTable:', err);
+      return { default: Element280Fallback };
+    }),
+    { ssr: false, loading: Element280Loading }
+  ),
+  element369: dynamic(
+    () => import('./HolderTable/Element369').catch((err) => {
+      console.error('Failed to load Element369 HolderTable:', err);
+      return { default: Element369Fallback };
+    }),
+    { ssr: false, loading: Element369Loading }
+  ),
+  stax: dynamic(
+    () => import('./HolderTable/Stax').catch((err) => {
+      console.error('Failed to load Stax HolderTable:', err);
+      return { default: StaxNFTFallback };
+    }),
+    { ssr: false, loading: StaxNFTLoading }
+  ),
+  ascendantNFT: dynamic(
+    () => import('./HolderTable/Ascendant').catch((err) => {
+      console.error('Failed to load Ascendant HolderTable:', err);
+      return { default: AscendantNFTFallback };
+    }),
+    { ssr: false, loading: AscendantNFTLoading }
+  ),
+  e280: dynamic(
+    () => import('./HolderTable/E280').catch((err) => {
+      console.error('Failed to load E280 HolderTable:', err);
+      return { default: E280Fallback };
+    }),
+    { ssr: false, loading: E280Loading }
+  ),
 };
 
-export default HolderTable;// config.js
+Object.keys(holderTableComponents).forEach((key) => {
+  holderTableComponents[key].displayName = `${key}HolderTable`;
+});
+
+export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick }) {
+  const modalVariants = {
+    hidden: { opacity: 0, y: -50 },
+    visible: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -50 },
+  };
+
+  const collections = [
+    { apiKey: 'element280', name: 'Element280' },
+    { apiKey: 'element369', name: 'Element369' },
+    { apiKey: 'stax', name: 'Stax' },
+    { apiKey: 'ascendantNFT', name: 'Ascendant' },
+    { apiKey: 'e280', name: 'E280' },
+  ];
+
+  return (
+    <div className="modal-overlay" onClick={handleBackgroundClick}>
+      <motion.div
+        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700"
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="subtitle">
+            NFT Ownership for {searchAddress.slice(0, 6)}...{searchAddress.slice(-4)}
+          </h2>
+          <button onClick={closeModal} className="text-gray-300 hover:text-gray-100 text-2xl">
+            ×
+          </button>
+        </div>
+
+        <div className="space-y-section">
+          {collections.map(({ apiKey, name }) => {
+            const data = searchResult[apiKey];
+            const HolderTable = holderTableComponents[apiKey] || (() => <div>Holder table not found for {apiKey}</div>);
+            return (
+              <div key={apiKey} className="border-b border-gray-700 pb-4">
+                <h3 className="subtitle mb-2">{name}</h3>
+                {data === null ? (
+                  <p className="text-body">No NFTs owned in this collection.</p>
+                ) : data?.error ? (
+                  <p className="text-error">Error: {data.error}</p>
+                ) : data?.message ? (
+                  <p className="text-body">{data.message}</p>
+                ) : (
+                  <HolderTable
+                    holders={[data]}
+                    contract={apiKey}
+                    loading={false}
+                    totalTokens={data.totalTokens || 0}
+                    totalShares={data.totalShares}
+                    rewardToken={data.rewardToken || config.contractDetails[apiKey]?.rewardToken}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </motion.div>
+    </div>
+  );
+}// config.js
 import element280NftStatus from './element280_nft_status.json' assert { type: 'json' };
 import element280MainAbi from './abi/element280.json' assert { type: 'json' };
 import element280VaultAbi from './abi/element280Vault.json' assert { type: 'json' };
@@ -2400,357 +2080,6 @@ export default function RootLayout({ children }) {
         </NFTLayout>
       </body>
     </html>
-  );
-}'use client';
-
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import Link from 'next/link';
-import nextDynamic from 'next/dynamic';
-import config from '@/config.js';
-import { useNFTStore } from '@/app/store';
-
-// Dynamically import SearchResultsModal to ensure it's only loaded client-side
-const SearchResultsModal = nextDynamic(() => import('@/components/SearchResultsModal'), { ssr: false });
-
-export default function NFTLayout({ children }) {
-  const [selectedChain, setSelectedChain] = useState(null);
-  const [showE280Message, setShowE280Message] = useState(false);
-  const [searchAddress, setSearchAddress] = useState('');
-  const [searchResults, setSearchResults] = useState({});
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isClient, setIsClient] = useState(false);
-
-  // Call useNFTStore unconditionally
-  const store = useNFTStore();
-  // Use conditional logic for accessing store methods
-  const getCache = isClient ? store.getCache : () => null;
-  const setCache = isClient ? store.setCache : () => {};
-  const getState = isClient ? store.getState : () => ({ cache: {}, clearCache: () => {} });
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
-  const chains = [
-    { name: 'ETH', id: 'eth' },
-    { name: 'BASE', id: 'base' },
-  ];
-
-  const ethNFTs = [
-    { name: 'Element280', href: '/nft/ETH/Element280', apiKey: 'element280' },
-    { name: 'Element369', href: '/nft/ETH/Element369', apiKey: 'element369' },
-    { name: 'Stax', href: '/nft/ETH/Stax', apiKey: 'stax' },
-    { name: 'Ascendant', href: '/nft/ETH/Ascendant', apiKey: 'ascendant' },
-  ];
-
-  const baseNFTs = [
-    { name: 'E280', href: null, apiKey: 'e280' },
-  ];
-
-  const allNFTs = Object.keys(config.contractDetails).map((key) => ({
-    name: config.contractDetails[key].name,
-    apiKey: key,
-    href:
-      key === 'e280'
-        ? null
-        : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${config.contractDetails[key].name.replace(/\s+/g, '')}`,
-  }));
-
-  const fetchCollectionData = async (apiKey, apiEndpoint, pageSize) => {
-    console.log(`[NFTLayout] Fetching data for ${apiKey} from ${apiEndpoint}`);
-    try {
-      if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
-        console.log(`[NFTLayout] ${apiKey} is disabled`);
-        return { error: `${apiKey} is not available` };
-      }
-
-      let endpoint = apiEndpoint;
-      if (!endpoint || !endpoint.startsWith('http')) {
-        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
-        endpoint = `${baseUrl}${apiEndpoint}`;
-        console.log(`[NFTLayout] Adjusted endpoint: ${endpoint}`);
-      }
-
-      let allHolders = [];
-      let totalTokens = 0;
-      let totalShares = 0;
-      let summary = {};
-      let page = 0;
-      let totalPages = Infinity;
-
-      while (page < totalPages) {
-        let attempts = 0;
-        const maxAttempts = config.alchemy.maxRetries || 3;
-        let success = false;
-
-        while (attempts < maxAttempts && !success) {
-          try {
-            const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
-            console.log(`[NFTLayout] Attempt ${attempts + 1} fetching ${url}`);
-            const res = await fetch(url, {
-              cache: 'force-cache',
-              signal: AbortSignal.timeout(config.alchemy.timeoutMs || 30000),
-            });
-            if (!res.ok) {
-              const errorText = await res.text();
-              throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
-            }
-
-            const json = await res.json();
-            if (json.error) {
-              console.log(`[NFTLayout] API error for ${apiKey}: ${json.error}`);
-              return { error: json.error };
-            }
-            if (!json.holders || !Array.isArray(json.holders)) {
-              throw new Error(`Invalid holders data for ${url}`);
-            }
-
-            allHolders = allHolders.concat(json.holders);
-            totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
-            totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
-            summary = json.summary || summary;
-            totalPages = json.totalPages || 1;
-            page++;
-            success = true;
-            console.log(`[NFTLayout] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
-          } catch (err) {
-            attempts++;
-            console.error(`[NFTLayout] Fetch attempt ${attempts} failed for ${apiKey}: ${err.message}`);
-            if (attempts >= maxAttempts) {
-              throw new Error(`Failed to fetch page ${page}: ${err.message}`);
-            }
-            await new Promise((resolve) => setTimeout(resolve, (config.alchemy.batchDelayMs || 1000) * attempts));
-          }
-        }
-      }
-
-      const data = {
-        holders: allHolders,
-        totalTokens,
-        totalShares,
-        summary,
-      };
-      if (isClient) {
-        console.log(`[NFTLayout] Setting cache for ${apiKey}: ${allHolders.length} holders`);
-        setCache(apiKey, data);
-      }
-      return data;
-    } catch (error) {
-      console.error(`[NFTLayout] Error fetching ${apiKey}: ${error.message}`);
-      return { error: error.message };
-    }
-  };
-
-  const handleSearch = async () => {
-    console.log('[NFTLayout] handleSearch called with address:', searchAddress);
-    if (!searchAddress || !/^0x[a-fA-F0-9]{40}$/.test(searchAddress)) {
-      setError('Please enter a valid Ethereum address (e.g., 0x...)');
-      setSearchResults({});
-      return;
-    }
-
-    setSearchLoading(true);
-    setError(null);
-    setSearchResults({});
-
-    try {
-      const searchResults = {};
-      const lowerSearchAddress = searchAddress.toLowerCase();
-
-      for (const { apiKey } of allNFTs) {
-        if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
-          searchResults[apiKey] = { error: `${apiKey} is not available` };
-          console.log(`[NFTLayout] Skipping disabled contract ${apiKey}`);
-          continue;
-        }
-
-        let data = isClient ? getCache(apiKey) : null;
-        console.log(`[NFTLayout] Cache check for ${apiKey}: ${data ? 'hit' : 'miss'}`);
-        if (!data) {
-          const contractConfig = config.contractDetails[apiKey] || {};
-          data = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
-        }
-
-        if (data.error) {
-          searchResults[apiKey] = { error: data.error };
-        } else {
-          const holder = data.holders.find(
-            (h) => h && h.wallet && h.wallet.toLowerCase() === lowerSearchAddress
-          );
-          searchResults[apiKey] = holder
-            ? {
-                ...holder,
-                totalShares: apiKey === 'ascendant' ? data.totalShares : undefined,
-                totalTokens: data.totalTokens,
-                rewardToken: config.contractDetails[apiKey]?.rewardToken,
-              }
-            : { error: 'No holdings found for this address' };
-          console.log(`[NFTLayout] ${apiKey} search result:`, searchResults[apiKey]);
-        }
-      }
-
-      setSearchResults(searchResults);
-      setIsModalOpen(true);
-    } catch (err) {
-      console.error('[NFTLayout] Search error:', err.message, err.stack);
-      setError(`Search failed: ${err.message}`);
-    } finally {
-      setSearchLoading(false);
-    }
-  };
-
-  const handleChainSelect = (chainId) => {
-    console.log('[NFTLayout] Chain selected:', chainId);
-    setShowE280Message(false);
-    setSelectedChain(chainId === selectedChain ? null : chainId);
-  };
-
-  const handleE280Click = () => {
-    console.log('[NFTLayout] E280 button clicked, selectedChain:', selectedChain);
-    if (selectedChain === 'base') {
-      setShowE280Message(true);
-    }
-  };
-
-  const handleCollectionClick = (name, href) => {
-    console.log(`[NFTLayout] Collection button clicked: ${name}, href: ${href}`);
-    setShowE280Message(false);
-  };
-
-  const handleClearCache = () => {
-    try {
-      if (isClient) {
-        console.log('[NFTLayout] Before clear cache:', getState().cache);
-        getState().clearCache();
-        console.log('[NFTLayout] After clear cache:', getState().cache);
-        setSearchResults({});
-        setError('Cache cleared. Please reload or search again to repopulate cache.');
-      }
-    } catch (err) {
-      console.error('[NFTLayout] Clear cache error:', err.message, err.stack);
-      setError('Failed to clear cache: ' + err.message);
-    }
-  };
-
-  if (!isClient) {
-    return (
-      <div className="flex-1 p-6 flex flex-col items-center bg-gray-900 min-h-screen">
-        <h1 className="title mb-8">TitanX NFT Protocols</h1>
-        <p>Loading...</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 p-6 flex flex-col items-center bg-gray-900 min-h-screen">
-      <h1 className="title mb-8">TitanX NFT Protocols</h1>
-
-      <div className="w-full max-w-2xl mb-6">
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            type="text"
-            value={searchAddress}
-            onChange={(e) => setSearchAddress(e.target.value)}
-            placeholder="Search by wallet address (e.g., 0x...)"
-            className="search-input"
-            disabled={searchLoading}
-          />
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={handleSearch}
-            disabled={searchLoading}
-            className={`btn btn-primary ${searchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            {searchLoading ? 'Searching...' : 'Search'}
-          </motion.button>
-        </div>
-        {error && <p className="text-error mt-2">{error}</p>}
-      </div>
-
-      <div className="flex space-x-4 mb-6">
-        {chains.map((chain) => (
-          <motion.button
-            key={chain.id}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => handleChainSelect(chain.id)}
-            className={`btn btn-secondary ${
-              selectedChain === chain.id ? 'bg-blue-500 text-gray-100' : ''
-            }`}
-          >
-            {chain.name}
-          </motion.button>
-        ))}
-      </div>
-
-      {selectedChain === 'eth' && (
-        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl">
-          {ethNFTs.map((nft) => (
-            <Link key={nft.name} href={nft.href} className="flex-1">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => handleCollectionClick(nft.name, nft.href)}
-                className="btn btn-secondary w-full"
-              >
-                {nft.name}
-              </motion.button>
-            </Link>
-          ))}
-        </div>
-      )}
-      {selectedChain === 'base' && (
-        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl">
-          {baseNFTs.map((nft) =>
-            nft.href ? (
-              <Link key={nft.name} href={nft.href} className="flex-1">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => handleCollectionClick(nft.name, nft.href)}
-                  className="btn btn-secondary w-full"
-                >
-                  {nft.name}
-                </motion.button>
-              </Link>
-            ) : (
-              <motion.button
-                key={nft.name}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleE280Click}
-                className="btn btn-secondary flex-1 w-full"
-              >
-                {nft.name}
-              </motion.button>
-            )
-          )}
-        </div>
-      )}
-      {showE280Message && selectedChain === 'base' && (
-        <div className="mt-6 text-center text-gray-100">
-          <p className="text-body">Contract not yet deployed. Coming soon...</p>
-        </div>
-      )}
-
-      {isModalOpen && (
-        <SearchResultsModal
-          searchResult={searchResults}
-          searchAddress={searchAddress}
-          closeModal={() => setIsModalOpen(false)}
-          handleBackgroundClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}
-        />
-      )}
-
-      <button onClick={handleClearCache} className="mt-6 btn btn-secondary">
-        Clear Client Cache
-      </button>
-      <div className="w-full max-w-6xl mt-6">{children}</div>
-    </div>
   );
 }'use client';
 
