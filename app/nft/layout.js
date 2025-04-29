@@ -1,7 +1,7 @@
 // app/nft/layout.js
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import SearchResultsModal from '@/components/SearchResultsModal';
@@ -16,8 +16,6 @@ export default function NFTLayout({ children }) {
   const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCacheReady, setIsCacheReady] = useState(false);
-  const hasRun = useRef(false);
 
   const { getCache, setCache } = useNFTStore();
 
@@ -46,107 +44,87 @@ export default function NFTLayout({ children }) {
         : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${config.contractDetails[key].name.replace(/\s+/g, '')}`,
   }));
 
-  // Populate mock cache
-  useEffect(() => {
-    if (!hasRun.current) {
-      const mockData = {
-        element280: {
-          holders: [
-            {
-              wallet: '0x1234567890abcdef1234567890abcdef12345678',
-              rank: 1,
-              total: 5,
-              claimableRewards: 1000,
-              percentage: 2.5,
-              displayMultiplierSum: 60,
-              tiers: [2, 1, 1, 1, 0, 0],
-            },
-          ],
-          totalTokens: 7,
-          summary: { totalLive: 7, totalBurned: 0, totalRewardPool: 1500 },
-        },
-        element369: {
-          holders: [
-            {
-              wallet: '0x1234567890abcdef1234567890abcdef12345678',
-              rank: 1,
-              total: 3,
-              infernoRewards: 1.5,
-              fluxRewards: 2.0,
-              e280Rewards: 0.5,
-              percentage: 1.0,
-              multiplierSum: 30,
-              tiers: [1, 1, 1],
-            },
-          ],
-          totalTokens: 3,
-          summary: { totalLive: 3, totalBurned: 0, totalRewardPool: 4 },
-        },
-        stax: {
-          holders: [
-            {
-              wallet: '0x1234567890abcdef1234567890abcdef12345678',
-              rank: 1,
-              total: 1,
-              claimableRewards: 200,
-              percentage: 0.5,
-              multiplierSum: 100,
-              tiers: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            },
-          ],
-          totalTokens: 1,
-          summary: { totalLive: 1, totalBurned: 0, totalRewardPool: 200 },
-        },
-        ascendant: {
-          holders: [
-            {
-              wallet: '0xabcdef1234567890abcdef1234567890abcdef12',
-              rank: 1,
-              total: 4,
-              claimableRewards: 500,
-              shares: 400,
-              pendingDay8: 100,
-              pendingDay28: 200,
-              pendingDay90: 200,
-              tiers: [0, 0, 0, 0, 0, 0, 0, 4],
-            },
-          ],
-          totalTokens: 4,
-          totalShares: 400,
-          summary: { totalLive: 4, totalBurned: 0, totalRewardPool: 300 },
-        },
-        e280: {
-          holders: [],
-          totalTokens: 0,
-          message: 'E280 data not available yet',
-        },
-      };
-      Object.entries(mockData).forEach(([key, data]) => {
-        console.log(`[NFTLayout] Setting cache for ${key}: ${data.holders.length} holders`);
-        setCache(key, data);
-      });
-      setIsCacheReady(true);
-      hasRun.current = true;
-    }
-  }, [setCache]);
+  // Fetch data for a single collection
+  const fetchCollectionData = async (apiKey, apiEndpoint, pageSize) => {
+    console.log(`[NFTLayout] Fetching data for ${apiKey} from ${apiEndpoint}`);
+    try {
+      if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+        console.log(`[NFTLayout] ${apiKey} is disabled`);
+        return { error: `${apiKey} is not available` };
+      }
 
-  const waitForCache = async () => {
-    if (isCacheReady) return;
-    console.log('[NFTLayout] Waiting for cache to be ready...');
-    return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        const cacheStatus = allNFTs.map((nft) => {
-          const data = getCache(nft.apiKey);
-          return data && (nft.apiKey === 'e280' || data.holders?.length >= 0);
-        });
-        if (cacheStatus.every((status) => status)) {
-          console.log('[NFTLayout] Cache is ready');
-          setIsCacheReady(true);
-          clearInterval(interval);
-          resolve();
+      let endpoint = apiEndpoint;
+      if (!endpoint || !endpoint.startsWith('http')) {
+        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+        endpoint = `${baseUrl}${apiEndpoint}`;
+        console.log(`[NFTLayout] Adjusted endpoint: ${endpoint}`);
+      }
+
+      let allHolders = [];
+      let totalTokens = 0;
+      let totalShares = 0;
+      let summary = {};
+      let page = 0;
+      let totalPages = Infinity;
+
+      while (page < totalPages) {
+        let attempts = 0;
+        const maxAttempts = config.alchemy.maxRetries || 3;
+        let success = false;
+
+        while (attempts < maxAttempts && !success) {
+          try {
+            const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+            console.log(`[NFTLayout] Attempt ${attempts + 1} fetching ${url}`);
+            const res = await fetch(url, {
+              signal: AbortSignal.timeout(config.alchemy.timeoutMs || 30000),
+            });
+            if (!res.ok) {
+              const errorText = await res.text();
+              throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
+            }
+
+            const json = await res.json();
+            if (json.error) {
+              console.log(`[NFTLayout] API error for ${apiKey}: ${json.error}`);
+              return { error: json.error };
+            }
+            if (!json.holders || !Array.isArray(json.holders)) {
+              throw new Error(`Invalid holders data for ${url}`);
+            }
+
+            allHolders = allHolders.concat(json.holders);
+            totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+            totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+            summary = json.summary || summary;
+            totalPages = json.totalPages || 1;
+            page++;
+            success = true;
+            console.log(`[NFTLayout] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
+          } catch (err) {
+            attempts++;
+            console.log(`[NFTLayout] Fetch attempt ${attempts} failed for ${apiKey}: ${err.message}`);
+            if (attempts >= maxAttempts) {
+              throw new Error(`Failed to fetch page ${page}: ${err.message}`);
+            }
+            await new Promise((resolve) => setTimeout(resolve, (config.alchemy.batchDelayMs || 1000) * attempts));
+          }
         }
-      }, 1000);
-    });
+      }
+
+      const data = {
+        holders: allHolders,
+        totalTokens,
+        totalShares,
+        summary,
+      };
+      console.log(`[NFTLayout] Setting cache for ${apiKey}: ${allHolders.length} holders`);
+      setCache(apiKey, data);
+      return data;
+    } catch (error) {
+      console.error(`[NFTLayout] Error fetching ${apiKey}: ${error.message}`);
+      return { error: error.message };
+    }
   };
 
   const handleSearch = async () => {
@@ -162,16 +140,23 @@ export default function NFTLayout({ children }) {
     setSearchResults({});
 
     try {
-      await waitForCache();
-
       const searchResults = {};
       const lowerSearchAddress = searchAddress.toLowerCase();
-      allNFTs.forEach(({ apiKey }) => {
-        if (apiKey === 'e280') {
-          searchResults[apiKey] = { message: 'E280 data not available yet' };
-          return;
+
+      for (const { apiKey } of allNFTs) {
+        if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+          searchResults[apiKey] = { error: `${apiKey} is not available` };
+          console.log(`[NFTLayout] Skipping disabled contract ${apiKey}`);
+          continue;
         }
-        const data = getCache(apiKey);
+
+        let data = getCache(apiKey);
+        console.log(`[NFTLayout] Cache check for ${apiKey}: ${data ? 'hit' : 'miss'}`);
+        if (!data) {
+          const contractConfig = config.contractDetails[apiKey] || {};
+          data = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+        }
+
         if (data.error) {
           searchResults[apiKey] = { error: data.error };
         } else {
@@ -185,10 +170,10 @@ export default function NFTLayout({ children }) {
                 totalTokens: data.totalTokens,
                 rewardToken: config.contractDetails[apiKey]?.rewardToken,
               }
-            : null;
-          console.log(`[NFTLayout] ${apiKey} search result:`, searchResults[apiKey] || 'not found');
+            : { error: 'No holdings found for this address' };
+          console.log(`[NFTLayout] ${apiKey} search result:`, searchResults[apiKey]);
         }
-      });
+      }
 
       setSearchResults(searchResults);
       setIsModalOpen(true);
@@ -223,7 +208,6 @@ export default function NFTLayout({ children }) {
       console.log('[NFTLayout] Before clear cache:', useNFTStore.getState().cache);
       useNFTStore.getState().clearCache();
       console.log('[NFTLayout] After clear cache:', useNFTStore.getState().cache);
-      setIsCacheReady(false);
       setSearchResults({});
       setError('Cache cleared. Please reload or search again to repopulate cache.');
     } catch (err) {
@@ -257,9 +241,6 @@ export default function NFTLayout({ children }) {
           </motion.button>
         </div>
         {error && <p className="text-error mt-2">{error}</p>}
-        {!isCacheReady && (
-          <p className="text-body mt-2">Cache is loading, results will be available soon...</p>
-        )}
       </div>
 
       <div className="flex space-x-4 mb-6">
@@ -270,7 +251,7 @@ export default function NFTLayout({ children }) {
             whileTap={{ scale: 0.95 }}
             onClick={() => handleChainSelect(chain.id)}
             className={`btn btn-secondary ${
-              selectedChain === chain.id ? 'bg-blue-500 text-white' : ''
+              selectedChain === chain.id ? 'bg-blue-500 text-gray-100' : ''
             }`}
           >
             {chain.name}
@@ -323,8 +304,8 @@ export default function NFTLayout({ children }) {
         </div>
       )}
       {showE280Message && selectedChain === 'base' && (
-        <div className="mt-6 text-center text-white">
-          <p className="text-lg">Contract not yet deployed. Coming soon...</p>
+        <div className="mt-6 text-center text-gray-100">
+          <p className="text-body">Contract not yet deployed. Coming soon...</p>
         </div>
       )}
 

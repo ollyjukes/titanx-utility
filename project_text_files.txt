@@ -1,19 +1,21 @@
 -e 
 ---
 File: ./tailwind.config.js
+
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: [
-    './app/**/*.{js,jsx,ts,tsx,mdx}',
-    './components/**/*.{js,jsx,ts,tsx,mdx}',
-    './pages/**/*.{js,jsx,ts,tsx,mdx}',
+    './app/**/*.{js,ts,jsx,tsx}',
+    './components/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
     extend: {},
   },
   plugins: [],
-  darkMode: 'class', // Enable dark mode with 'class' strategy
-};-e 
+};
+
+-e 
 ---
 File: ./.env.local
 # Created by Vercel CLI
@@ -42,11 +44,10 @@ ESLINT_NO_DEV_ERRORS=true
 USE_ALCHEMY_FOR_OWNERS=true
 
 # In .env.local
-NEXT_NO_WORKER_THREADS=true-e 
+NEXT_NO_WORKER_THREADS=true
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3000-e 
 ---
 File: ./app/layout.js
-// app/layout.js
-
 import './global.css';
 import Navbar from '@/components/Navbar';
 import { Inter } from 'next/font/google';
@@ -60,7 +61,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" className="bg-gray-900 text-gray-100">
       <head>
         <title>TitanXUtils</title>
       </head>
@@ -73,12 +74,9 @@ export default function RootLayout({ children }) {
       </body>
     </html>
   );
-}
--e 
+}-e 
 ---
 File: ./app/page.js
-
-// app/page.js
 'use client';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -92,7 +90,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-gray-100">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
         <AnimatePresence>
           {isLoaded && (
@@ -106,26 +104,26 @@ export default function Home() {
               <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight">
                 Welcome to TitanXUtils
               </h1>
-              <p className="mt-4 text-lg sm:text-xl text-gray-300">
+              <p className="mt-4 text-lg sm:text-xl text-body">
                 Your gateway to exploring the TitanX ecosystem. Dive into NFT protocols, auctions, mining, and more.
               </p>
               <div className="mt-8 flex flex-col sm:flex-row justify-center gap-4">
                 <motion.div
-                  className="inline-block bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-orange-600 transition-colors duration-200"
+                  className="inline-block bg-orange-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-orange-600 transition-colors duration-200"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Link href="/nft">NFT Protocols</Link>
                 </motion.div>
                 <motion.div
-                  className="inline-block bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-blue-600 transition-colors duration-200"
+                  className="inline-block bg-blue-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-blue-600 transition-colors duration-200"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Link href="/auctions">TitanX Auctions</Link>
                 </motion.div>
                 <motion.div
-                  className="inline-block bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-green-600 transition-colors duration-200"
+                  className="inline-block bg-green-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-green-600 transition-colors duration-200"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
@@ -138,14 +136,12 @@ export default function Home() {
       </main>
     </div>
   );
-}
-  -e 
+}-e 
 ---
 File: ./app/nft/layout.js
-// app/nft/layout.js
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import SearchResultsModal from '@/components/SearchResultsModal';
@@ -160,8 +156,6 @@ export default function NFTLayout({ children }) {
   const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isCacheReady, setIsCacheReady] = useState(false);
-  const hasRun = useRef(false);
 
   const { getCache, setCache } = useNFTStore();
 
@@ -190,107 +184,87 @@ export default function NFTLayout({ children }) {
         : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${config.contractDetails[key].name.replace(/\s+/g, '')}`,
   }));
 
-  // Populate mock cache
-  useEffect(() => {
-    if (!hasRun.current) {
-      const mockData = {
-        element280: {
-          holders: [
-            {
-              wallet: '0x1234567890abcdef1234567890abcdef12345678',
-              rank: 1,
-              total: 5,
-              claimableRewards: 1000,
-              percentage: 2.5,
-              displayMultiplierSum: 60,
-              tiers: [2, 1, 1, 1, 0, 0],
-            },
-          ],
-          totalTokens: 7,
-          summary: { totalLive: 7, totalBurned: 0, totalRewardPool: 1500 },
-        },
-        element369: {
-          holders: [
-            {
-              wallet: '0x1234567890abcdef1234567890abcdef12345678',
-              rank: 1,
-              total: 3,
-              infernoRewards: 1.5,
-              fluxRewards: 2.0,
-              e280Rewards: 0.5,
-              percentage: 1.0,
-              multiplierSum: 30,
-              tiers: [1, 1, 1],
-            },
-          ],
-          totalTokens: 3,
-          summary: { totalLive: 3, totalBurned: 0, totalRewardPool: 4 },
-        },
-        stax: {
-          holders: [
-            {
-              wallet: '0x1234567890abcdef1234567890abcdef12345678',
-              rank: 1,
-              total: 1,
-              claimableRewards: 200,
-              percentage: 0.5,
-              multiplierSum: 100,
-              tiers: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            },
-          ],
-          totalTokens: 1,
-          summary: { totalLive: 1, totalBurned: 0, totalRewardPool: 200 },
-        },
-        ascendant: {
-          holders: [
-            {
-              wallet: '0xabcdef1234567890abcdef1234567890abcdef12',
-              rank: 1,
-              total: 4,
-              claimableRewards: 500,
-              shares: 400,
-              pendingDay8: 100,
-              pendingDay28: 200,
-              pendingDay90: 200,
-              tiers: [0, 0, 0, 0, 0, 0, 0, 4],
-            },
-          ],
-          totalTokens: 4,
-          totalShares: 400,
-          summary: { totalLive: 4, totalBurned: 0, totalRewardPool: 300 },
-        },
-        e280: {
-          holders: [],
-          totalTokens: 0,
-          message: 'E280 data not available yet',
-        },
-      };
-      Object.entries(mockData).forEach(([key, data]) => {
-        console.log(`[NFTLayout] Setting cache for ${key}: ${data.holders.length} holders`);
-        setCache(key, data);
-      });
-      setIsCacheReady(true);
-      hasRun.current = true;
-    }
-  }, [setCache]);
+  // Fetch data for a single collection
+  const fetchCollectionData = async (apiKey, apiEndpoint, pageSize) => {
+    console.log(`[NFTLayout] Fetching data for ${apiKey} from ${apiEndpoint}`);
+    try {
+      if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+        console.log(`[NFTLayout] ${apiKey} is disabled`);
+        return { error: `${apiKey} is not available` };
+      }
 
-  const waitForCache = async () => {
-    if (isCacheReady) return;
-    console.log('[NFTLayout] Waiting for cache to be ready...');
-    return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        const cacheStatus = allNFTs.map((nft) => {
-          const data = getCache(nft.apiKey);
-          return data && (nft.apiKey === 'e280' || data.holders?.length >= 0);
-        });
-        if (cacheStatus.every((status) => status)) {
-          console.log('[NFTLayout] Cache is ready');
-          setIsCacheReady(true);
-          clearInterval(interval);
-          resolve();
+      let endpoint = apiEndpoint;
+      if (!endpoint || !endpoint.startsWith('http')) {
+        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+        endpoint = `${baseUrl}/api/holders/${apiKey.toLowerCase()}`;
+        console.log(`[NFTLayout] Adjusted endpoint: ${endpoint}`);
+      }
+
+      let allHolders = [];
+      let totalTokens = 0;
+      let totalShares = 0;
+      let summary = {};
+      let page = 0;
+      let totalPages = Infinity;
+
+      while (page < totalPages) {
+        let attempts = 0;
+        const maxAttempts = config.alchemy.maxRetries || 3;
+        let success = false;
+
+        while (attempts < maxAttempts && !success) {
+          try {
+            const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+            console.log(`[NFTLayout] Attempt ${attempts + 1} fetching ${url}`);
+            const res = await fetch(url, {
+              signal: AbortSignal.timeout(config.alchemy.timeoutMs || 30000),
+            });
+            if (!res.ok) {
+              const errorText = await res.text();
+              throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
+            }
+
+            const json = await res.json();
+            if (json.error) {
+              console.log(`[NFTLayout] API error for ${apiKey}: ${json.error}`);
+              return { error: json.error };
+            }
+            if (!json.holders || !Array.isArray(json.holders)) {
+              throw new Error(`Invalid holders data for ${url}`);
+            }
+
+            allHolders = allHolders.concat(json.holders);
+            totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+            totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+            summary = json.summary || summary;
+            totalPages = json.totalPages || 1;
+            page++;
+            success = true;
+            console.log(`[NFTLayout] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
+          } catch (err) {
+            attempts++;
+            console.log(`[NFTLayout] Fetch attempt ${attempts} failed for ${apiKey}: ${err.message}`);
+            if (attempts >= maxAttempts) {
+              throw new Error(`Failed to fetch page ${page}: ${err.message}`);
+            }
+            await new Promise((resolve) => setTimeout(resolve, (config.alchemy.batchDelayMs || 1000) * attempts));
+          }
         }
-      }, 1000);
-    });
+      }
+
+      const data = {
+        holders: allHolders,
+        totalTokens,
+        totalShares,
+        summary,
+      };
+      console.log(`[NFTLayout] Setting cache for ${apiKey}: ${allHolders.length} holders`);
+      setCache(apiKey, data);
+      return data;
+    } catch (error) {
+      console.error(`[NFTLayout] Error fetching ${apiKey}: ${error.message}`);
+      return { error: error.message };
+    }
   };
 
   const handleSearch = async () => {
@@ -306,16 +280,23 @@ export default function NFTLayout({ children }) {
     setSearchResults({});
 
     try {
-      await waitForCache();
-
       const searchResults = {};
       const lowerSearchAddress = searchAddress.toLowerCase();
-      allNFTs.forEach(({ apiKey }) => {
-        if (apiKey === 'e280') {
-          searchResults[apiKey] = { message: 'E280 data not available yet' };
-          return;
+
+      for (const { apiKey } of allNFTs) {
+        if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+          searchResults[apiKey] = { error: `${apiKey} is not available` };
+          console.log(`[NFTLayout] Skipping disabled contract ${apiKey}`);
+          continue;
         }
-        const data = getCache(apiKey);
+
+        let data = getCache(apiKey);
+        console.log(`[NFTLayout] Cache check for ${apiKey}: ${data ? 'hit' : 'miss'}`);
+        if (!data) {
+          const contractConfig = config.contractDetails[apiKey] || {};
+          data = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+        }
+
         if (data.error) {
           searchResults[apiKey] = { error: data.error };
         } else {
@@ -329,10 +310,10 @@ export default function NFTLayout({ children }) {
                 totalTokens: data.totalTokens,
                 rewardToken: config.contractDetails[apiKey]?.rewardToken,
               }
-            : null;
-          console.log(`[NFTLayout] ${apiKey} search result:`, searchResults[apiKey] || 'not found');
+            : { error: 'No holdings found for this address' };
+          console.log(`[NFTLayout] ${apiKey} search result:`, searchResults[apiKey]);
         }
-      });
+      }
 
       setSearchResults(searchResults);
       setIsModalOpen(true);
@@ -367,7 +348,6 @@ export default function NFTLayout({ children }) {
       console.log('[NFTLayout] Before clear cache:', useNFTStore.getState().cache);
       useNFTStore.getState().clearCache();
       console.log('[NFTLayout] After clear cache:', useNFTStore.getState().cache);
-      setIsCacheReady(false);
       setSearchResults({});
       setError('Cache cleared. Please reload or search again to repopulate cache.');
     } catch (err) {
@@ -401,9 +381,6 @@ export default function NFTLayout({ children }) {
           </motion.button>
         </div>
         {error && <p className="text-error mt-2">{error}</p>}
-        {!isCacheReady && (
-          <p className="text-body mt-2">Cache is loading, results will be available soon...</p>
-        )}
       </div>
 
       <div className="flex space-x-4 mb-6">
@@ -414,7 +391,7 @@ export default function NFTLayout({ children }) {
             whileTap={{ scale: 0.95 }}
             onClick={() => handleChainSelect(chain.id)}
             className={`btn btn-secondary ${
-              selectedChain === chain.id ? 'bg-blue-500 text-white' : ''
+              selectedChain === chain.id ? 'bg-blue-500 text-gray-100' : ''
             }`}
           >
             {chain.name}
@@ -467,8 +444,8 @@ export default function NFTLayout({ children }) {
         </div>
       )}
       {showE280Message && selectedChain === 'base' && (
-        <div className="mt-6 text-center text-white">
-          <p className="text-lg">Contract not yet deployed. Coming soon...</p>
+        <div className="mt-6 text-center text-gray-100">
+          <p className="text-body">Contract not yet deployed. Coming soon...</p>
         </div>
       )}
 
@@ -493,34 +470,182 @@ export default function NFTLayout({ children }) {
 }-e 
 ---
 File: ./app/nft/page.js
-export default function NFTOverview() {
+import NFTSummary from '@/components/NFTSummary';
+import config from '@/config';
+
+// Fetch data for a single collection
+async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[NFTOverview] Fetching data for ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+      console.log(`[NFTOverview] ${apiKey} is disabled`);
+      return { error: `${apiKey} is not available` };
+    }
+
+    let endpoint = apiEndpoint;
+    if (!endpoint || !endpoint.startsWith('http')) {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+      endpoint = `${baseUrl}/api/holders/${apiKey.toLowerCase()}`;
+      console.log(`[NFTOverview] Adjusted endpoint: ${endpoint}`);
+    }
+
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalShares = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+
+    while (page < totalPages) {
+      const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[NFTOverview] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
+      }
+
+      const json = await res.json();
+      if (json.error) {
+        console.log(`[NFTOverview] API error for ${apiKey}: ${json.error}`);
+        return { error: json.error };
+      }
+      if (!json.holders || !Array.isArray(json.holders)) {
+        throw new Error(`Invalid holders data for ${url}`);
+      }
+
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[NFTOverview] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
+    }
+
+    return {
+      holders: allHolders,
+      totalTokens,
+      totalShares,
+      summary,
+    };
+  } catch (error) {
+    console.error(`[NFTOverview] Error fetching ${apiKey}: ${error.message}`);
+    return { error: error.message };
+  }
+}
+
+// Fetch data for all collections
+async function fetchCollectionsData() {
+  const collections = Object.keys(config.contractDetails).map((key) => ({
+    apiKey: key,
+    ...config.contractDetails[key],
+  }));
+
+  const collectionsData = await Promise.all(
+    collections.map(async ({ apiKey, apiEndpoint, pageSize }) => {
+      const data = await fetchCollectionData(apiKey, apiEndpoint, pageSize || 1000);
+      return { apiKey, data };
+    })
+  );
+
+  return collectionsData;
+}
+
+export const revalidate = 60; // Revalidate every 60 seconds
+
+export default async function NFTOverview() {
+  const collectionsData = await fetchCollectionsData();
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
-      <h1 className="text-4xl font-bold mb-6">NFT Collections</h1>
-      <p className="text-lg text-gray-300">Select a collection from the menu above to view details.</p>
+    <div className="min-h-screen bg-gray-900 text-gray-100 p-6 flex flex-col items-center">
+      <h1 className="title mb-6">NFT Collections</h1>
+      {collectionsData.some(({ data }) => data.error) ? (
+        <p className="text-error">Error fetching data: {collectionsData.find(({ data }) => data.error)?.data.error}</p>
+      ) : (
+        <NFTSummary collectionsData={collectionsData} />
+      )}
     </div>
   );
 }-e 
 ---
 File: ./app/nft/[chain]/[contract]/page.js
-// app/nft/[chain]/[contract]/page.js
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
 import { notFound } from 'next/navigation';
 import NFTPageWrapper from '@/components/NFTPageWrapper';
+import config from '@/config';
 import { useNFTStore } from '@/app/store';
-import config from '@/config.js';
 
-export default function NFTContractPage() {
-  const params = useParams();
-  const chain = params.chain; // e.g., 'ETH'
-  const contract = params.contract; // e.g., 'Stax'
-  const { getCache } = useNFTStore();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+// Fetch data for a single collection
+async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[NFTContractPage] Fetching data for ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+      console.log(`[NFTContractPage] ${apiKey} is disabled`);
+      return { error: `${apiKey} is not available` };
+    }
+
+    let endpoint = apiEndpoint;
+    if (!endpoint || !endpoint.startsWith('http')) {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+      endpoint = `${baseUrl}/api/holders/${apiKey.toLowerCase()}`;
+      console.log(`[NFTContractPage] Adjusted endpoint: ${endpoint}`);
+    }
+
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalShares = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+
+    while (page < totalPages) {
+      const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[NFTContractPage] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
+      }
+
+      const json = await res.json();
+      if (json.error) {
+        console.log(`[NFTContractPage] API error for ${apiKey}: ${json.error}`);
+        return { error: json.error };
+      }
+      if (!json.holders || !Array.isArray(json.holders)) {
+        throw new Error(`Invalid holders data for ${url}`);
+      }
+
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[NFTContractPage] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
+    }
+
+    const data = {
+      holders: allHolders,
+      totalTokens,
+      totalShares,
+      summary,
+    };
+
+    console.log(`[NFTContractPage] Setting cache for ${apiKey}: ${allHolders.length} holders`);
+    useNFTStore.getState().setCache(apiKey, data);
+
+    return data;
+  } catch (error) {
+    console.error(`[NFTContractPage] Error fetching ${apiKey}: ${error.message}`);
+    return { error: error.message };
+  }
+}
+
+export const revalidate = 60; // Revalidate every 60 seconds
+
+export default async function NFTContractPage({ params }) {
+  const { chain, contract } = params;
 
   // Map contract name to apiKey
   const apiKeyMap = {
@@ -532,40 +657,19 @@ export default function NFTContractPage() {
   };
   const apiKey = apiKeyMap[contract];
 
-  useEffect(() => {
-    console.log(`[NFTContractPage] Loading page for chain=${chain}, contract=${contract}, apiKey=${apiKey}`);
-    if (!config.supportedChains.includes(chain) || !apiKey) {
-      console.log(`[NFTContractPage] Not found: chain=${chain}, contract=${contract}`);
-      notFound();
-    }
-
-    const cachedData = getCache(apiKey);
-    if (cachedData) {
-      console.log(`[NFTContractPage] Cache hit for ${apiKey}: ${cachedData.holders.length} holders`);
-      setData(cachedData);
-      setLoading(false);
-    } else {
-      console.log(`[NFTContractPage] Cache miss for ${apiKey}`);
-      setError('No data available for this collection.');
-      setLoading(false);
-    }
-  }, [chain, contract, apiKey, getCache]);
-
-  if (loading) {
-    return (
-      <div className="container page-content">
-        <div className="loading-container">
-          <div className="spinner animate-spin"></div>
-          <p className="text-body">Loading {contract} data...</p>
-        </div>
-      </div>
-    );
+  if (!config.supportedChains.includes(chain) || !apiKey) {
+    console.log(`[NFTContractPage] Not found: chain=${chain}, contract=${contract}`);
+    notFound();
   }
 
-  if (error) {
+  const contractConfig = config.contractDetails[apiKey] || {};
+  const data = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+
+  if (data.error) {
     return (
       <div className="container page-content">
-        <p className="text-error">{error}</p>
+        <h1 className="title mb-6">{contract} Collection</h1>
+        <p className="text-error">{data.error}</p>
       </div>
     );
   }
@@ -594,11 +698,7 @@ html {
 }
 
 body {
-  @apply min-h-screen flex flex-col bg-gray-100 text-gray-900 antialiased;
-}
-
-.dark body {
-  @apply bg-gray-900 text-gray-100;
+  @apply min-h-screen flex flex-col bg-gray-900 text-gray-100 antialiased;
 }
 
 /* Component Classes */
@@ -614,39 +714,37 @@ body {
 
   /* Cards */
   .card {
-    @apply rounded-lg shadow-lg p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700;
+    @apply rounded-lg shadow-lg p-6 bg-gray-800 border border-gray-700;
   }
 
   /* Buttons */
   .btn {
     @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
-    /* Orange theme: @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500; */
   }
 
   .btn-primary {
-    @apply bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600;
-    /* Orange theme: @apply bg-orange-600 text-white hover:bg-orange-700 dark:bg-orange-500 dark:hover:bg-orange-600; */
+    @apply bg-blue-500 text-white hover:bg-blue-600;
   }
 
   .btn-secondary {
-    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600;
+    @apply bg-gray-700 text-gray-100 hover:bg-gray-600;
   }
 
   /* Typography */
   .title {
-    @apply text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100;
+    @apply text-3xl font-bold tracking-tight text-gray-100;
   }
 
   .subtitle {
-    @apply text-2xl font-semibold text-gray-900 dark:text-gray-100;
+    @apply text-2xl font-semibold text-gray-100;
   }
 
   .text-body {
-    @apply text-sm sm:text-base text-gray-600 dark:text-gray-300;
+    @apply text-sm sm:text-base text-gray-300;
   }
 
   .text-error {
-    @apply text-red-500 dark:text-red-400;
+    @apply text-red-400;
   }
 
   /* Tables */
@@ -655,33 +753,31 @@ body {
   }
 
   .table {
-    @apply w-full table-auto md:table-fixed bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100;
+    @apply w-full table-auto md:table-fixed bg-gray-800 text-gray-100;
   }
 
   .table-head {
     @apply bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base text-white;
-    /* Orange theme: @apply bg-gradient-to-r from-orange-600 to-orange-800 text-sm md:text-base text-white; */
   }
 
   .table-body {
-    @apply text-xs md:text-sm text-gray-600 dark:text-gray-300;
+    @apply text-xs md:text-sm text-gray-300;
   }
 
   .table-row {
-    @apply transition-colors border-b border-gray-200 dark:border-gray-700;
+    @apply transition-colors border-b border-gray-700;
   }
 
   .table-row-even {
-    @apply bg-white dark:bg-gray-800;
+    @apply bg-gray-800;
   }
 
   .table-row-odd {
-    @apply bg-gray-50 dark:bg-gray-900;
+    @apply bg-gray-900;
   }
 
   .table-row:hover {
     @apply bg-blue-900/30 shadow-sm;
-    /* Orange theme: @apply bg-orange-900/30 shadow-sm; */
   }
 
   .table-cell {
@@ -689,8 +785,7 @@ body {
   }
 
   .table-link {
-    @apply text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 hover:underline break-all;
-    /* Orange theme: @apply text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 hover:underline break-all; */
+    @apply text-blue-400 hover:text-blue-300 hover:underline break-all;
   }
 
   .table-pulse {
@@ -698,13 +793,12 @@ body {
   }
 
   .table-pulse-placeholder {
-    @apply h-4 bg-gray-300 dark:bg-gray-600 rounded w-3/4;
+    @apply h-4 bg-gray-600 rounded w-3/4;
   }
 
   /* Reward Columns (for Element369.js) */
   .reward-cell {
-    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-blue-600 dark:text-blue-400;
-    /* Orange theme: @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-orange-600 dark:text-orange-400; */
+    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-blue-400;
   }
 
   /* Chart Container */
@@ -718,17 +812,15 @@ body {
   }
 
   .spinner {
-    @apply h-6 w-6 sm:h-8 sm:w-8 text-blue-500 dark:text-blue-400;
-    /* Orange theme: @apply h-6 w-6 sm:h-8 sm:w-8 text-orange-500 dark:text-orange-400; */
+    @apply h-6 w-6 sm:h-8 sm:w-8 text-blue-400;
   }
 
   .progress-bar {
-    @apply w-64 bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-2;
+    @apply w-64 bg-gray-700 rounded-full h-2.5 mt-2;
   }
 
   .progress-fill {
-    @apply bg-blue-600 dark:bg-blue-400 h-2.5 rounded-full;
-    /* Orange theme: @apply bg-orange-600 dark:bg-orange-400 h-2.5 rounded-full; */
+    @apply bg-blue-400 h-2.5 rounded-full;
   }
 
   /* Navbar */
@@ -746,7 +838,6 @@ body {
 
   .nav-link {
     @apply text-gray-300 hover:text-blue-400 transition-colors duration-200;
-    /* Orange theme: @apply text-gray-300 hover:text-orange-400 transition-colors duration-200; */
   }
 
   .nav-dropdown {
@@ -766,13 +857,12 @@ body {
     @apply bg-gray-800 py-4 text-center text-gray-400;
   }
 
-  /* Search Input (New) */
+  /* Search Input */
   .search-input {
-    @apply w-full p-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
-    /* Orange theme: @apply w-full p-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500; */
+    @apply w-full p-2 bg-gray-700 text-gray-100 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
   }
 
-  /* Modal Overlay (New) */
+  /* Modal Overlay */
   .modal-overlay {
     @apply fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4;
   }
@@ -804,14 +894,13 @@ body {
 }-e 
 ---
 File: ./app/store.js
-// app/store.js
 'use client';
 import { create } from 'zustand';
 
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 export const useNFTStore = create((set, get) => ({
-  cache: {}, // { contractKey: { data: {...}, timestamp: number } }
+  cache: {},
   setCache: (contractKey, data) => {
     console.log(`[NFTStore] Setting cache for ${contractKey}: ${data.holders.length} holders`);
     set((state) => ({
@@ -841,18 +930,6 @@ export const useNFTStore = create((set, get) => ({
     console.log('[NFTStore] Clearing cache');
     set({ cache: {} });
   },
-}));
-
-export const useThemeStore = create((set) => ({
-  isDarkMode: true, // Default to dark mode
-  toggleTheme: () =>
-    set((state) => {
-      const isDarkMode = !state.isDarkMode;
-      if (typeof window !== 'undefined') {
-        document.documentElement.classList.toggle('dark', isDarkMode);
-      }
-      return { isDarkMode };
-    }),
 }));-e 
 ---
 File: ./app/about/page.js
@@ -8505,147 +8582,122 @@ The @solana/* packages require Node.js >=20.18.0, and running on 18.20.8 may cau
 
 cat app/api/holders/Ascendant/route.js app/api/holders/E280/route.js app/api/holders/Element369/route.js app/api/holders/Element280/route.js app/api/holders/Stax/route.js app/api/holders/Element280/progress/route.js app/api/holders/Element280/validate-burned/route.js  app/store.js config.js app/api/utils.js > ./routes.js
 
-cat components/NFTPage.js  components/NFTPageWrapper.js components/NFTSummary.js components/HolderTable/Ascendant.js components/HolderTable/Element369.js components/HolderTable/Element280.js components/HolderTable/E280.js components/HolderTable/Stax.js components/SearchResultsModal.js config.js app/store.js > ClientStuff.txt-e 
+cat components/NFTPage.js  components/NFTPageWrapper.js components/NFTSummary.js components/HolderTable/Ascendant.js components/HolderTable/Element369.js components/HolderTable/Element280.js components/HolderTable/E280.js components/HolderTable/Stax.js components/SearchResultsModal.js config.js app/store.js  app/page.js app/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js  > ClientStuff.txt-e 
 ---
 File: ./components/NFTSummary.js
-// components/NFTSummary.js
-'use client';
-import { motion } from 'framer-motion';
+import NFTSummary from '@/components/NFTSummary';
+import config from '@/config';
 
-const NFTSummary = ({ collectionsData }) => {
+// Fetch data for a single collection
+async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[NFTOverview] Fetching data for ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280') {
+      console.log(`[NFTOverview] ${apiKey} is disabled, returning empty data`);
+      return { holders: [], totalTokens: 0, error: 'Contract not deployed' };
+    }
+
+    if (!apiEndpoint || !apiEndpoint.startsWith('http')) {
+      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+      apiEndpoint = `${baseUrl}/api/holders/${apiKey}`;
+      console.log(`[NFTOverview] Adjusted apiEndpoint to ${apiEndpoint}`);
+    }
+
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalLockedAscendant = 0;
+    let toDistributeDay8 = 0;
+    let toDistributeDay28 = 0;
+    let toDistributeDay90 = 0;
+    let pendingRewards = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+
+    while (page < totalPages) {
+      const url = `${apiEndpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[NFTOverview] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
+      }
+
+      const json = await res.json();
+      if (json.error) {
+        console.log(`[NFTOverview] API error for ${apiKey}: ${json.error}`);
+        return { error: json.error };
+      }
+      if (!json.holders || !Array.isArray(json.holders)) {
+        throw new Error(`Invalid holders data for ${url}`);
+      }
+
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+      totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
+      toDistributeDay8 = json.toDistributeDay8 || toDistributeDay8;
+      toDistributeDay28 = json.toDistributeDay28 || toDistributeDay28;
+      toDistributeDay90 = json.toDistributeDay90 || toDistributeDay90;
+      pendingRewards = json.pendingRewards || pendingRewards;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[NFTOverview] Successfully fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
+    }
+
+    return {
+      holders: allHolders,
+      totalTokens,
+      totalLockedAscendant,
+      toDistributeDay8,
+      toDistributeDay28,
+      toDistributeDay90,
+      pendingRewards,
+      summary,
+    };
+  } catch (error) {
+    console.error(`[NFTOverview] Error fetching ${apiKey}: ${error.message}`);
+    return { error: error.message };
+  }
+}
+
+// Fetch data for all collections
+async function fetchCollectionsData() {
+  const collections = Object.keys(config.contractDetails).map((key) => ({
+    apiKey: key,
+    ...config.contractDetails[key],
+  }));
+
+  const collectionsData = await Promise.all(
+    collections.map(async ({ apiKey, apiEndpoint, pageSize, disabled }) => {
+      if (disabled) {
+        console.log(`[NFTOverview] ${apiKey} is disabled, returning empty data`);
+        return { apiKey, data: { holders: [], totalTokens: 0, error: 'Contract not deployed' } };
+      }
+      const data = await fetchCollectionData(apiKey, apiEndpoint, pageSize);
+      return { apiKey, data };
+    })
+  );
+
+  return collectionsData;
+}
+
+export const revalidate = 60; // Revalidate every 60 seconds
+
+export default async function NFTOverview() {
+  const collectionsData = await fetchCollectionsData();
+
   return (
-    <div className="w-full max-w-6xl mt-6 mb-4">
-      <h2 className="text-lg font-semibold text-white mb-3 text-center">NFT Collections</h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {collectionsData.map(({ apiKey, data }) => {
-          const isE280 = apiKey === 'e280';
-          if (isE280) {
-            return (
-              <div
-                key={apiKey}
-                className="bg-gray-800 rounded-md p-3 text-gray-300"
-              >
-                <h3 className="text-sm font-semibold text-orange-500 mb-1">E280 (Base)</h3>
-                <p className="text-xs">Not deployed yet</p>
-              </div>
-            );
-          }
-
-          const {
-            holders = [],
-            totalTokens = 0,
-            summary = {},
-            totalLockedAscendant = 0,
-            toDistributeDay8 = 0,
-            toDistributeDay28 = 0,
-            toDistributeDay90 = 0,
-            pendingRewards = 0,
-            error,
-          } = data;
-
-          const uniqueWallets = holders.length;
-          const liveNFTs = apiKey === 'element280' ? summary.totalLive || totalTokens : totalTokens;
-          const burnedNFTs = summary.totalBurned || 0;
-          const totalRewardPool = summary.totalRewardPool || 0;
-          const infernoRewards = holders.reduce((sum, h) => sum + (h.infernoRewards || 0), 0);
-          const fluxRewards = holders.reduce((sum, h) => sum + (h.fluxRewards || 0), 0);
-          const e280Rewards = holders.reduce((sum, h) => sum + (h.e280Rewards || 0), 0);
-          const claimableRewards = toDistributeDay8 + toDistributeDay28 + toDistributeDay90;
-
-          const collectionName = {
-            element280: 'Element 280',
-            element369: 'Element 369',
-            staxNFT: 'Stax',
-            ascendantNFT: 'Ascendant',
-          }[apiKey] || apiKey;
-
-          if (error) {
-            return (
-              <div
-                key={apiKey}
-                className="bg-gray-800 rounded-md p-3 text-gray-300"
-              >
-                <h3 className="text-sm font-semibold text-orange-500 mb-1">{collectionName}</h3>
-                <p className="text-xs">Error: {error}</p>
-              </div>
-            );
-          }
-
-          return (
-            <motion.div
-              key={apiKey}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
-              className="bg-gray-800 rounded-md p-3 text-gray-300 hover:shadow-md transition-shadow"
-            >
-              <h3 className="text-sm font-semibold text-orange-500 mb-1">{collectionName}</h3>
-              <div className="space-y-1 text-xs">
-                <p>
-                  <span className="font-medium">Wallets:</span> {uniqueWallets.toLocaleString()}
-                </p>
-                <p>
-                  <span className="font-medium">Live NFTs:</span> {liveNFTs.toLocaleString()}
-                </p>
-                {['element280', 'staxNFT'].includes(apiKey) && (
-                  <p>
-                    <span className="font-medium">Burned:</span> {burnedNFTs.toLocaleString()}
-                  </p>
-                )}
-                {apiKey === 'element280' && (
-                  <p>
-                    <span className="font-medium">Rewards:</span>{' '}
-                    {totalRewardPool.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ELMNT
-                  </p>
-                )}
-                {apiKey === 'element369' && (
-                  <>
-                    <p>
-                      <span className="font-medium">Inferno:</span>{' '}
-                      {infernoRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETH
-                    </p>
-                    <p>
-                      <span className="font-medium">Flux:</span>{' '}
-                      {fluxRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETH
-                    </p>
-                    <p>
-                      <span className="font-medium">E280:</span>{' '}
-                      {e280Rewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ETH
-                    </p>
-                  </>
-                )}
-                {apiKey === 'staxNFT' && (
-                  <p>
-                    <span className="font-medium">Rewards:</span>{' '}
-                    {holders.reduce((sum, h) => sum + (h.claimableRewards || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} X28
-                  </p>
-                )}
-                {apiKey === 'ascendantNFT' && (
-                  <>
-                    <p>
-                      <span className="font-medium">Locked:</span>{' '}
-                      {totalLockedAscendant.toLocaleString()}
-                    </p>
-                    <p>
-                      <span className="font-medium">Claimable:</span>{' '}
-                      {claimableRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DRAGONX
-                    </p>
-                    <p>
-                      <span className="font-medium">Pending:</span>{' '}
-                      {pendingRewards.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DRAGONX
-                    </p>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
+    <div className="min-h-screen bg-gray-900 text-gray-100 p-6 flex flex-col items-center">
+      <h1 className="title mb-6">NFT Collections</h1>
+      {collectionsData.some(({ data }) => data.error) ? (
+        <p className="text-error">Error fetching data: {collectionsData.find(({ data }) => data.error)?.data.error}</p>
+      ) : (
+        <NFTSummary collectionsData={collectionsData} />
+      )}
     </div>
   );
-};
-
-export default NFTSummary;-e 
+}-e 
 ---
 File: ./components/LoadingIndicator.js
 import { motion } from 'framer-motion';
@@ -8681,7 +8733,6 @@ export default function LoadingIndicator({ status, progress }) {
 }-e 
 ---
 File: ./components/NFTPage.js
-// components/NFTPage.js
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
@@ -9053,13 +9104,12 @@ export default function NFTPage({ chain, contract }) {
       {
         label: 'Live NFTs',
         data: data.tierDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(59, 130, 246, 0.6)', // Blue-500
-        /* Orange theme: backgroundColor: 'rgba(249, 115, 22, 0.6)', // Orange-500 */
+        backgroundColor: 'rgba(96, 165, 250, 0.6)', // text-blue-400
       },
       {
         label: 'Burned NFTs',
         data: data.burnedDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(239, 68, 68, 0.6)', // Red-500
+        backgroundColor: 'rgba(248, 113, 113, 0.6)', // text-red-400
       },
     ],
   } : null;
@@ -9224,7 +9274,6 @@ export default function NFTPage({ chain, contract }) {
 }-e 
 ---
 File: ./components/SearchResultsModal.js
-// components/SearchResultsModal.js
 'use client';
 
 import { motion } from 'framer-motion';
@@ -9232,19 +9281,19 @@ import dynamic from 'next/dynamic';
 import config from '@/config.js';
 
 // Loading components
-const Element280Loading = () => <div className="text-gray-400">Loading Element280 data...</div>;
+const Element280Loading = () => <div className="text-body">Loading Element280 data...</div>;
 Element280Loading.displayName = 'Element280Loading';
 
-const Element369Loading = () => <div className="text-gray-400">Loading Element369 data...</div>;
+const Element369Loading = () => <div className="text-body">Loading Element369 data...</div>;
 Element369Loading.displayName = 'Element369Loading';
 
-const StaxNFTLoading = () => <div className="text-gray-400">Loading Stax data...</div>;
+const StaxNFTLoading = () => <div className="text-body">Loading Stax data...</div>;
 StaxNFTLoading.displayName = 'StaxNFTLoading';
 
-const AscendantNFTLoading = () => <div className="text-gray-400">Loading Ascendant data...</div>;
+const AscendantNFTLoading = () => <div className="text-body">Loading Ascendant data...</div>;
 AscendantNFTLoading.displayName = 'AscendantNFTLoading';
 
-const E280Loading = () => <div className="text-gray-400">Loading E280 data...</div>;
+const E280Loading = () => <div className="text-body">Loading E280 data...</div>;
 E280Loading.displayName = 'E280Loading';
 
 // Fallback components
@@ -9263,69 +9312,46 @@ AscendantNFTFallback.displayName = 'AscendantNFTErrorFallback';
 const E280Fallback = () => <div className="text-error">Error loading data for E280</div>;
 E280Fallback.displayName = 'E280ErrorFallback';
 
-// Define holder table components for each contract
 const holderTableComponents = {
   element280: dynamic(
-    () =>
-      import('./HolderTable/Element280').catch((err) => {
-        console.error('Failed to load Element280 HolderTable:', err);
-        return { default: Element280Fallback };
-      }),
-    {
-      ssr: false,
-      loading: Element280Loading,
-    }
+    () => import('./HolderTable/Element280').catch((err) => {
+      console.error('Failed to load Element280 HolderTable:', err);
+      return { default: Element280Fallback };
+    }),
+    { ssr: false, loading: Element280Loading }
   ),
   element369: dynamic(
-    () =>
-      import('./HolderTable/Element369').catch((err) => {
-        console.error('Failed to load Element369 HolderTable:', err);
-        return { default: Element369Fallback };
-      }),
-    {
-      ssr: false,
-      loading: Element369Loading,
-    }
+    () => import('./HolderTable/Element369').catch((err) => {
+      console.error('Failed to load Element369 HolderTable:', err);
+      return { default: Element369Fallback };
+    }),
+    { ssr: false, loading: Element369Loading }
   ),
-  staxNFT: dynamic(
-    () =>
-      import('./HolderTable/Stax').catch((err) => {
-        console.error('Failed to load Stax HolderTable:', err);
-        return { default: StaxNFTFallback };
-      }),
-    {
-      ssr: false,
-      loading: StaxNFTLoading,
-    }
+  stax: dynamic(
+    () => import('./HolderTable/Stax').catch((err) => {
+      console.error('Failed to load Stax HolderTable:', err);
+      return { default: StaxNFTFallback };
+    }),
+    { ssr: false, loading: StaxNFTLoading }
   ),
   ascendantNFT: dynamic(
-    () =>
-      import('./HolderTable/Ascendant').catch((err) => {
-        console.error('Failed to load Ascendant HolderTable:', err);
-        return { default: AscendantNFTFallback };
-      }),
-    {
-      ssr: false,
-      loading: AscendantNFTLoading,
-    }
+    () => import('./HolderTable/Ascendant').catch((err) => {
+      console.error('Failed to load Ascendant HolderTable:', err);
+      return { default: AscendantNFTFallback };
+    }),
+    { ssr: false, loading: AscendantNFTLoading }
   ),
   e280: dynamic(
-    () =>
-      import('./HolderTable/E280').catch((err) => {
-        console.error('Failed to load E280 HolderTable:', err);
-        return { default: E280Fallback };
-      }),
-    {
-      ssr: false,
-      loading: E280Loading,
-    }
+    () => import('./HolderTable/E280').catch((err) => {
+      console.error('Failed to load E280 HolderTable:', err);
+      return { default: E280Fallback };
+    }),
+    { ssr: false, loading: E280Loading }
   ),
 };
 
-// Assign displayName to each dynamically imported component
 Object.keys(holderTableComponents).forEach((key) => {
-  const Component = holderTableComponents[key];
-  Component.displayName = `${key}HolderTable`;
+  holderTableComponents[key].displayName = `${key}HolderTable`;
 });
 
 export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick }) {
@@ -9338,18 +9364,15 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
   const collections = [
     { apiKey: 'element280', name: 'Element280' },
     { apiKey: 'element369', name: 'Element369' },
-    { apiKey: 'staxNFT', name: 'Stax' },
+    { apiKey: 'stax', name: 'Stax' },
     { apiKey: 'ascendantNFT', name: 'Ascendant' },
     { apiKey: 'e280', name: 'E280' },
   ];
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4"
-      onClick={handleBackgroundClick}
-    >
+    <div className="modal-overlay" onClick={handleBackgroundClick}>
       <motion.div
-        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700"
         variants={modalVariants}
         initial="hidden"
         animate="visible"
@@ -9360,7 +9383,7 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
           <h2 className="subtitle">
             NFT Ownership for {searchAddress.slice(0, 6)}...{searchAddress.slice(-4)}
           </h2>
-          <button onClick={closeModal} className="text-gray-400 hover:text-white text-2xl">
+          <button onClick={closeModal} className="text-gray-300 hover:text-gray-100 text-2xl">
             ×
           </button>
         </div>
@@ -9370,8 +9393,8 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
             const data = searchResult[apiKey];
             const HolderTable = holderTableComponents[apiKey] || (() => <div>Holder table not found for {apiKey}</div>);
             return (
-              <div key={apiKey} className="border-b border-gray-200 dark:border-gray-700 pb-4">
-                <h3 className="text-lg font-semibold mb-2">{name}</h3>
+              <div key={apiKey} className="border-b border-gray-700 pb-4">
+                <h3 className="subtitle mb-2">{name}</h3>
                 {data === null ? (
                   <p className="text-body">No NFTs owned in this collection.</p>
                 ) : data?.error ? (
@@ -9398,18 +9421,17 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
 }-e 
 ---
 File: ./components/NFTPageWrapper.js
-// components/NFTPageWrapper.js
 'use client';
 
 import dynamic from 'next/dynamic';
 import config from '@/config.js';
 
 // Loading components
-const Element280Loading = () => <div className="text-gray-400">Loading Element280 data...</div>;
-const Element369Loading = () => <div className="text-gray-400">Loading Element369 data...</div>;
-const StaxLoading = () => <div className="text-gray-400">Loading Stax data...</div>;
-const AscendantLoading = () => <div className="text-gray-400">Loading Ascendant data...</div>;
-const E280Loading = () => <div className="text-gray-400">Loading E280 data...</div>;
+const Element280Loading = () => <div className="text-body">Loading Element280 data...</div>;
+const Element369Loading = () => <div className="text-body">Loading Element369 data...</div>;
+const StaxLoading = () => <div className="text-body">Loading Stax data...</div>;
+const AscendantLoading = () => <div className="text-body">Loading Ascendant data...</div>;
+const E280Loading = () => <div className="text-body">Loading E280 data...</div>;
 
 // Fallback components
 const Element280Fallback = () => <div className="text-error">Error loading Element280 data</div>;
@@ -9475,35 +9497,17 @@ export default function NFTPageWrapper({ chain, contract, data, rewardToken }) {
 }-e 
 ---
 File: ./components/Navbar.jsx
-
-// components/Navbar.jsx
-'use client';
-import { useThemeStore } from '@/app/store';
-
-export default function Navbar() {
-  const { isDarkMode } = useThemeStore();
-  return (
-    <nav>
-      <a href="/">TitanXUtils</a>
-      <p>{isDarkMode ? 'Dark' : 'Light'}</p>
-    </nav>
-  );
-}
-/*
-// components/Navbar.jsx
 'use client';
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useThemeStore } from '@/app/store';
-import { SunIcon, MoonIcon, CurrencyDollarIcon } from '@heroicons/react/24/solid';
+import { CurrencyDollarIcon } from '@heroicons/react/24/solid';
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isNFTDropdownOpen, setIsNFTDropdownOpen] = useState(false);
-  const { isDarkMode, toggleTheme } = useThemeStore();
   const pathname = usePathname();
 
   const menuVariants = {
@@ -9552,7 +9556,7 @@ function Navbar() {
   ];
 
   return (
-    <nav className="nav">
+    <nav className="nav bg-gray-800 text-white">
       <div className="nav-container">
         <motion.div
           initial={{ opacity: 0, x: -20 }}
@@ -9576,7 +9580,7 @@ function Navbar() {
               <Link
                 href={item.href}
                 className={`nav-link flex items-center space-x-1 ${
-                  pathname === item.href ? 'text-orange-500' : ''
+                  pathname === item.href ? 'text-orange-500' : 'text-gray-300 hover:text-orange-500'
                 }`}
               >
                 {item.icon && <item.icon className="h-5 w-5" />}
@@ -9584,7 +9588,7 @@ function Navbar() {
               </Link>
               {item.subItems && (
                 <motion.div
-                  className="nav-dropdown opacity-0 group-hover:opacity-100 group-hover:mt-3 transition-all duration-200 pointer-events-none group-hover:pointer-events-auto"
+                  className="nav-dropdown opacity-0 group-hover:opacity-100 group-hover:mt-3 transition-all duration-200 pointer-events-none group-hover:pointer-events-auto bg-gray-700 text-white"
                   variants={dropdownVariants}
                   initial="hidden"
                   animate="hidden"
@@ -9599,7 +9603,7 @@ function Navbar() {
                             <Link
                               key={nestedItem.name}
                               href={nestedItem.href}
-                              className="nav-dropdown-item"
+                              className="nav-dropdown-item hover:text-orange-500"
                             >
                               {nestedItem.name}
                             </Link>
@@ -9612,15 +9616,7 @@ function Navbar() {
               )}
             </motion.div>
           ))}
-          <motion.button
-            onClick={toggleTheme}
-            className="nav-toggle"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            aria-label="Toggle theme"
-          >
-            {isDarkMode ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
-          </motion.button>
+          {/* Removed theme toggle button */}
         </div>
 
         <button
@@ -9663,7 +9659,7 @@ function Navbar() {
                 {item.subItems ? (
                   <>
                     <div
-                      className="flex justify-between items-center cursor-pointer"
+                      className="flex justify-between items-center cursor-pointer text-gray-300 hover:text-orange-500"
                       onClick={() =>
                         item.name === 'NFT' &&
                         setIsNFTDropdownOpen(!isNFTDropdownOpen)
@@ -9707,7 +9703,7 @@ function Navbar() {
                                   <Link
                                     key={nestedItem.name}
                                     href={nestedItem.href}
-                                    className="nav-dropdown-item"
+                                    className="nav-dropdown-item hover:text-orange-500"
                                     onClick={() => setIsOpen(false)}
                                   >
                                     {nestedItem.name}
@@ -9724,7 +9720,7 @@ function Navbar() {
                   <Link
                     href={item.href}
                     className={`block flex items-center space-x-1 ${
-                      pathname === item.href ? 'text-orange-500' : ''
+                      pathname === item.href ? 'text-orange-500' : 'text-gray-300 hover:text-orange-500'
                     }`}
                     onClick={() => setIsOpen(false)}
                   >
@@ -9734,13 +9730,7 @@ function Navbar() {
                 )}
               </motion.div>
             ))}
-            <motion.button
-              onClick={toggleTheme}
-              className="w-full text-left nav-dropdown-item"
-              variants={itemVariants}
-            >
-              {isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            </motion.button>
+            {/* Removed theme toggle button */}
           </motion.div>
         )}
       </AnimatePresence>
@@ -9748,8 +9738,7 @@ function Navbar() {
   );
 }
 
-export default Navbar;
-*/-e 
+export default Navbar;-e 
 ---
 File: ./components/HolderTable/E280.js
 'use client';
@@ -13723,7 +13712,8 @@ LOG_LEVEL=info
 USE_ALCHEMY_FOR_OWNERS=true
 
 # In .env.local
-NEXT_NO_WORKER_THREADS=true-e 
+NEXT_NO_WORKER_THREADS=true
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3000-e 
 ---
 File: ./postcss.config.js
 export default {
