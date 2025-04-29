@@ -457,4 +457,6 @@ The @solana/* packages require Node.js >=20.18.0, and running on 18.20.8 may cau
 
 cat app/api/holders/Ascendant/route.js app/api/holders/E280/route.js app/api/holders/Element369/route.js app/api/holders/Element280/route.js app/api/holders/Stax/route.js app/api/holders/Element280/progress/route.js app/api/holders/Element280/validate-burned/route.js  app/store.js config.js app/api/utils.js > ./routes.js
 
-cat components/NFTPage.js  components/NFTPageWrapper.js components/NFTSummary.js components/HolderTable/Ascendant.js components/HolderTable/Element369.js components/HolderTable/Element280.js components/HolderTable/E280.js components/HolderTable/Stax.js components/SearchResultsModal.js config.js app/store.js  app/page.js app/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js  > ClientStuff.txt
+cat components/NFTPage.js  components/NFTPageWrapper.js components/NFTSummary.js components/HolderTable/Ascendant.js components/HolderTable/Element369.js components/HolderTable/Element280.js components/HolderTable/E280.js components/HolderTable/Stax.js components/SearchResultsModal.js config.js app/store.js  app/page.js app/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js   > ClientStuff.txt
+
+cat components/*.js  components/*.jsx components/HolderTable/*.js config.js app/store.js app/page.js app/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js   > ClientStuff.txt

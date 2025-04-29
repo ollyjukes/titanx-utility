@@ -1,50 +1,44 @@
+// components/NFTPageWrapper.js
 'use client';
 
 import dynamic from 'next/dynamic';
 import config from '@/config.js';
-
-// Loading components
-const Element280Loading = () => <div className="text-body">Loading Element280 data...</div>;
-const Element369Loading = () => <div className="text-body">Loading Element369 data...</div>;
-const StaxLoading = () => <div className="text-body">Loading Stax data...</div>;
-const AscendantLoading = () => <div className="text-body">Loading Ascendant data...</div>;
-const E280Loading = () => <div className="text-body">Loading E280 data...</div>;
-
-// Fallback components
-const Element280Fallback = () => <div className="text-error">Error loading Element280 data</div>;
-const Element369Fallback = () => <div className="text-error">Error loading Element369 data</div>;
-const StaxFallback = () => <div className="text-error">Error loading Stax data</div>;
-const AscendantFallback = () => <div className="text-error">Error loading Ascendant data</div>;
-const E280Fallback = () => <div className="text-error">Error loading E280 data</div>;
+import { useEffect } from 'react';
+import { useNFTStore } from '@/app/store';
 
 const holderTableComponents = {
-  element280: dynamic(() => import('./HolderTable/Element280').catch(() => ({ default: Element280Fallback })), {
+  element280: dynamic(() => import('./HolderTable/Element280').catch(() => ({ default: () => <div className="text-error">Error loading Element280 data</div> })), {
     ssr: false,
-    loading: Element280Loading,
+    loading: () => <div className="text-body">Loading Element280 data...</div>,
   }),
-  element369: dynamic(() => import('./HolderTable/Element369').catch(() => ({ default: Element369Fallback })), {
+  element369: dynamic(() => import('./HolderTable/Element369').catch(() => ({ default: () => <div className="text-error">Error loading Element369 data</div> })), {
     ssr: false,
-    loading: Element369Loading,
+    loading: () => <div className="text-body">Loading Element369 data...</div>,
   }),
-  stax: dynamic(() => import('./HolderTable/Stax').catch(() => ({ default: StaxFallback })), {
+  stax: dynamic(() => import('./HolderTable/Stax').catch(() => ({ default: () => <div className="text-error">Error loading Stax data</div> })), {
     ssr: false,
-    loading: StaxLoading,
+    loading: () => <div className="text-body">Loading Stax data...</div>,
   }),
-  ascendant: dynamic(() => import('./HolderTable/Ascendant').catch(() => ({ default: AscendantFallback })), {
+  ascendant: dynamic(() => import('./HolderTable/Ascendant').catch(() => ({ default: () => <div className="text-error">Error loading Ascendant data</div> })), {
     ssr: false,
-    loading: AscendantLoading,
+    loading: () => <div className="text-body">Loading Ascendant data...</div>,
   }),
-  e280: dynamic(() => import('./HolderTable/E280').catch(() => ({ default: E280Fallback })), {
+  e280: dynamic(() => import('./HolderTable/E280').catch(() => ({ default: () => <div className="text-error">Error loading E280 data</div> })), {
     ssr: false,
-    loading: E280Loading,
+    loading: () => <div className="text-body">Loading E280 data...</div>,
   }),
 };
 
-Object.keys(holderTableComponents).forEach((key) => {
-  holderTableComponents[key].displayName = `${key}HolderTable`;
-});
-
 export default function NFTPageWrapper({ chain, contract, data, rewardToken }) {
+  const { setCache } = useNFTStore();
+
+  useEffect(() => {
+    if (data && contract) {
+      console.log(`[NFTPageWrapper] Setting cache for ${contract}: ${data.holders?.length} holders`);
+      setCache(contract, data);
+    }
+  }, [contract, data, setCache]);
+
   console.log('[NFTPageWrapper] Props:', { chain, contract, data: data?.holders?.length, rewardToken });
 
   if (!contract || !data) {

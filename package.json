@@ -5,8 +5,8 @@
     "private": true,
     "scripts": {
         "dev": "next dev",
-        "build": "next build --debug",
-        "start": "next start",
+        "build": "ODE_ENV=production next build --debug",
+        "start": "NODE_ENV=production next start",
         "lint": "next lint",
         "tailwind": "tailwindcss build -i ./app/global.css -o ./app/output.css --watch"
     },

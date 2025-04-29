@@ -2,9 +2,7 @@
 import { notFound } from 'next/navigation';
 import NFTPageWrapper from '@/components/NFTPageWrapper';
 import config from '@/config';
-import { useNFTStore } from '@/app/store';
 
-// Fetch data for a single collection
 async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
   console.log(`[NFTContractPage] Fetching data for ${apiKey} from ${apiEndpoint}`);
   try {
@@ -30,7 +28,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     while (page < totalPages) {
       const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
       console.log(`[NFTContractPage] Fetching ${url}`);
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'force-cache' });
       if (!res.ok) {
         const errorText = await res.text();
         throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
@@ -54,29 +52,23 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       console.log(`[NFTContractPage] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
     }
 
-    const data = {
+    return {
       holders: allHolders,
       totalTokens,
       totalShares,
       summary,
     };
-
-    console.log(`[NFTContractPage] Setting cache for ${apiKey}: ${allHolders.length} holders`);
-    useNFTStore.getState().setCache(apiKey, data);
-
-    return data;
   } catch (error) {
     console.error(`[NFTContractPage] Error fetching ${apiKey}: ${error.message}`);
     return { error: error.message };
   }
 }
 
-export const revalidate = 60; // Revalidate every 60 seconds
+export const revalidate = 60;
 
 export default async function NFTContractPage({ params }) {
   const { chain, contract } = params;
 
-  // Map contract name to apiKey
   const apiKeyMap = {
     Element280: 'element280',
     Element369: 'element369',

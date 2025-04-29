@@ -4,11 +4,11 @@
 -rw-r--r--@ 1 ollyjukes  staff  88 23 Apr 13:03 ./.vercel/project.json
 -rw-r--r--@ 1 ollyjukes  staff  209 29 Apr 01:34 ./tailwind.config.js
 -rw-r--r--@ 1 ollyjukes  staff  1186 29 Apr 02:10 ./.env.local
--rw-r--r--@ 1 ollyjukes  staff  771 29 Apr 01:34 ./app/layout.js
+-rw-r--r--@ 1 ollyjukes  staff  12559 29 Apr 09:39 ./app/layout.js
 -rw-r--r--@ 1 ollyjukes  staff  2467 29 Apr 01:34 ./app/page.js
--rw-r--r--@ 1 ollyjukes  staff  11905 29 Apr 09:02 ./app/nft/layout.js
--rw-r--r--@ 1 ollyjukes  staff  3343 29 Apr 09:03 ./app/nft/page.js
--rw-r--r--@ 1 ollyjukes  staff  3806 29 Apr 09:03 ./app/nft/[chain]/[contract]/page.js
+-rw-r--r--@ 1 ollyjukes  staff  11904 29 Apr 09:40 ./app/nft/layout.js
+-rw-r--r--@ 1 ollyjukes  staff  3340 29 Apr 09:40 ./app/nft/page.js
+-rw-r--r--@ 1 ollyjukes  staff  3822 29 Apr 09:40 ./app/nft/[chain]/[contract]/page.js
 -rw-r--r--@ 1 ollyjukes  staff  4012 29 Apr 01:34 ./app/global.css
 -rw-r--r--@ 1 ollyjukes  staff  1124 29 Apr 01:34 ./app/store.js
 -rw-r--r--@ 1 ollyjukes  staff  1755 27 Apr 06:14 ./app/about/page.js
@@ -25,33 +25,12 @@
 -rw-r--r--@ 1 ollyjukes  staff  1475 29 Apr 01:34 ./app/api/holders/Element369/progress/route.js
 -rw-r--r--@ 1 ollyjukes  staff  19571 29 Apr 01:34 ./app/api/holders/Ascendant/route.js
 -rw-r--r--@ 1 ollyjukes  staff  1467 29 Apr 01:34 ./app/api/holders/Ascendant/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  9558 29 Apr 01:34 ./app/api/backup copy/holders/Stax/route.js
--rw-r--r--@ 1 ollyjukes  staff  1427 29 Apr 01:34 ./app/api/backup copy/holders/Stax/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  1660 29 Apr 01:34 ./app/api/backup copy/holders/E280/route.js
--rw-r--r--@ 1 ollyjukes  staff  431 29 Apr 01:34 ./app/api/backup copy/holders/E280/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  32022 29 Apr 01:34 ./app/api/backup copy/holders/Element280/route.js
--rw-r--r--@ 1 ollyjukes  staff  2586 29 Apr 01:34 ./app/api/backup copy/holders/Element280/validate-burned/route copy.js
--rw-r--r--@ 1 ollyjukes  staff  1475 29 Apr 01:34 ./app/api/backup copy/holders/Element280/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  9792 29 Apr 01:34 ./app/api/backup copy/holders/Element369/route.js
--rw-r--r--@ 1 ollyjukes  staff  1475 29 Apr 01:34 ./app/api/backup copy/holders/Element369/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  19571 29 Apr 01:34 ./app/api/backup copy/holders/Ascendant/route.js
--rw-r--r--@ 1 ollyjukes  staff  1467 29 Apr 01:34 ./app/api/backup copy/holders/Ascendant/progress/route.js
 -rw-r--r--@ 1 ollyjukes  staff  9484 29 Apr 01:34 ./app/api/utils.js
--rw-r--r--@ 1 ollyjukes  staff  9558 29 Apr 01:34 ./app/api/backup/holders/Stax/route.js
--rw-r--r--@ 1 ollyjukes  staff  1427 29 Apr 01:34 ./app/api/backup/holders/Stax/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  1660 29 Apr 01:34 ./app/api/backup/holders/E280/route.js
--rw-r--r--@ 1 ollyjukes  staff  431 29 Apr 01:34 ./app/api/backup/holders/E280/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  32022 29 Apr 01:34 ./app/api/backup/holders/Element280/route.js
--rw-r--r--@ 1 ollyjukes  staff  3253 29 Apr 01:34 ./app/api/backup/holders/Element280/validate-burned/route.js
--rw-r--r--@ 1 ollyjukes  staff  2586 29 Apr 01:34 ./app/api/backup/holders/Element280/validate-burned/route copy.js
--rw-r--r--@ 1 ollyjukes  staff  1475 29 Apr 01:34 ./app/api/backup/holders/Element280/progress/route.js
--rw-r--r--@ 1 ollyjukes  staff  19571 29 Apr 01:34 ./app/api/backup/holders/Ascendant/route.js
--rw-r--r--@ 1 ollyjukes  staff  1467 29 Apr 01:34 ./app/api/backup/holders/Ascendant/progress/route.js
 -rw-r--r--@ 1 ollyjukes  staff  769 27 Apr 06:14 ./app/layout.css
 -rw-r--r--@ 1 ollyjukes  staff  3426 28 Apr 00:05 ./app/auctions/page.js
 -rw-r--r--@ 1 ollyjukes  staff  159 27 Apr 06:14 ./postcss.config.mjs
 -rw-r--r--@ 1 ollyjukes  staff  212 29 Apr 01:34 ./next.config.mjs
--rw-r--r--@ 1 ollyjukes  staff  11386 29 Apr 01:34 ./config.js
+-rw-r--r--@ 1 ollyjukes  staff  11386 29 Apr 09:38 ./config.js
 -rw-r--r--@ 1 ollyjukes  staff  228 26 Apr 17:40 ./next-env.d.ts
 -rw-r--r--@ 1 ollyjukes  staff  14331 23 Apr 09:44 ./abi/staxNFT.json
 -rw-r--r--@ 1 ollyjukes  staff  9727 23 Apr 09:44 ./abi/element369Vault.json

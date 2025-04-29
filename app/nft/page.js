@@ -2,7 +2,6 @@
 import NFTSummary from '@/components/NFTSummary';
 import config from '@/config';
 
-// Fetch data for a single collection
 async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
   console.log(`[NFTOverview] Fetching data for ${apiKey} from ${apiEndpoint}`);
   try {
@@ -28,7 +27,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     while (page < totalPages) {
       const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
       console.log(`[NFTOverview] Fetching ${url}`);
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(url, { cache: 'force-cache' }); // Use force-cache
       if (!res.ok) {
         const errorText = await res.text();
         throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
@@ -64,7 +63,6 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
   }
 }
 
-// Fetch data for all collections
 async function fetchCollectionsData() {
   const collections = Object.keys(config.contractDetails).map((key) => ({
     apiKey: key,
@@ -81,7 +79,7 @@ async function fetchCollectionsData() {
   return collectionsData;
 }
 
-export const revalidate = 60; // Revalidate every 60 seconds
+export const revalidate = 60;
 
 export default async function NFTOverview() {
   const collectionsData = await fetchCollectionsData();
@@ -90,7 +88,9 @@ export default async function NFTOverview() {
     <div className="min-h-screen bg-gray-900 text-gray-100 p-6 flex flex-col items-center">
       <h1 className="title mb-6">NFT Collections</h1>
       {collectionsData.some(({ data }) => data.error) ? (
-        <p className="text-error">Error fetching data: {collectionsData.find(({ data }) => data.error)?.data.error}</p>
+        <p className="text-error">
+          Error fetching data: {collectionsData.find(({ data }) => data.error)?.data.error}
+        </p>
       ) : (
         <NFTSummary collectionsData={collectionsData} />
       )}

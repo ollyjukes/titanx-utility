@@ -44,7 +44,6 @@ export default function NFTLayout({ children }) {
         : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${config.contractDetails[key].name.replace(/\s+/g, '')}`,
   }));
 
-  // Fetch data for a single collection
   const fetchCollectionData = async (apiKey, apiEndpoint, pageSize) => {
     console.log(`[NFTLayout] Fetching data for ${apiKey} from ${apiEndpoint}`);
     try {
@@ -77,6 +76,7 @@ export default function NFTLayout({ children }) {
             const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
             console.log(`[NFTLayout] Attempt ${attempts + 1} fetching ${url}`);
             const res = await fetch(url, {
+              cache: 'force-cache',
               signal: AbortSignal.timeout(config.alchemy.timeoutMs || 30000),
             });
             if (!res.ok) {
@@ -103,7 +103,7 @@ export default function NFTLayout({ children }) {
             console.log(`[NFTLayout] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
           } catch (err) {
             attempts++;
-            console.log(`[NFTLayout] Fetch attempt ${attempts} failed for ${apiKey}: ${err.message}`);
+            console.error(`[NFTLayout] Fetch attempt ${attempts} failed for ${apiKey}: ${err.message}`);
             if (attempts >= maxAttempts) {
               throw new Error(`Failed to fetch page ${page}: ${err.message}`);
             }

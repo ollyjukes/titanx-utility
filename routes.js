@@ -2014,14 +2014,13 @@ export async function POST(request) {
     log(`[validate-burned] [ERROR] Error processing transaction: ${error.message}, stack: ${error.stack}`);
     return NextResponse.json({ error: 'Failed to validate transaction', details: error.message }, { status: 500 });
   }
-}// app/store.js
-'use client';
+}'use client';
 import { create } from 'zustand';
 
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 export const useNFTStore = create((set, get) => ({
-  cache: {}, // { contractKey: { data: {...}, timestamp: number } }
+  cache: {},
   setCache: (contractKey, data) => {
     console.log(`[NFTStore] Setting cache for ${contractKey}: ${data.holders.length} holders`);
     set((state) => ({
@@ -2051,18 +2050,6 @@ export const useNFTStore = create((set, get) => ({
     console.log('[NFTStore] Clearing cache');
     set({ cache: {} });
   },
-}));
-
-export const useThemeStore = create((set) => ({
-  isDarkMode: true, // Default to dark mode
-  toggleTheme: () =>
-    set((state) => {
-      const isDarkMode = !state.isDarkMode;
-      if (typeof window !== 'undefined') {
-        document.documentElement.classList.toggle('dark', isDarkMode);
-      }
-      return { isDarkMode };
-    }),
 }));// config.js
 import element280NftStatus from './element280_nft_status.json' assert { type: 'json' };
 import element280MainAbi from './abi/element280.json' assert { type: 'json' };
@@ -2379,6 +2366,7 @@ const alchemy = new Alchemy({
 });
 
 const DEBUG = process.env.DEBUG === 'true';
+const isProduction = process.env.NODE_ENV === 'production';
 
 export const logger = (() => {
   if (loggerInstance) {
@@ -2391,17 +2379,21 @@ export const logger = (() => {
       level: (label) => ({ level: label.toUpperCase() }),
     },
     timestamp: pino.stdTimeFunctions.isoTime,
-    transport: {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'yyyy-mm-dd HH:MM:ss',
-        ignore: 'pid,hostname',
-      },
-    },
+    // Conditionally apply pino-pretty in development only
+    ...(!isProduction
+      ? {
+          transport: {
+            target: 'pino-pretty',
+            options: {
+              colorize: true,
+              translateTime: 'yyyy-mm-dd HH:MM:ss',
+              ignore: 'pid,hostname',
+            },
+          },
+        }
+      : {}),
   });
   try {
-    console.log('[utils] Logger initializing...');
     if (DEBUG) loggerInstance.debug('[utils] Pino logger initialized');
     console.log('[utils] Pino logger initialized (console)');
   } catch (error) {

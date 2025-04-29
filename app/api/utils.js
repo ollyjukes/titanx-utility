@@ -26,6 +26,7 @@ const alchemy = new Alchemy({
 });
 
 const DEBUG = process.env.DEBUG === 'true';
+const isProduction = process.env.NODE_ENV === 'production';
 
 export const logger = (() => {
   if (loggerInstance) {
@@ -38,17 +39,21 @@ export const logger = (() => {
       level: (label) => ({ level: label.toUpperCase() }),
     },
     timestamp: pino.stdTimeFunctions.isoTime,
-    transport: {
-      target: 'pino-pretty',
-      options: {
-        colorize: true,
-        translateTime: 'yyyy-mm-dd HH:MM:ss',
-        ignore: 'pid,hostname',
-      },
-    },
+    // Conditionally apply pino-pretty in development only
+    ...(!isProduction
+      ? {
+          transport: {
+            target: 'pino-pretty',
+            options: {
+              colorize: true,
+              translateTime: 'yyyy-mm-dd HH:MM:ss',
+              ignore: 'pid,hostname',
+            },
+          },
+        }
+      : {}),
   });
   try {
-    console.log('[utils] Logger initializing...');
     if (DEBUG) loggerInstance.debug('[utils] Pino logger initialized');
     console.log('[utils] Pino logger initialized (console)');
   } catch (error) {

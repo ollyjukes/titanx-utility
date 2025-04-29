@@ -76,7 +76,7 @@ async function fetchContractData() {
     let burnedDistribution = [0, 0, 0, 0, 0, 0];
     let totalBurned = 0;
     try {
-      const res = await fetch('/api/holders/Element280/validate-burned', { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+      const res = await fetch('/api/holders/Element280/validate-burned', { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
       if (res.ok) {
         const reader = res.body.getReader();
         let events = [];
@@ -166,15 +166,15 @@ export default function NFTPage({ chain, contract }) {
       if (isElement280) {
         try {
           console.log(`[NFTPage] [INFO] Fetching progress from ${apiEndpoint}/progress`);
-          const res = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+          const res = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
           if (!res.ok) {
             console.error(`[NFTPage] [ERROR] Progress fetch failed: ${res.status}`);
           } else {
             progressData = await res.json();
             if (progressData.totalOwners === 0 && progressData.phase === 'Idle') {
               console.log(`[NFTPage] [INFO] Stale progress, triggering cache refresh`);
-              await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
-              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+              await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
+              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
               if (retryRes.ok) progressData = await retryRes.json();
             }
           }
@@ -251,10 +251,10 @@ export default function NFTPage({ chain, contract }) {
       let totalPages = Infinity;
       const effectivePageSize = pageSize || config.contractDetails[contractId]?.pageSize;
 
-      let progressData = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) }).then(res => res.json()).catch(() => ({}));
+      let progressData = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) }).then(res => res.json()).catch(() => ({}));
       if (progressData.phase === 'Idle' || progressData.totalOwners === 0) {
         console.log(`[NFTPage] [INFO] Cache is Idle or empty, triggering POST`);
-        await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
+        await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
       }
 
       while (page < totalPages) {
@@ -266,7 +266,7 @@ export default function NFTPage({ chain, contract }) {
           try {
             const url = `${apiEndpoint}?page=${page}&pageSize=${effectivePageSize}`;
             console.log(`[NFTPage] [INFO] Fetching ${contractId} page ${page} at ${url}`);
-            const res = await fetch(url, { signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+            const res = await fetch(url, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
             if (!res.ok) {
               const errorText = await res.text();
               console.error(`[NFTPage] [ERROR] Fetch failed for ${url}: ${res.status} - ${errorText}`);
@@ -281,7 +281,7 @@ export default function NFTPage({ chain, contract }) {
             }
             if (!json.holders || !Array.isArray(json.holders)) {
               console.error(`[NFTPage] [ERROR] Invalid holders data for ${url}: ${JSON.stringify(json, null, 2)}`);
-              await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
+              await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
               throw new Error(`Invalid holders data: retrying after POST`);
             }
             const newHolders = json.holders;
@@ -303,7 +303,7 @@ export default function NFTPage({ chain, contract }) {
             page++;
             success = true;
             if (!newHolders.length && json.totalPages === 0) {
-              console.log(`[NFTPage] [] Empty holders with zero pages, accepting as valid`);
+              console.log(`[NFTPage] [INFO] Empty holders with zero pages, accepting as valid`);
               break;
             }
           } catch (err) {
