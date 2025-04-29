@@ -1,4 +1,7 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
-
-export default nextConfig;
+const nextConfig = {
+    experimental: {
+      serverComponentsExternalPackages: ['viem', 'alchemy-sdk', 'zustand', 'node-cache'],
+    },
+  };
+  export default nextConfig;

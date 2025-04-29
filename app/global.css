@@ -8,11 +8,7 @@ html {
 }
 
 body {
-  @apply min-h-screen flex flex-col bg-gray-100 text-gray-900 antialiased;
-}
-
-.dark body {
-  @apply bg-gray-900 text-gray-100;
+  @apply min-h-screen flex flex-col bg-gray-900 text-gray-100 antialiased;
 }
 
 /* Component Classes */
@@ -28,39 +24,37 @@ body {
 
   /* Cards */
   .card {
-    @apply rounded-lg shadow-lg p-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700;
+    @apply rounded-lg shadow-lg p-6 bg-gray-800 border border-gray-700;
   }
 
   /* Buttons */
   .btn {
     @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
-    /* Orange theme: @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500; */
   }
 
   .btn-primary {
-    @apply bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600;
-    /* Orange theme: @apply bg-orange-600 text-white hover:bg-orange-700 dark:bg-orange-500 dark:hover:bg-orange-600; */
+    @apply bg-blue-500 text-white hover:bg-blue-600;
   }
 
   .btn-secondary {
-    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600;
+    @apply bg-gray-700 text-gray-100 hover:bg-gray-600;
   }
 
   /* Typography */
   .title {
-    @apply text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100;
+    @apply text-3xl font-bold tracking-tight text-gray-100;
   }
 
   .subtitle {
-    @apply text-2xl font-semibold text-gray-900 dark:text-gray-100;
+    @apply text-2xl font-semibold text-gray-100;
   }
 
   .text-body {
-    @apply text-sm sm:text-base text-gray-600 dark:text-gray-300;
+    @apply text-sm sm:text-base text-gray-300;
   }
 
   .text-error {
-    @apply text-red-500 dark:text-red-400;
+    @apply text-red-400;
   }
 
   /* Tables */
@@ -69,33 +63,31 @@ body {
   }
 
   .table {
-    @apply w-full table-auto md:table-fixed bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100;
+    @apply w-full table-auto md:table-fixed bg-gray-800 text-gray-100;
   }
 
   .table-head {
     @apply bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base text-white;
-    /* Orange theme: @apply bg-gradient-to-r from-orange-600 to-orange-800 text-sm md:text-base text-white; */
   }
 
   .table-body {
-    @apply text-xs md:text-sm text-gray-600 dark:text-gray-300;
+    @apply text-xs md:text-sm text-gray-300;
   }
 
   .table-row {
-    @apply transition-colors border-b border-gray-200 dark:border-gray-700;
+    @apply transition-colors border-b border-gray-700;
   }
 
   .table-row-even {
-    @apply bg-white dark:bg-gray-800;
+    @apply bg-gray-800;
   }
 
   .table-row-odd {
-    @apply bg-gray-50 dark:bg-gray-900;
+    @apply bg-gray-900;
   }
 
   .table-row:hover {
     @apply bg-blue-900/30 shadow-sm;
-    /* Orange theme: @apply bg-orange-900/30 shadow-sm; */
   }
 
   .table-cell {
@@ -103,8 +95,7 @@ body {
   }
 
   .table-link {
-    @apply text-blue-500 dark:text-blue-400 hover:text-blue-600 dark:hover:text-blue-300 hover:underline break-all;
-    /* Orange theme: @apply text-orange-500 dark:text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 hover:underline break-all; */
+    @apply text-blue-400 hover:text-blue-300 hover:underline break-all;
   }
 
   .table-pulse {
@@ -112,13 +103,12 @@ body {
   }
 
   .table-pulse-placeholder {
-    @apply h-4 bg-gray-300 dark:bg-gray-600 rounded w-3/4;
+    @apply h-4 bg-gray-600 rounded w-3/4;
   }
 
   /* Reward Columns (for Element369.js) */
   .reward-cell {
-    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-blue-600 dark:text-blue-400;
-    /* Orange theme: @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-orange-600 dark:text-orange-400; */
+    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-blue-400;
   }
 
   /* Chart Container */
@@ -132,17 +122,15 @@ body {
   }
 
   .spinner {
-    @apply h-6 w-6 sm:h-8 sm:w-8 text-blue-500 dark:text-blue-400;
-    /* Orange theme: @apply h-6 w-6 sm:h-8 sm:w-8 text-orange-500 dark:text-orange-400; */
+    @apply h-6 w-6 sm:h-8 sm:w-8 text-blue-400;
   }
 
   .progress-bar {
-    @apply w-64 bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-2;
+    @apply w-64 bg-gray-700 rounded-full h-2.5 mt-2;
   }
 
   .progress-fill {
-    @apply bg-blue-600 dark:bg-blue-400 h-2.5 rounded-full;
-    /* Orange theme: @apply bg-orange-600 dark:bg-orange-400 h-2.5 rounded-full; */
+    @apply bg-blue-400 h-2.5 rounded-full;
   }
 
   /* Navbar */
@@ -160,7 +148,6 @@ body {
 
   .nav-link {
     @apply text-gray-300 hover:text-blue-400 transition-colors duration-200;
-    /* Orange theme: @apply text-gray-300 hover:text-orange-400 transition-colors duration-200; */
   }
 
   .nav-dropdown {
@@ -178,6 +165,16 @@ body {
   /* Footer */
   .footer {
     @apply bg-gray-800 py-4 text-center text-gray-400;
+  }
+
+  /* Search Input */
+  .search-input {
+    @apply w-full p-2 bg-gray-700 text-gray-100 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
+  }
+
+  /* Modal Overlay */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4;
   }
 
   /* Animations */

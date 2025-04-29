@@ -1,16 +1,19 @@
 'use client';
-
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import LoadingIndicator from './LoadingIndicator';
 import config from '@/config.js';
-import { Bar } from 'react-chartjs-2';
-import Chart from 'chart.js/auto';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { useNFTStore } from '@/app/store';
 import { barChartOptions } from '@/lib/chartOptions';
+
+// Dynamically import chart component
+const Bar = dynamic(() => import('react-chartjs-2').then(mod => mod.Bar), { ssr: false });
+
+// Default timeout for fetches
+const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
 
 // Retry utility
 async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
@@ -41,7 +44,7 @@ async function fetchContractData() {
 
   const client = createPublicClient({
     chain: mainnet,
-    transport: http(`https://eth-mainnet.g.alchemy.com/v2/${config.alchemy.apiKey}`, { timeout: config.alchemy.timeoutMs }),
+    transport: http(`https://eth-mainnet.g.alchemy.com/v2/${config.alchemy.apiKey}`, { timeout: Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS }),
   });
 
   try {
@@ -73,7 +76,7 @@ async function fetchContractData() {
     let burnedDistribution = [0, 0, 0, 0, 0, 0];
     let totalBurned = 0;
     try {
-      const res = await fetch('/api/holders/Element280/validate-burned', { cache: 'no-store' });
+      const res = await fetch('/api/holders/Element280/validate-burned', { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
       if (res.ok) {
         const reader = res.body.getReader();
         let events = [];
@@ -163,7 +166,7 @@ export default function NFTPage({ chain, contract }) {
       if (isElement280) {
         try {
           console.log(`[NFTPage] [INFO] Fetching progress from ${apiEndpoint}/progress`);
-          const res = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+          const res = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
           if (!res.ok) {
             console.error(`[NFTPage] [ERROR] Progress fetch failed: ${res.status}`);
           } else {
@@ -171,7 +174,7 @@ export default function NFTPage({ chain, contract }) {
             if (progressData.totalOwners === 0 && progressData.phase === 'Idle') {
               console.log(`[NFTPage] [INFO] Stale progress, triggering cache refresh`);
               await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
-              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
               if (retryRes.ok) progressData = await retryRes.json();
             }
           }
@@ -248,7 +251,7 @@ export default function NFTPage({ chain, contract }) {
       let totalPages = Infinity;
       const effectivePageSize = pageSize || config.contractDetails[contractId]?.pageSize;
 
-      let progressData = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store' }).then(res => res.json()).catch(() => ({}));
+      let progressData = await fetch(`${apiEndpoint}/progress`, { cache: 'no-store', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) }).then(res => res.json()).catch(() => ({}));
       if (progressData.phase === 'Idle' || progressData.totalOwners === 0) {
         console.log(`[NFTPage] [INFO] Cache is Idle or empty, triggering POST`);
         await fetch(apiEndpoint, { method: 'POST', cache: 'no-store' });
@@ -263,7 +266,7 @@ export default function NFTPage({ chain, contract }) {
           try {
             const url = `${apiEndpoint}?page=${page}&pageSize=${effectivePageSize}`;
             console.log(`[NFTPage] [INFO] Fetching ${contractId} page ${page} at ${url}`);
-            const res = await fetch(url, { signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+            const res = await fetch(url, { signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
             if (!res.ok) {
               const errorText = await res.text();
               console.error(`[NFTPage] [ERROR] Fetch failed for ${url}: ${res.status} - ${errorText}`);
@@ -271,7 +274,7 @@ export default function NFTPage({ chain, contract }) {
             }
 
             const json = await res.json();
-            console.log(`[NFTPage] [DEBUG] API response for ${url}: ${JSON.stringify(json, null, 2)}`);
+            console.log(`[NFTPage] [DEBUG] API response for ${url}: holders=${json.holders?.length}, totalTokens=${json.totalTokens}`);
             if (json.error) {
               console.error(`[NFTPage] [ERROR] API error for ${url}: ${json.error}`);
               throw new Error(json.error);
@@ -366,13 +369,12 @@ export default function NFTPage({ chain, contract }) {
       {
         label: 'Live NFTs',
         data: data.tierDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(59, 130, 246, 0.6)', // Blue-500
-        /* Orange theme: backgroundColor: 'rgba(249, 115, 22, 0.6)', // Orange-500 */
+        backgroundColor: 'rgba(96, 165, 250, 0.6)', // text-blue-400
       },
       {
         label: 'Burned NFTs',
         data: data.burnedDistribution || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(239, 68, 68, 0.6)', // Red-500
+        backgroundColor: 'rgba(248, 113, 113, 0.6)', // text-red-400
       },
     ],
   } : null;

@@ -1,4 +1,4 @@
-// app/api/utils.js
+// ./app/api/utils.js
 import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
 import { Redis } from '@upstash/redis';
@@ -6,6 +6,10 @@ import NodeCache from 'node-cache';
 import pino from 'pino';
 import { promises as fs } from 'fs';
 import config from '@/config.js';
+import { Network, Alchemy } from 'alchemy-sdk';
+
+// Singleton logger instance
+let loggerInstance = null;
 
 const ALCHEMY_API_KEY = config.alchemy.apiKey || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
 
@@ -16,19 +20,56 @@ export const client = createPublicClient({
   }),
 });
 
-export const logger = pino({
-  level: 'info',
-  ...(process.env.NODE_ENV !== 'production' && {
-    transport: {
-      target: 'pino-pretty',
-      options: { colorize: true, translateTime: 'SYS:standard' },
-    },
-  }),
+const alchemy = new Alchemy({
+  apiKey: ALCHEMY_API_KEY,
+  network: Network.ETH_MAINNET,
 });
 
+const DEBUG = process.env.DEBUG === 'true';
+
+export const logger = (() => {
+  if (loggerInstance) {
+    if (DEBUG) console.log('[utils] [DEBUG] Reusing existing logger instance');
+    return loggerInstance;
+  }
+  loggerInstance = pino({
+    level: DEBUG ? 'debug' : 'error',
+    formatters: {
+      level: (label) => ({ level: label.toUpperCase() }),
+    },
+    timestamp: pino.stdTimeFunctions.isoTime,
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'yyyy-mm-dd HH:MM:ss',
+        ignore: 'pid,hostname',
+      },
+    },
+  });
+  try {
+    console.log('[utils] Logger initializing...');
+    if (DEBUG) loggerInstance.debug('[utils] Pino logger initialized');
+    console.log('[utils] Pino logger initialized (console)');
+  } catch (error) {
+    console.error('[utils] Failed to initialize logger:', error.message);
+  }
+  return loggerInstance;
+})();
+
 export function log(message) {
-  logger.info(message);
+  try {
+    if (message.includes('[ERROR]') || message.includes('[VALIDATION]')) {
+      logger.error(message);
+    } else if (DEBUG) {
+      logger.debug(message);
+    }
+  } catch (error) {
+    console.error('[utils] Logger error:', error.message);
+  }
 }
+
+// ... (rest of utils.js remains unchanged)
 
 const cache = new NodeCache({
   stdTTL: config.cache.nodeCache.stdTTL,
@@ -77,7 +118,7 @@ export async function getCache(key) {
       log(`[utils] [ERROR] Redis get failed for key ${key}: ${error.message}`);
     }
   }
-  if (config.debug.enabled) {
+  if (DEBUG) {
     log(`[utils] [DEBUG] Cache get for ${key}: ${data ? 'hit' : 'miss'}`);
   }
   return data;
@@ -92,7 +133,7 @@ export async function setCache(key, value, ttl = config.cache.nodeCache.stdTTL) 
       log(`[utils] [ERROR] Redis set failed for key ${key}: ${error.message}`);
     }
   }
-  if (config.debug.enabled) {
+  if (DEBUG) {
     log(`[utils] [DEBUG] Cache set for ${key}`);
   }
 }
@@ -116,7 +157,7 @@ export async function loadCacheState(contractAddress) {
       };
     }
   }
-  if (config.debug.enabled) {
+  if (DEBUG) {
     log(`[utils] [DEBUG] Loaded cache state for ${cacheKey}: ${JSON.stringify(state)}`);
   }
   return state;
@@ -139,7 +180,7 @@ export async function saveCacheState(contractAddress, state) {
       log(`[utils] [ERROR] Failed to write cache state to file: ${error.message}`);
     }
   }
-  if (config.debug.enabled) {
+  if (DEBUG) {
     log(`[utils] [DEBUG] Saved cache state for ${cacheKey}`);
   }
 }
@@ -164,7 +205,7 @@ export async function getNftsForOwner(ownerAddress, contractAddress, abi) {
       });
       tokenIds.push(tokenId);
     }
-    if (config.debug.enabled) {
+    if (DEBUG) {
       log(`[utils] [DEBUG] Fetched ${tokenIds.length} NFTs for owner ${ownerAddress} at contract ${contractAddress}`);
     }
     return tokenIds.map(id => ({ tokenId: id.toString(), balance: 1 }));
@@ -175,35 +216,65 @@ export async function getNftsForOwner(ownerAddress, contractAddress, abi) {
 }
 
 export async function getOwnersForContract(contractAddress, abi, fromBlock = 0n) {
-  try {
-    const logs = await client.getLogs({
-      address: contractAddress,
-      event: parseAbi(['event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)']),
-      fromBlock,
-    });
-    const owners = {};
-    logs.forEach(log => {
-      const { tokenId, to } = log.args;
-      if (to !== '0x0000000000000000000000000000000000000000') {
-        owners[tokenId.toString()] = { ownerAddress: to, tokenId: tokenId.toString() };
-      } else {
-        delete owners[tokenId.toString()];
+  const useAlchemy = process.env.USE_ALCHEMY_FOR_OWNERS === 'true';
+  log(`[utils] [INFO] Fetching owners for contract ${contractAddress} using ${useAlchemy ? 'Alchemy SDK' : 'viem'}`);
+
+  if (useAlchemy) {
+    try {
+      const response = await alchemy.nft.getOwnersForContract(contractAddress, {
+        withTokenBalances: true,
+      });
+      const owners = response.owners.flatMap(owner => {
+        const tokenBalances = owner.tokenBalances || [];
+        return tokenBalances.map(balance => ({
+          ownerAddress: owner.ownerAddress.toLowerCase(),
+          tokenId: balance.tokenId,
+        }));
+      });
+      if (DEBUG) {
+        log(`[utils] [DEBUG] Fetched ${owners.length} owner-token pairs via Alchemy for contract ${contractAddress}`);
       }
-    });
-    if (config.debug.enabled) {
-      log(`[utils] [DEBUG] Fetched ${Object.keys(owners).length} owners for contract ${contractAddress}`);
+      return owners;
+    } catch (alchemyError) {
+      log(`[utils] [ERROR] Alchemy failed for contract ${contractAddress}: ${alchemyError.message}`);
+      throw new Error(`Failed to fetch owners via Alchemy: ${alchemyError.message}`);
     }
-    return Object.values(owners);
-  } catch (error) {
-    log(`[utils] [ERROR] Failed to fetch owners for contract ${contractAddress}: ${error.message}`);
-    throw error;
+  } else {
+    try {
+      const fromBlockValue = config.deploymentBlocks.element369?.block || 0n;
+      if (DEBUG) {
+        log(`[utils] [DEBUG] Fetching logs for contract ${contractAddress} from block ${fromBlockValue}`);
+        log(`[utils] [DEBUG] ABI passed: ${JSON.stringify(abi.filter(item => item.type === 'event').map(item => item.name))}`);
+      }
+      const logs = await client.getLogs({
+        address: contractAddress,
+        event: parseAbi(['event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)']),
+        fromBlock: BigInt(fromBlockValue),
+      });
+      const owners = {};
+      logs.forEach(log => {
+        const { tokenId, to } = log.args;
+        if (to !== '0x0000000000000000000000000000000000000000') {
+          owners[tokenId.toString()] = { ownerAddress: to, tokenId: tokenId.toString() };
+        } else {
+          delete owners[tokenId.toString()];
+        }
+      });
+      if (DEBUG) {
+        log(`[utils] [DEBUG] Fetched ${Object.keys(owners).length} owners for contract ${contractAddress}`);
+      }
+      return Object.values(owners);
+    } catch (error) {
+      log(`[utils] [ERROR] Failed to fetch owners for contract ${contractAddress}: ${error.message}`);
+      throw error;
+    }
   }
 }
 
 export async function getTransactionReceipt(txHash) {
   try {
     const receipt = await client.getTransactionReceipt({ hash: txHash });
-    if (config.debug.enabled) {
+    if (DEBUG) {
       log(`[utils] [DEBUG] Fetched transaction receipt for hash ${txHash}`);
     }
     return receipt;

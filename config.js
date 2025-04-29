@@ -256,6 +256,7 @@ const config = {
     batchDelayMs: 1000,
     retryMaxDelayMs: 30000,
     maxRetries: 3,
+    timeoutMs: 30000 // 30 seconds
   },
 
   // Cache settings

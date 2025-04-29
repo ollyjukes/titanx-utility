@@ -5,8 +5,11 @@ Directory Tree: (Install 'tree' with 'brew install tree' for this feature)
 
 Dependencies from package.json:
   - @heroicons/react
+  - @rushstack/eslint-patch
   - @tanstack/react-query
   - @upstash/redis
+  - alchemy
+  - alchemy-sdk
   - async-mutex
   - chart.js
   - dotenv
@@ -17,15 +20,19 @@ Dependencies from package.json:
   - node-fetch
   - p-limit
   - pino
+  - pino-pretty
   - react
   - react-chartjs-2
   - react-dom
+  - react-virtualized
   - uuid
   - viem
   - zustand
 
 Dev Dependencies from package.json:
   - @eslint/js
+  - @typescript-eslint/eslint-plugin
+  - @typescript-eslint/parser
   - autoprefixer
   - eslint
   - eslint-config-next
@@ -34,3 +41,5 @@ Dev Dependencies from package.json:
 
 Referenced Files Not Found:
 ---------------------------
+- ./app/ClientProvider.js (Referenced but not found in project structure)
+- ./components/loadElement280NFTsDB.js (Referenced but not found in project structure)

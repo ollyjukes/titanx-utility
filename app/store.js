@@ -4,7 +4,7 @@ import { create } from 'zustand';
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 export const useNFTStore = create((set, get) => ({
-  cache: {}, // { contractKey: { data: {...}, timestamp: number } }
+  cache: {},
   setCache: (contractKey, data) => {
     console.log(`[NFTStore] Setting cache for ${contractKey}: ${data.holders.length} holders`);
     set((state) => ({
@@ -30,16 +30,8 @@ export const useNFTStore = create((set, get) => ({
     console.log(`[NFTStore] Returning cached data for ${contractKey}: ${cachedEntry.data.holders.length} holders`);
     return cachedEntry.data;
   },
-}));
-
-export const useThemeStore = create((set) => ({
-  isDarkMode: true, // Default to dark mode
-  toggleTheme: () =>
-    set((state) => {
-      const isDarkMode = !state.isDarkMode;
-      if (typeof window !== 'undefined') {
-        document.documentElement.classList.toggle('dark', isDarkMode);
-      }
-      return { isDarkMode };
-    }),
+  clearCache: () => {
+    console.log('[NFTStore] Clearing cache');
+    set({ cache: {} });
+  },
 }));

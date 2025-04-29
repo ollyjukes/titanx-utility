@@ -1,22 +1,28 @@
-// components/NFTSummary.js
 'use client';
 import { motion } from 'framer-motion';
 
 const NFTSummary = ({ collectionsData }) => {
+  // Validate collectionsData to prevent runtime errors
+  if (!Array.isArray(collectionsData)) {
+    return (
+      <div className="w-full max-w-6xl mt-6 mb-4 text-center">
+        <h2 className="subtitle mb-3">NFT Collections</h2>
+        <p className="text-error">Error: Invalid collections data</p>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-6xl mt-6 mb-4">
-      <h2 className="text-lg font-semibold text-white mb-3 text-center">NFT Collections</h2>
+      <h2 className="subtitle mb-3 text-center">NFT Collections</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {collectionsData.map(({ apiKey, data }) => {
           const isE280 = apiKey === 'e280';
           if (isE280) {
             return (
-              <div
-                key={apiKey}
-                className="bg-gray-800 rounded-md p-3 text-gray-300"
-              >
+              <div key={apiKey} className="card">
                 <h3 className="text-sm font-semibold text-orange-500 mb-1">E280 (Base)</h3>
-                <p className="text-xs">Not deployed yet</p>
+                <p className="text-body">Not deployed yet</p>
               </div>
             );
           }
@@ -31,7 +37,7 @@ const NFTSummary = ({ collectionsData }) => {
             toDistributeDay90 = 0,
             pendingRewards = 0,
             error,
-          } = data;
+          } = data || {};
 
           const uniqueWallets = holders.length;
           const liveNFTs = apiKey === 'element280' ? summary.totalLive || totalTokens : totalTokens;
@@ -45,18 +51,15 @@ const NFTSummary = ({ collectionsData }) => {
           const collectionName = {
             element280: 'Element 280',
             element369: 'Element 369',
-            staxNFT: 'Stax',
+            stax: 'Stax',
             ascendantNFT: 'Ascendant',
           }[apiKey] || apiKey;
 
           if (error) {
             return (
-              <div
-                key={apiKey}
-                className="bg-gray-800 rounded-md p-3 text-gray-300"
-              >
+              <div key={apiKey} className="card">
                 <h3 className="text-sm font-semibold text-orange-500 mb-1">{collectionName}</h3>
-                <p className="text-xs">Error: {error}</p>
+                <p className="text-error text-body">Error: {error}</p>
               </div>
             );
           }
@@ -67,17 +70,17 @@ const NFTSummary = ({ collectionsData }) => {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
-              className="bg-gray-800 rounded-md p-3 text-gray-300 hover:shadow-md transition-shadow"
+              className="card hover:shadow-md transition-shadow"
             >
               <h3 className="text-sm font-semibold text-orange-500 mb-1">{collectionName}</h3>
-              <div className="space-y-1 text-xs">
+              <div className="space-y-1 text-body">
                 <p>
                   <span className="font-medium">Wallets:</span> {uniqueWallets.toLocaleString()}
                 </p>
                 <p>
                   <span className="font-medium">Live NFTs:</span> {liveNFTs.toLocaleString()}
                 </p>
-                {['element280', 'staxNFT'].includes(apiKey) && (
+                {['element280', 'stax'].includes(apiKey) && (
                   <p>
                     <span className="font-medium">Burned:</span> {burnedNFTs.toLocaleString()}
                   </p>
@@ -104,7 +107,7 @@ const NFTSummary = ({ collectionsData }) => {
                     </p>
                   </>
                 )}
-                {apiKey === 'staxNFT' && (
+                {apiKey === 'stax' && (
                   <p>
                     <span className="font-medium">Rewards:</span>{' '}
                     {holders.reduce((sum, h) => sum + (h.claimableRewards || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} X28

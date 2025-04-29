@@ -1,17 +1,14 @@
-// components/Navbar.jsx
 'use client';
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useThemeStore } from '@/app/store';
-import { SunIcon, MoonIcon, CurrencyDollarIcon } from '@heroicons/react/24/solid';
+import { CurrencyDollarIcon } from '@heroicons/react/24/solid';
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const [isNFTDropdownOpen, setIsNFTDropdownOpen] = useState(false);
-  const { isDarkMode, toggleTheme } = useThemeStore();
   const pathname = usePathname();
 
   const menuVariants = {
@@ -60,7 +57,7 @@ function Navbar() {
   ];
 
   return (
-    <nav className="nav">
+    <nav className="nav bg-gray-800 text-white">
       <div className="nav-container">
         <motion.div
           initial={{ opacity: 0, x: -20 }}
@@ -84,7 +81,7 @@ function Navbar() {
               <Link
                 href={item.href}
                 className={`nav-link flex items-center space-x-1 ${
-                  pathname === item.href ? 'text-orange-500' : ''
+                  pathname === item.href ? 'text-orange-500' : 'text-gray-300 hover:text-orange-500'
                 }`}
               >
                 {item.icon && <item.icon className="h-5 w-5" />}
@@ -92,7 +89,7 @@ function Navbar() {
               </Link>
               {item.subItems && (
                 <motion.div
-                  className="nav-dropdown opacity-0 group-hover:opacity-100 group-hover:mt-3 transition-all duration-200 pointer-events-none group-hover:pointer-events-auto"
+                  className="nav-dropdown opacity-0 group-hover:opacity-100 group-hover:mt-3 transition-all duration-200 pointer-events-none group-hover:pointer-events-auto bg-gray-700 text-white"
                   variants={dropdownVariants}
                   initial="hidden"
                   animate="hidden"
@@ -107,7 +104,7 @@ function Navbar() {
                             <Link
                               key={nestedItem.name}
                               href={nestedItem.href}
-                              className="nav-dropdown-item"
+                              className="nav-dropdown-item hover:text-orange-500"
                             >
                               {nestedItem.name}
                             </Link>
@@ -120,15 +117,7 @@ function Navbar() {
               )}
             </motion.div>
           ))}
-          <motion.button
-            onClick={toggleTheme}
-            className="nav-toggle"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            aria-label="Toggle theme"
-          >
-            {isDarkMode ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
-          </motion.button>
+          {/* Removed theme toggle button */}
         </div>
 
         <button
@@ -171,7 +160,7 @@ function Navbar() {
                 {item.subItems ? (
                   <>
                     <div
-                      className="flex justify-between items-center cursor-pointer"
+                      className="flex justify-between items-center cursor-pointer text-gray-300 hover:text-orange-500"
                       onClick={() =>
                         item.name === 'NFT' &&
                         setIsNFTDropdownOpen(!isNFTDropdownOpen)
@@ -215,7 +204,7 @@ function Navbar() {
                                   <Link
                                     key={nestedItem.name}
                                     href={nestedItem.href}
-                                    className="nav-dropdown-item"
+                                    className="nav-dropdown-item hover:text-orange-500"
                                     onClick={() => setIsOpen(false)}
                                   >
                                     {nestedItem.name}
@@ -232,7 +221,7 @@ function Navbar() {
                   <Link
                     href={item.href}
                     className={`block flex items-center space-x-1 ${
-                      pathname === item.href ? 'text-orange-500' : ''
+                      pathname === item.href ? 'text-orange-500' : 'text-gray-300 hover:text-orange-500'
                     }`}
                     onClick={() => setIsOpen(false)}
                   >
@@ -242,13 +231,7 @@ function Navbar() {
                 )}
               </motion.div>
             ))}
-            <motion.button
-              onClick={toggleTheme}
-              className="w-full text-left nav-dropdown-item"
-              variants={itemVariants}
-            >
-              {isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-            </motion.button>
+            {/* Removed theme toggle button */}
           </motion.div>
         )}
       </AnimatePresence>
