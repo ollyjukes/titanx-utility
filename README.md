@@ -459,4 +459,4 @@ cat app/api/holders/Ascendant/route.js app/api/holders/E280/route.js app/api/hol
 
 cat components/NFTPage.js  components/NFTPageWrapper.js components/NFTSummary.js components/HolderTable/Ascendant.js components/HolderTable/Element369.js components/HolderTable/Element280.js components/HolderTable/E280.js components/HolderTable/Stax.js components/SearchResultsModal.js config.js app/store.js  app/page.js app/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js   > ClientStuff.txt
 
-cat components/*.js  components/*.jsx components/HolderTable/*.js config.js app/store.js app/page.js app/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js   > ClientStuff.txt
+cat components/*.js  components/*.jsx components/HolderTable/*.js config.js app/store.js app/page.js app/layout.js app/nft/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js   > ClientStuff.txt
