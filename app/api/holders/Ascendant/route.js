@@ -3,8 +3,10 @@ import { NextResponse } from 'next/server';
 import { createPublicClient, http, formatUnits, getAddress } from 'viem';
 import { mainnet } from 'viem/chains';
 import config from '@/config.js';
-import { getCache, setCache, loadCacheState, saveCacheState, getOwnersForContract, getNftsForOwner, log, batchMulticall, retry, safeSerialize } from '@/app/api/utils';
+import { client, getCache, setCache, loadCacheState, saveCacheState, getOwnersForContract, getNftsForOwner, log, batchMulticall, retry, safeSerialize } from '@/app/api/utils';
 import ascendant from '@/abi/ascendantNFT.json';
+
+
 
 const CONTRACT_ADDRESS = config.contractAddresses.ascendant.address;
 const CACHE_TTL = config.cache.nodeCache.stdTTL;

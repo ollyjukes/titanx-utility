@@ -2,7 +2,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ['viem', 'alchemy-sdk'],
+  serverExternalPackages: ['viem', 'alchemy-sdk', 'pino'],
   webpack: (config) => {
     config.resolve.fallback = { fs: false, path: false };
     return config;
@@ -10,3 +10,4 @@ const nextConfig = {
 };
 
 export default nextConfig;
+

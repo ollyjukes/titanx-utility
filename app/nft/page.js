@@ -4,6 +4,8 @@ import { fetchCollectionData } from '@/lib/fetchCollectionData';
 import config from '@/config';
 import LoadingIndicator from '@/components/LoadingIndicator';
 import NFTSummary from '@/components/NFTSummary';
+import React from 'react';
+
 
 const collections = Object.entries(config.contractDetails).map(([apiKey, { name, apiEndpoint, pageSize, disabled }]) => ({
   apiKey,

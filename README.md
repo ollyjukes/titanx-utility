@@ -227,27 +227,26 @@ Summary for README
 Current State: The application fetches and displays NFT holder data for collections (Element369, Element280, Stax, Ascendant, E280) using Alchemy and viem, with server-side caching (NodeCache) and client-side caching (useNFTStore). Element280’s cache population is slow (fetching_supply), causing delays.
 
 
-Logging: Ensure DEBUG=false outputs only [ERROR] and [VALIDATION] logs, using pino-pretty for readability.
+Logging: Ensure DEBUG=false outputs only [ERROR] and [VALIDATION] logs, using pino-pretty in debug for readability.( this doesn't work in prod)
 Enhance Caching: Use independent caches per collection, polling /progress endpoints to wait for server-side cache completion.
 Improve Loading: Display loading states (<LoadingIndicator>) until each collection’s cache is ready, ensuring smooth switching between collections.
 Support All Collections: Implement consistent /progress endpoints for Element369, Stax, Ascendant, and E280, Element280
 
 Goal:
-data is fetched for NFT collections when the button for that collection is clicked.  the cache should be checked first to make sure the data is available in thde cache.  If its not then the browser should give an animated loading message and then load the data when its fully available and only then render the page.  THe user can switch between NFT colections smoothly and each time its individual memory cache should be queried for complete data and only render once complete. Each NFT colection has its own memoey cache managed my node-cache or Redis depending on whether an env variable is true or false.  I want to ensure the caching is correct before moving to redis.
+data is fetched for NFT collections when the button for that collection is clicked.  the cache should be checked first to make sure the data is available in the cache. The cache needs to contain all the data for that NFT collection ( wallets with live NFTs, their owned tiers, etc) and should either be written to file( node-cache) for quick access or Redit Upstash(controlled by env vars).  the cache needs to persist across server restarts.  If its not then the browser should give an animated loading message and then load the data when its fully available and only then render the page.  THe user can switch between NFT colections smoothly and each time its individual memory cache should be queried for complete data and only render once complete. Each NFT colection has its own memoey cache managed my node-cache (written to file) or Redis Upstash depending on whether an env variable is true or false.  I want to ensure the caching is correct before moving to redis upstash.
 when a user switches to a different nft collection that data fetch should start. if the user switches back to the original nft collection the data fetch should continue from where it left off.
-if a user uses the search functioanlity then this requires that all the data caches are completed before returning results.  The results should be one row for each NFT collection with its corresponding data and displayed on top of each other in a modal dialog.  The data for each collection is usually different.
-If data is in the cache the system should load this but if there any more potential data on the block chain this should be checked first before displaying the data in the holder table. The cache should always be updated with the latest data from the blockchain when a user uses the Browser.
+if a user uses the search functionality then this requires that all the data caches are completed before returning results.  The results should be one row for each NFT collection with its corresponding data and displayed on top of each other in a modal dialog.  The data for each collection is usually different.
+If data is in the cache the system should load this but if there any more potential data on the block chain this should be checked first before displaying the data in the holder table. The cache should always be updated with the latest data from the blockchain when a user uses the Browser.  The cache should hold the lastBlock processed info)
 
 Frontend Validation:
 Verify HolderTable components (components/HolderTable/Element280.js, HolderTable/Element369.js, etc.) display data correctly (e.g., multiplierSum, shares, rewards).
 i need help debugging the code to ensure this happens.
 this project uses the free vercel tier and alchemy
-Enhanced populateHoldersMapCache with debug logging.
 Centralized configuration in config.js with ES Modules.
 Moved ABIs to config.js for consistency.
 Optimized Alchemy settings (batchSize: 10, batchDelayMs: 1000).
 Caching Implementation
-All collections (Element280, Element369, Stax, Ascendant) support Redis caching (via Upstash) and in-memory caching (node-cache) with toggles (DISABLE_*_REDIS in .env.local).
+All collections (Element280, Element369, Stax, Ascendant) support Redis caching (via Upstash) and in-memory/file caching (node-cache) with toggles (DISABLE_*_REDIS in .env.local).
 
 Testing:
 Run the following commands to verify API endpoints:
@@ -259,31 +258,6 @@ curl "http://localhost:3000/api/holders/Stax"
 curl "http://localhost:3000/api/holders/Element369"
 curl "http://localhost:3000/api/holders/Ascendant"
 
-### Plan Going Forward
-1. **Immediate Fixes** 
-   - Update `route.js` to log `inMemoryCacheState` changes and detect resets.
-   - Test in production mode (`npm run build && npm run start`) to avoid dev mode hot reloads.
-   - Optimize `/validate-burned` with caching and progress logs.
-   - Debug `tierDistribution` and `multiplierPool` failures using contract call logs.
-2. **Cache Isolation** 
-   - Modify `inMemoryStorage` to use `inMemoryStorage[contractAddress]` for collection-specific data.
-   - Test with a second NFT collection to ensure no overwrites.
-3. **Switch to `node-cache`** 
-   - Integrate `node-cache` for in-memory caching with TTL and eviction.
-   - Update all cache operations (`getCacheState`, `inMemoryHoldersMap`, `burnedEventsCache`) to use `node-cache`.
-   - Benchmark performance and memory usage.
-4. **Long-Term Improvements** (Next 2-4 weeks):
-   - Add streaming responses for `/validate-burned` to handle large datasets.
-   - Implement Redis fallback for high-traffic scenarios.
-   - Add unit tests for cache isolation and blockchain queries.
-   - Document API endpoints and caching strategy
-
-### Intentions
-- **Fix Progress Endpoint**: Ensure caching persists `totalOwners: 920` and `phase: "Completed"` after POST.
-- **Optimize `/validate-burned`**: Cache results, add progress logging, and batch `getNftTier` calls.
-- **Improve Caching**: Replace `inMemoryStorage` with `node-cache` for robustness, TTL support, and eviction policies. - DONE
-- **Fix Tier Distribution**: Debug and resolve failed `getTotalNftsPerTiers` and `multiplierPool` calls.
-- **Enhance Reliability**: Add error handling, retries, and logging for all blockchain interactions.
 
 *Data**:
   - Total Minted: 16,883 NFTs. ( this will never changed and shoud be hardcoded)
@@ -303,6 +277,7 @@ cat app/api/holders/Element280/route.js \
 app/api/holders/Element280/progress/route.js \
 app/api/holders/Element280/validate-burned/route.js \
 app/api/holders/Stax/route.js \
+app/store.js config.js app/api/utils.js \
 app/api/holders/Stax/progress/route.js > ./routes2.txt
 
 grep app/api/holders/ ./routes1.txt >> routes1.txt
@@ -314,7 +289,20 @@ cat package.json next.config.mjs jsconfig.json tailwind.config.js .env.local .en
 
 clear; cat envs.txt
 clear; cat envs.txt  ./routes1.txt 
-clear; cat ./routes2.txt 
+clear; cat envs.txt ./routes2.txt 
 clear; cat ClientStuff.txt
 
 clear;npm run build
+
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/Stax;

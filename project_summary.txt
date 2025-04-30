@@ -5,22 +5,17 @@ Directory Tree: (Install 'tree' with 'brew install tree' for this feature)
 
 Dependencies from package.json:
   - @heroicons/react
-  - @rushstack/eslint-patch
   - @tanstack/react-query
   - @upstash/redis
-  - alchemy
   - alchemy-sdk
   - async-mutex
   - chart.js
   - dotenv
   - framer-motion
   - next
-  - nextjs
   - node-cache
   - node-fetch
   - p-limit
-  - pino
-  - pino-pretty
   - react
   - react-chartjs-2
   - react-dom
