@@ -1,5 +1,4 @@
 // File: app/nft/[chain]/[contract]/page.js
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -16,10 +15,10 @@ const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), 
 export const dynamic = 'force-dynamic';
 
 async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
-  console.log(`[NFTContractPage] Fetching data for ${apiKey} from ${apiEndpoint}`);
+  console.log(`[NFTContractPage] [INFO] Fetching data for ${apiKey} from ${apiEndpoint}`);
   try {
     if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
-      console.log(`[NFTContractPage] ${apiKey} is disabled`);
+      console.log(`[NFTContractPage] [INFO] ${apiKey} is disabled`);
       return { error: `${apiKey} is not available` };
     }
 
@@ -27,7 +26,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     if (!endpoint || !endpoint.startsWith('http')) {
       const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
       endpoint = `${baseUrl}${apiEndpoint}`;
-      console.log(`[NFTContractPage] Adjusted endpoint: ${endpoint}`);
+      console.log(`[NFTContractPage] [INFO] Adjusted endpoint: ${endpoint}`);
     }
 
     let allHolders = [];
@@ -40,20 +39,50 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
 
     while (page < totalPages) {
       const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
-      console.log(`[NFTContractPage] Fetching ${url}`);
+      console.log(`[NFTContractPage] [DEBUG] Fetching ${url}`);
       const res = await fetch(url, { cache: 'force-cache' });
+      console.log(`[NFTContractPage] [DEBUG] Response status: ${res.status}, headers: ${JSON.stringify([...res.headers])}`);
+
       if (!res.ok) {
         const errorText = await res.text();
-        throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
+        console.error(`[NFTContractPage] [ERROR] Failed to fetch ${url}: ${res.status} ${errorText}`);
+        return { error: `Failed to fetch ${url}: ${res.status} ${errorText}` };
       }
 
       const json = await res.json();
+      console.log(`[NFTContractPage] [DEBUG] Response body: ${JSON.stringify(json, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
+
       if (json.error) {
-        console.log(`[NFTContractPage] API error for ${apiKey}: ${json.error}`);
+        console.error(`[NFTContractPage] [ERROR] API error for ${apiKey}: ${json.error}`);
         return { error: json.error };
       }
       if (!json.holders || !Array.isArray(json.holders)) {
-        throw new Error(`Invalid holders data for ${url}`);
+        console.error(`[NFTContractPage] [ERROR] Invalid holders data for ${url}: ${JSON.stringify(json)}`);
+        if (apiKey === 'ascendant') {
+          console.log(`[NFTContractPage] [INFO] Triggering POST to refresh cache for ${apiKey}`);
+          await fetch(endpoint, { method: 'POST', cache: 'force-cache' });
+          // Retry fetching the page
+          const retryRes = await fetch(url, { cache: 'no-store' });
+          if (!retryRes.ok) {
+            const retryError = await retryRes.text();
+            console.error(`[NFTContractPage] [ERROR] Retry failed for ${url}: ${retryRes.status} ${retryError}`);
+            return { error: `Retry failed: ${retryRes.status}` };
+          }
+          const retryJson = await retryRes.json();
+          console.log(`[NFTContractPage] [DEBUG] Retry response: ${JSON.stringify(retryJson, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
+          if (!retryJson.holders || !Array.isArray(retryJson.holders)) {
+            console.error(`[NFTContractPage] [ERROR] Retry invalid holders data: ${JSON.stringify(retryJson)}`);
+            return { error: 'Invalid holders data after retry' };
+          }
+          json.holders = retryJson.holders;
+          json.totalTokens = retryJson.totalTokens;
+          json.totalShares = retryJson.totalShares;
+          json.totalBurned = retryJson.totalBurned;
+          json.summary = retryJson.summary;
+          json.totalPages = retryJson.totalPages;
+        } else {
+          return { error: 'Invalid holders data' };
+        }
       }
 
       allHolders = allHolders.concat(json.holders);
@@ -63,7 +92,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       summary = json.summary || summary;
       totalPages = json.totalPages || 1;
       page++;
-      console.log(`[NFTContractPage] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
+      console.log(`[NFTContractPage] [INFO] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
     }
 
     return {
@@ -74,7 +103,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       summary,
     };
   } catch (error) {
-    console.error(`[NFTContractPage] Error fetching ${apiKey}: ${error.message}`);
+    console.error(`[NFTContractPage] [ERROR] Error fetching ${apiKey}: ${error.message}, stack: ${error.stack}`);
     return { error: error.message };
   }
 }
@@ -98,7 +127,7 @@ export default function NFTContractPage({ params }) {
 
   useEffect(() => {
     if (!config.supportedChains.includes(chain) || !apiKey) {
-      console.log(`[NFTContractPage] Not found: chain=${chain}, contract=${contract}`);
+      console.log(`[NFTContractPage] [ERROR] Not found: chain=${chain}, contract=${contract}`);
       notFound();
     }
 
@@ -110,21 +139,22 @@ export default function NFTContractPage({ params }) {
       const contractConfig = config.contractDetails[apiKey] || {};
 
       // Check cache first
-      const cachedData = getCache(apiKey);
+      const cacheKey = `contract_${apiKey}`;
+      const cachedData = getCache(cacheKey);
       if (cachedData) {
-        console.log(`[NFTContractPage] Cache hit for ${apiKey}`);
+        console.log(`[NFTContractPage] [INFO] Cache hit for ${cacheKey}`);
         setData(cachedData);
         setLoading(false);
         return;
       }
 
       // Fetch data if not cached
-      console.log(`[NFTContractPage] Cache miss for ${apiKey}, fetching data`);
+      console.log(`[NFTContractPage] [INFO] Cache miss for ${cacheKey}, fetching data`);
       const result = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
       if (result.error) {
         setError(result.error);
       } else {
-        setCache(apiKey, result);
+        setCache(cacheKey, result);
         setData(result);
       }
       setLoading(false);

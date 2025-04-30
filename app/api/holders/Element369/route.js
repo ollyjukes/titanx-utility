@@ -1,14 +1,16 @@
 // app/api/holders/Element369/route.js
 import { NextResponse } from 'next/server';
 import config from '@/config.js';
-import { getOwnersForContract, log, batchMulticall, getCache, setCache } from '@/app/api/utils';
+import { getOwnersForContract, log, batchMulticall, getCache, setCache, loadCacheState, saveCacheState, safeSerialize } from '@/app/api/utils';
 
-const contractAddress = config.contractAddresses.element369.address;
-const vaultAddress = config.vaultAddresses.element369.address;
-const tiersConfig = config.contractDetails.element369.tiers;
-const defaultPageSize = config.contractDetails.element369.pageSize;
-const element369MinimalAbi = config.abis.element369.main;
-const element369VaultMinimalAbi = config.abis.element369.vault;
+const CONTRACT_ADDRESS = config.contractAddresses.element369.address;
+const VAULT_ADDRESS = config.vaultAddresses.element369.address;
+const TIERS_CONFIG = config.contractDetails.element369.tiers;
+const PAGE_SIZE = config.contractDetails.element369.pageSize;
+const ELEMENT369_ABI = config.abis.element369.main;
+const ELEMENT369_VAULT_ABI = config.abis.element369.vault;
+const CACHE_TTL = config.cache.nodeCache.stdTTL;
+const COLLECTION = 'element369';
 
 let cacheState = {
   isPopulating: false,
@@ -34,17 +36,17 @@ export async function getCacheState(_address) {
 
 export async function GET(request) {
   const { searchParams, pathname } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '0');
-  const pageSize = parseInt(searchParams.get('pageSize') || defaultPageSize);
+  const page = parseInt(searchParams.get('page') || '0', 10);
+  const pageSize = parseInt(searchParams.get('pageSize') || PAGE_SIZE, 10);
   const wallet = searchParams.get('wallet')?.toLowerCase();
 
-  if (!contractAddress || !vaultAddress || !tiersConfig || !defaultPageSize) {
-    log(`[Element369] [VALIDATION] Config error: contractAddress=${contractAddress}, vaultAddress=${vaultAddress}, tiersConfig=${tiersConfig}, pageSize=${defaultPageSize}`);
+  if (!CONTRACT_ADDRESS || !VAULT_ADDRESS || !TIERS_CONFIG || !PAGE_SIZE) {
+    log(`[Element369] [VALIDATION] Config error: contractAddress=${CONTRACT_ADDRESS}, vaultAddress=${VAULT_ADDRESS}, tiersConfig=${TIERS_CONFIG}, pageSize=${PAGE_SIZE}`);
     return NextResponse.json({ error: 'Element369 contract, vault address, tiers config, or page size missing' }, { status: 400 });
   }
 
   if (pathname.endsWith('/progress')) {
-    const state = await getCacheState(contractAddress);
+    const state = await getCacheState(CONTRACT_ADDRESS);
     const progressPercentage = state.progressState.totalNfts > 0
       ? ((state.progressState.processedNfts / state.progressState.totalNfts) * 100).toFixed(1)
       : '0.0';
@@ -57,7 +59,7 @@ export async function GET(request) {
     });
   }
 
-  log(`[Element369] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}, contract=${contractAddress}`);
+  log(`[Element369] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}, contract=${CONTRACT_ADDRESS}`);
 
   try {
     const cacheKey = `element369_holders_${page}_${pageSize}_${wallet || 'all'}`;
@@ -65,12 +67,12 @@ export async function GET(request) {
     try {
       if (cacheState.isPopulating) {
         log(`[Element369] [INFO] Waiting for cache population to complete`);
-        return NextResponse.json({ message: 'Cache is populating', ...await getCacheState(contractAddress) });
+        return NextResponse.json({ message: 'Cache is populating', ...await getCacheState(CONTRACT_ADDRESS) });
       }
-      cachedData = await getCache(cacheKey);
+      cachedData = await getCache(cacheKey, COLLECTION);
       if (cachedData) {
         log(`[Element369] [INFO] Cache hit: ${cacheKey}`);
-        return NextResponse.json(cachedData);
+        return NextResponse.json(safeSerialize(cachedData));
       }
       log(`[Element369] [INFO] Cache miss: ${cacheKey}`);
     } catch (cacheError) {
@@ -78,16 +80,28 @@ export async function GET(request) {
     }
 
     cacheState = { ...cacheState, isPopulating: true, step: 'fetching_owners', processedNfts: 0, totalNfts: 0, totalOwners: 0 };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
     log(`[Element369] Fetching owners...`);
-    const owners = await getOwnersForContract(contractAddress, element369MinimalAbi);
+
+    const owners = await getOwnersForContract(CONTRACT_ADDRESS, ELEMENT369_ABI);
+    if (!Array.isArray(owners)) {
+      log(`[Element369] [ERROR] getOwnersForContract returned non-array: ${JSON.stringify(owners)}`);
+      cacheState = { ...cacheState, isPopulating: false, step: 'error' };
+      await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
+      throw new Error('Invalid owners data');
+    }
+
     cacheState = { ...cacheState, step: 'filtering_owners', totalNfts: owners.length, totalOwners: new Set(owners.map(o => o.ownerAddress.toLowerCase())).size };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
 
     const burnAddress = '0x0000000000000000000000000000000000000000';
     const filteredOwners = wallet
       ? owners.filter(owner => owner.ownerAddress.toLowerCase() === wallet && owner.ownerAddress.toLowerCase() !== burnAddress)
       : owners.filter(owner => owner.ownerAddress.toLowerCase() !== burnAddress);
     log(`[Element369] Live owners: ${filteredOwners.length}`);
+
     cacheState = { ...cacheState, step: 'building_token_map' };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
 
     const tokenOwnerMap = new Map();
     const ownerTokens = new Map();
@@ -102,7 +116,9 @@ export async function GET(request) {
       ownerTokens.set(walletAddr, tokens);
     });
     log(`[Element369] Total tokens: ${totalTokens}, tokenOwnerMap size: ${tokenOwnerMap.size}`);
+
     cacheState = { ...cacheState, step: 'fetching_tiers' };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
 
     const allTokenIds = Array.from(tokenOwnerMap.keys());
     const start = page * pageSize;
@@ -111,16 +127,18 @@ export async function GET(request) {
     log(`[Element369] Paginated tokens: ${paginatedTokenIds.length}`);
 
     const tierCalls = paginatedTokenIds.map(tokenId => ({
-      address: contractAddress,
-      abi: element369MinimalAbi,
+      address: CONTRACT_ADDRESS,
+      abi: ELEMENT369_ABI,
       functionName: 'getNftTier',
       args: [BigInt(tokenId)],
     }));
     const tierResults = await batchMulticall(tierCalls);
     log(`[Element369] Tiers fetched for ${tierResults.length} tokens`);
-    cacheState = { ...cacheState, step: 'processing_holders', processedNfts: tierResults.length };
 
-    const maxTier = Math.max(...Object.keys(tiersConfig).filter(key => !isNaN(key)).map(Number));
+    cacheState = { ...cacheState, step: 'processing_holders', processedNfts: tierResults.length };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
+
+    const maxTier = Math.max(...Object.keys(TIERS_CONFIG).filter(key => !isNaN(key)).map(Number));
     const holdersMap = new Map();
 
     tierResults.forEach((result, i) => {
@@ -144,11 +162,11 @@ export async function GET(request) {
           const holder = holdersMap.get(walletAddr);
           holder.total += 1;
           if (tier >= 1 && tier <= maxTier) {
-            holder.multiplierSum += tiersConfig[tier]?.multiplier || 0;
+            holder.multiplierSum += TIERS_CONFIG[tier]?.multiplier || 0;
             holder.tiers[tier - 1] += 1;
           } else {
             log(`[Element369] [ERROR] Invalid tier ${tier} for token ${tokenId}`);
-            holder.multiplierSum += tiersConfig[1]?.multiplier || 0;
+            holder.multiplierSum += TIERS_CONFIG[1]?.multiplier || 0;
           }
         }
       } else {
@@ -158,12 +176,13 @@ export async function GET(request) {
 
     let holders = Array.from(holdersMap.values());
     cacheState = { ...cacheState, step: 'fetching_rewards' };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
 
     const rewardCalls = holders.map(holder => {
       const tokenIds = ownerTokens.get(holder.wallet) || [];
       return {
-        address: vaultAddress,
-        abi: element369VaultMinimalAbi,
+        address: VAULT_ADDRESS,
+        abi: ELEMENT369_VAULT_ABI,
         functionName: 'getRewards',
         args: [tokenIds.map(id => BigInt(id)), holder.wallet, false],
       };
@@ -206,15 +225,39 @@ export async function GET(request) {
       totalPages: wallet ? 1 : Math.ceil(totalTokens / pageSize),
     };
 
-    await setCache(cacheKey, response);
+    await setCache(cacheKey, response, CACHE_TTL, COLLECTION);
     log(`[Element369] [INFO] Cached response: ${cacheKey}`);
 
-    cacheState = { ...cacheState, isPopulating: false, step: 'completed' };
+    cacheState = { ...cacheState, isPopulating: false, step: 'completed', totalOwners: holders.length };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
     log(`[Element369] Success: ${holders.length} holders`);
-    return NextResponse.json(response);
+
+    return NextResponse.json(safeSerialize(response));
   } catch (error) {
-    log(`[Element369] [ERROR] Error: ${error.message}`);
+    log(`[Element369] [ERROR] GET error: ${error.message}, stack: ${error.stack}`);
     cacheState = { ...cacheState, isPopulating: false, step: 'error' };
-    return NextResponse.json({ error: 'Failed to fetch Element369 data', details: error.message }, { status: 500 });
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
+    let status = 500;
+    let message = 'Failed to fetch Element369 data';
+    if (error.message.includes('Rate limit')) {
+      status = 429;
+      message = 'Rate limit exceeded';
+    }
+    return NextResponse.json({ error: message, details: error.message }, { status });
+  }
+}
+
+export async function POST(_request) {
+  try {
+    cacheState = { ...cacheState, isPopulating: true, step: 'starting' };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
+    const cacheKey = `element369_holders_0_${PAGE_SIZE}_all`;
+    const data = await getCache(cacheKey, COLLECTION) || { message: 'Cache population triggered' };
+    return NextResponse.json(data);
+  } catch (error) {
+    log(`[Element369] [ERROR] POST error: ${error.message}, stack: ${error.stack}`);
+    cacheState = { ...cacheState, isPopulating: false, step: 'error' };
+    await saveCacheState(CONTRACT_ADDRESS, cacheState, COLLECTION);
+    return NextResponse.json({ error: 'Failed to populate cache', details: error.message }, { status: 500 });
   }
 }

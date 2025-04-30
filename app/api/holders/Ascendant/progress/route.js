@@ -1,4 +1,4 @@
-// ./app/api/holders/Ascendant/progress/route.js
+// app/api/holders/Ascendant/progress/route.js
 import { NextResponse } from 'next/server';
 import { log } from '@/app/api/utils';
 import { getCacheState } from '@/app/api/holders/Ascendant/route';
@@ -7,14 +7,14 @@ import config from '@/config';
 export async function GET() {
   const address = config.contractAddresses.ascendant.address;
   if (!address) {
-    log(`[ascendant] [VALIDATION] Ascendant contract address not found`);
+    log(`[Ascendant] [VALIDATION] Ascendant contract address not found`);
     return NextResponse.json({ error: 'Ascendant contract address not found' }, { status: 400 });
   }
 
   try {
     const state = await getCacheState(address);
     if (!state || !state.progressState) {
-      log(`[ascendant] [VALIDATION] Invalid cache state for ${address}`);
+      log(`[Ascendant] [VALIDATION] Invalid cache state for ${address}`);
       return NextResponse.json({ error: 'Cache state not initialized' }, { status: 500 });
     }
     const progressPercentage = state.progressState.totalNfts > 0
@@ -29,7 +29,7 @@ export async function GET() {
       progressPercentage,
     });
   } catch (error) {
-    log(`[ascendant] [ERROR] Progress endpoint error: ${error.message}, stack: ${error.stack}`);
+    log(`[Ascendant] [ERROR] Progress endpoint error: ${error.message}, stack: ${error.stack}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }

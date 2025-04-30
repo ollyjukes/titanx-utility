@@ -16,7 +16,7 @@
         "@tanstack/react-query": "^5.59.13",
         "@upstash/redis": "^1.34.4",
         "alchemy": "^0.12.16",
-        "alchemy-sdk": "^3.5.7",
+        "alchemy-sdk": "^3.4.2",
         "async-mutex": "^0.5.0",
         "chart.js": "^4.4.3",
         "dotenv": "^16.4.5",
@@ -26,7 +26,7 @@
         "node-cache": "^5.1.2",
         "node-fetch": "^3.3.2",
         "p-limit": "^6.2.0",
-        "pino": "^9.6.0",
+        "pino": "^9.2.0",
         "pino-pretty": "^13.0.0",
         "react": "^18.3.0",
         "react-chartjs-2": "^5.3.0",
@@ -48,15 +48,29 @@
     },
     "resolutions": {}
 }
+// File: next.config.mjs
+
+// next.config.mjs
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['viem', 'alchemy-sdk', 'zustand', 'node-cache'],
+  reactStrictMode: true,
+  experimental: {
+    serverComponentsExternalPackages: ['pino', 'viem', 'alchemy-sdk'],
+  },
+  webpack: (config) => {
+    config.resolve.fallback = { fs: false, path: false };
+    return config;
+  },
 };
+
 export default nextConfig;{
-    "compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["./*"]}}
-
-}
-
+    "compilerOptions": {
+      "baseUrl": ".",
+      "paths": {
+        "@/*": ["./*"]
+      }
+    }
+  }
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {
@@ -81,6 +95,8 @@ NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID="1dd2a69d54ac94fdefad918243183710"
 UPSTASH_REDIS_REST_TOKEN="AWeIAAIjcDE5ODI2M2QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YXAxMA"
 UPSTASH_REDIS_REST_URL="https://splendid-sunbird-26504.upstash.io"
 ETHERSCAN_API_KEY=GZDQAWE7C9MKSWQ3ANT2BFPUW8SXXZJ9MF
+ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI
+PERSIST_CACHE=true
 
 # Redis on/off switches
 DISABLE_ELEMENT280_REDIS=true
@@ -89,7 +105,7 @@ DISABLE_STAX_REDIS=true
 DISABLE_ASCENDANT_REDIS=true
 DISABLE_E280_REDIS=true
 
-DEBUG=false
+DEBUG=true
 USE_FALLBACK_DATA=false
 
 ESLINT_NO_DEV_ERRORS=true
@@ -117,7 +133,7 @@ DISABLE_STAX_REDIS=true
 DISABLE_ASCENDANT_REDIS=true
 DISABLE_E280_REDIS=true
 
-DEBUG=false
+DEBUG=true
 USE_FALLBACK_DATA=false
 ESLINT_NO_DEV_ERRORS=true
 
@@ -128,4 +144,150 @@ USE_ALCHEMY_FOR_OWNERS=true
 
 # In .env.local
 NEXT_NO_WORKER_THREADS=true
-NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3000export const barChartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top', labels: { color: '#e5e7eb' } }, // Gray-200
+      title: {
+        display: true,
+        text: 'NFT Tier Distribution',
+        color: '#e5e7eb',
+        font: { size: 16, weight: 'bold' },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: { display: true, text: 'Number of NFTs', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' }, // Gray-300
+      },
+      x: {
+        title: { display: true, text: 'Tiers', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' },
+      },
+    },
+  };// File: lib/fetchCollectionData.js
+import config from '@/config';
+
+export async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[FetchCollectionData] [INFO] Fetching ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+      return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' };
+    }
+
+    let endpoint = apiEndpoint.startsWith('http') ? apiEndpoint : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${apiEndpoint}`;
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalShares = 0;
+    let totalBurned = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+
+    while (page < totalPages) {
+      const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[FetchCollectionData] [DEBUG] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'force-cache' });
+      console.log(`[FetchCollectionData] [DEBUG] Status: ${res.status}, headers: ${JSON.stringify([...res.headers])}`);
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FetchCollectionData] [ERROR] Failed: ${res.status} ${errorText}`);
+        throw new Error(`API request failed: ${res.status}`);
+      }
+
+      const json = await res.json();
+      console.log(`[FetchCollectionData] [DEBUG] Response: ${JSON.stringify(json, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+
+      if (json.error) {
+        console.error(`[FetchCollectionData] [ERROR] API error: ${json.error}`);
+        throw new Error(json.error);
+      }
+      if (!json.holders || !Array.isArray(json.holders)) {
+        console.error(`[FetchCollectionData] [ERROR] Invalid holders: ${JSON.stringify(json)}`);
+        if (apiKey === 'ascendant') {
+          console.log(`[FetchCollectionData] [INFO] Triggering POST for ${apiKey}`);
+          await fetch(endpoint, { method: 'POST', cache: 'force-cache' });
+          const retryRes = await fetch(url, { cache: 'no-store' });
+          if (!retryRes.ok) {
+            const retryError = await retryRes.text();
+            console.error(`[FetchCollectionData] [ERROR] Retry failed: ${retryRes.status} ${retryError}`);
+            throw new Error(`Retry failed: ${retryRes.status}`);
+          }
+          const retryJson = await retryRes.json();
+          console.log(`[FetchCollectionData] [DEBUG] Retry response: ${JSON.stringify(retryJson, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+          if (!retryJson.holders || !Array.isArray(retryJson.holders)) {
+            console.error(`[FetchCollectionData] [ERROR] Retry invalid holders: ${JSON.stringify(retryJson)}`);
+            throw new Error('Invalid holders data after retry');
+          }
+          json.holders = retryJson.holders;
+          json.totalTokens = retryJson.totalTokens;
+          json.totalShares = retryJson.totalShares;
+          json.totalBurned = retryJson.totalBurned;
+          json.summary = retryJson.summary;
+          json.totalPages = retryJson.totalPages;
+        } else {
+          throw new Error('Invalid holders data');
+        }
+      }
+
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalTokens;
+      totalBurned = json.totalBurned || totalBurned;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[FetchCollectionData] [INFO] Fetched page ${page}: ${json.holders.length} holders`);
+    }
+
+    return { holders: allHolders, totalTokens, totalShares, totalBurned, summary };
+  } catch (error) {
+    console.error(`[FetchCollectionData] [ERROR] ${apiKey}: ${error.message}, stack: ${error.stack}`);
+    return { holders: [], totalTokens: 0, totalBurned: 0, error: error.message };
+  }
+}// File: lib/logger.js
+import fs from 'fs/promises';
+import path from 'path';
+
+const isDebug = process.env.DEBUG === 'true';
+const logDir = path.join(process.cwd(), 'logs');
+
+export const logger = {
+  info: async (scope, message) => {
+    const log = `[${scope}] [INFO] ${message}`;
+    console.log(log);
+    if (isDebug) {
+      await fs.appendFile(
+        path.join(logDir, `app-${new Date().toISOString().split('T')[0]}.log`),
+        `${new Date().toISOString()} ${log}\n`
+      );
+    }
+  },
+  error: async (scope, message, details = {}) => {
+    const log = `[${scope}] [ERROR] ${message} ${JSON.stringify(details)}`;
+    console.error(log);
+    if (isDebug) {
+      await fs.appendFile(
+        path.join(logDir, `app-${new Date().toISOString().split('T')[0]}.log`),
+        `${new Date().toISOString()} ${log}\n`
+      );
+    }
+  },
+};// File: lib/schemas.js
+import { z } from 'zod';
+
+export const HoldersResponseSchema = z.object({
+  holders: z.array(z.object({
+    wallet: z.string(),
+    total: z.number().optional(),
+    tiers: z.array(z.number()).optional(),
+    shares: z.number().optional(),
+  })),
+  totalTokens: z.number().optional(),
+  totalShares: z.number().optional(),
+  totalBurned: z.number().optional(),
+  summary: z.object({}).optional(),
+  totalPages: z.number().optional(),
+});

@@ -1,4 +1,4 @@
-// ./app/api/holders/Element280/progress/route.js
+// app/api/holders/Element280/progress/route.js
 import { NextResponse } from 'next/server';
 import { log } from '@/app/api/utils';
 import { getCacheState } from '@/app/api/holders/Element280/route';
@@ -7,14 +7,14 @@ import config from '@/config';
 export async function GET() {
   const address = config.contractAddresses.element280.address;
   if (!address) {
-    log(`[element280] [VALIDATION] Element280 contract address not found`);
+    log(`[Element280] [VALIDATION] Element280 contract address not found`);
     return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
   }
 
   try {
     const state = await getCacheState(address);
     if (!state || !state.progressState) {
-      log(`[element280] [VALIDATION] Invalid cache state for ${address}`);
+      log(`[Element280] [VALIDATION] Invalid cache state for ${address}`);
       return NextResponse.json({ error: 'Cache state not initialized' }, { status: 500 });
     }
     const progressPercentage = state.progressState.totalNfts > 0
@@ -29,7 +29,7 @@ export async function GET() {
       progressPercentage,
     });
   } catch (error) {
-    log(`[element280] [ERROR] Progress endpoint error: ${error.message}, stack: ${error.stack}`);
+    log(`[Element280] [ERROR] Progress endpoint error: ${error.message}, stack: ${error.stack}`);
     return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }

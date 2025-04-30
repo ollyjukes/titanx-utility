@@ -1,21 +1,29 @@
 // app/api/holders/Stax/progress/route.js
 import { NextResponse } from 'next/server';
+import { logger } from '@/lib/logger.js';
 import { getCacheState } from '../route';
-import { log } from '@/app/api/utils';
 
-export async function GET(_request) {
+export async function GET() {
   try {
     const state = await getCacheState();
-    const progressPercentage = state.holderCount > 0 ? '100.0' : '0.0';
+    if (!state || !state.progressState) {
+      logger.error('Stax', 'Invalid cache state');
+      return NextResponse.json({ error: 'Cache state not initialized' }, { status: 500 });
+    }
+    const progressPercentage = state.progressState.totalNfts > 0
+      ? ((state.progressState.processedNfts / state.progressState.totalNfts) * 100).toFixed(1)
+      : '0.0';
+
     return NextResponse.json({
-      isPopulating: !state.cached,
+      isPopulating: state.isPopulating,
       totalLiveHolders: state.holderCount,
       totalOwners: state.holderCount,
-      phase: state.cached ? 'Completed' : 'Idle',
+      phase: state.progressState.step.charAt(0).toUpperCase() + state.progressState.step.slice(1),
       progressPercentage,
+      error: state.progressState.error || null,
     });
   } catch (error) {
-    log(`[Stax] [ERROR] Progress endpoint error: ${error.message}`);
-    return NextResponse.json({ error: 'Failed to fetch cache state' }, { status: 500 });
+    logger.error('Stax', `Progress endpoint error: ${error.message}`);
+    return NextResponse.json({ error: 'Failed to fetch cache state', details: error.message }, { status: 500 });
   }
 }

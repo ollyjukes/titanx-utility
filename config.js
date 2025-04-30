@@ -249,16 +249,16 @@ const config = {
     return config.nftContracts[contractName] || null;
   },
 
-  // Alchemy settings (optimized for free tier)
   alchemy: {
+    apiKey: process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
     network: 'eth-mainnet',
     batchSize: 10,
     batchDelayMs: 1000,
     retryMaxDelayMs: 30000,
     maxRetries: 3,
-    timeoutMs: 30000 // 30 seconds
+    timeoutMs: 30000,
   },
-
+  
   // Cache settings
   cache: {
     redis: {
