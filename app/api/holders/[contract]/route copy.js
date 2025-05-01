@@ -52,10 +52,10 @@ async function getCacheState(contractKey) {
         lastProcessedBlock: savedState.lastProcessedBlock ?? null,
         globalMetrics: savedState.globalMetrics ?? {},
       });
-      logger.debug('utils', `Loaded cache state: totalOwners=${cacheState.totalOwners}, step=${cacheState.progressState.step}`, 'eth', contractKey);
+      logger.debug(contractKey, `Loaded cache state: totalOwners=${cacheState.totalOwners}, step=${cacheState.progressState.step}`);
     }
   } catch (error) {
-    logger.error('utils', `Failed to load cache state: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    logger.error(contractKey, `Failed to load cache state: ${error.message}`, { stack: error.stack });
   }
   return cacheState;
 }
@@ -64,9 +64,9 @@ async function getCacheState(contractKey) {
 async function saveCacheStateContract(contractKey, cacheState) {
   try {
     await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
-    logger.debug('utils', `Saved cache state: totalOwners=${cacheState.totalOwners}, step=${cacheState.progressState.step}`, 'eth', contractKey);
+    logger.debug(contractKey, `Saved cache state: totalOwners=${cacheState.totalOwners}, step=${cacheState.progressState.step}`);
   } catch (error) {
-    logger.error('utils', `Failed to save cache state: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    logger.error(contractKey, `Failed to save cache state: ${error.message}`, { stack: error.stack });
   }
 }
 
@@ -77,7 +77,7 @@ async function getNewEvents(contractKey, contractAddress, fromBlock, errorLog) {
   let cachedEvents = await getCache(cacheKey, contractKey.toLowerCase());
 
   if (cachedEvents) {
-    logger.info('utils', `Events cache hit: ${cacheKey}, count: ${cachedEvents.burnedTokenIds.length + (cachedEvents.transferTokenIds?.length || 0)}`, 'eth', contractKey);
+    logger.info(contractKey, `Events cache hit: ${cacheKey}, count: ${cachedEvents.burnedTokenIds.length + (cachedEvents.transferTokenIds?.length || 0)}`);
     return cachedEvents;
   }
 
@@ -87,13 +87,13 @@ async function getNewEvents(contractKey, contractAddress, fromBlock, errorLog) {
   try {
     endBlock = await client.getBlockNumber();
   } catch (error) {
-    logger.error('utils', `Failed to fetch block number: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    logger.error(contractKey, `Failed to fetch block number: ${error.message}`, { stack: error.stack });
     errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_block_number', error: error.message });
     throw error;
   }
 
   if (fromBlock >= endBlock) {
-    logger.info('utils', `No new blocks: fromBlock ${fromBlock} >= endBlock ${endBlock}`, 'eth', contractKey);
+    logger.info(contractKey, `No new blocks: fromBlock ${fromBlock} >= endBlock ${endBlock}`);
     return { burnedTokenIds, transferTokenIds, lastBlock: Number(endBlock) };
   }
 
@@ -112,10 +112,10 @@ async function getNewEvents(contractKey, contractAddress, fromBlock, errorLog) {
       .map(log => ({ tokenId: Number(log.args.tokenId), from: log.args.from.toLowerCase(), to: log.args.to.toLowerCase() }));
     const cacheData = { burnedTokenIds, transferTokenIds, lastBlock: Number(endBlock), timestamp: Date.now() };
     await setCache(cacheKey, cacheData, config.cache.nodeCache.stdTTL, contractKey.toLowerCase());
-    logger.info('utils', `Cached events: ${cacheKey}, burns: ${burnedTokenIds.length}, transfers: ${transferTokenIds.length}`, 'eth', contractKey);
+    logger.info(contractKey, `Cached events: ${cacheKey}, burns: ${burnedTokenIds.length}, transfers: ${transferTokenIds.length}`);
     return cacheData;
   } catch (error) {
-    logger.error('utils', `Failed to fetch events: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    logger.error(contractKey, `Failed to fetch events: ${error.message}`, { stack: error.stack });
     errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_events', error: error.message });
     throw error;
   }
@@ -141,10 +141,10 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   let currentBlock;
   try {
     currentBlock = await client.getBlockNumber();
-    logger.debug('utils', `Fetched current block: ${currentBlock}`, 'eth', contractKey);
+    logger.debug(contractKey, `Fetched current block: ${currentBlock}`);
   } catch (error) {
     errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_block_number', error: error.message });
-    logger.error('utils', `Failed to fetch block number: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    logger.error(contractKey, `Failed to fetch block number: ${error.message}`, { stack: error.stack });
     throw error;
   }
 
@@ -159,7 +159,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
     );
     const totalShares = parseFloat(formatUnits(totalSharesRaw, 18));
-    logger.debug('utils', `Total shares: ${totalShares}`, 'eth', contractKey);
+    logger.debug(contractKey, `Total shares: ${totalShares}`);
 
     // Fetch toDistribute for day8, day28, day90
     const toDistributeDay8Raw = await retry(
@@ -195,84 +195,50 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     cacheState.progressState.step = 'fetching_holders';
     await saveCacheStateContract(contractKey, cacheState);
 
-    // Fetch owners and tokenIds
-    let tokenOwnerMap = new Map();
+    // Fetch owners and tokenIds using Alchemy
+    let owners = [];
+    let pageKey = null;
+    do {
+      const response = await retry(
+        () => alchemy.nft.getOwnersForContract(contractAddress, {
+          block: 'latest',
+          withTokenBalances: true,
+          pageKey,
+        }),
+        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+      );
+      owners = owners.concat(response.owners);
+      pageKey = response.pageKey;
+      logger.debug(contractKey, `Fetched ${response.owners.length} owners, pageKey: ${pageKey}`);
+    } while (pageKey);
+
+    // Filter out burn address and invalid owners
+    const filteredOwners = owners.filter(
+      (owner) => owner?.ownerAddress && owner.ownerAddress.toLowerCase() !== burnAddress.toLowerCase() && owner.tokenBalances?.length > 0
+    );
+    logger.debug(contractKey, `Filtered owners: ${filteredOwners.length}`);
+
+    // Build tokenOwnerMap
+    const tokenOwnerMap = new Map();
     let totalTokens = 0;
-    try {
-      // Use getOwnersForContract from utils.js
-      const owners = await retry(
-        () => getOwnersForContract(contractAddress, abi, { withTokenBalances: true }),
-        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
-      );
-
-      // Filter out burn address and invalid owners
-      const filteredOwners = owners.filter(
-        (owner) => owner?.ownerAddress && owner.ownerAddress.toLowerCase() !== burnAddress.toLowerCase() && owner.tokenBalances?.length > 0
-      );
-      logger.debug('utils', `Filtered owners: ${filteredOwners.length}`, 'eth', contractKey);
-
-      // Build tokenOwnerMap
-      filteredOwners.forEach((owner) => {
-        if (!owner.ownerAddress) return;
-        let wallet;
-        try {
-          wallet = getAddress(owner.ownerAddress).toLowerCase();
-        } catch (e) {
-          logger.warn('utils', `Invalid wallet address: ${owner.ownerAddress}`, 'eth', contractKey);
-          errorLog.push({ timestamp: new Date().toISOString(), phase: 'process_owner', ownerAddress: owner.ownerAddress, error: 'Invalid wallet address' });
-          return;
-        }
-        owner.tokenBalances.forEach((tb) => {
-          if (!tb.tokenId) return;
-          const tokenId = Number(tb.tokenId);
-          tokenOwnerMap.set(tokenId, wallet);
-          totalTokens++;
-        });
-      });
-      logger.debug('utils', `Total tokens (Alchemy): ${totalTokens}`, 'eth', contractKey);
-    } catch (error) {
-      logger.warn('utils', `Failed to fetch owners via getOwnersForContract: ${error.message}, falling back to Transfer events`, 'eth', contractKey);
-      errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_owners_alchemy', error: error.message });
-
-      // Fallback: Use Transfer events
-      const fromBlock = BigInt(config.deploymentBlocks[contractKey]?.block || 0);
-      const toBlock = currentBlock;
-      const transferLogs = await retry(
-        async () => {
-          const logs = await client.getLogs({
-            address: contractAddress,
-            event: parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'),
-            fromBlock,
-            toBlock,
-          });
-          return logs;
-        },
-        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
-      );
-
-      for (const log of transferLogs) {
-        const from = log.args.from.toLowerCase();
-        const to = log.args.to.toLowerCase();
-        const tokenId = Number(log.args.tokenId);
-
-        if (to === burnAddress.toLowerCase()) {
-          totalBurned += 1;
-          tokenOwnerMap.delete(tokenId);
-          logger.debug('utils', `Token ${tokenId} burned to ${to}`, 'eth', contractKey);
-          continue;
-        }
-
-        if (from === '0x0000000000000000000000000000000000000000') {
-          tokenOwnerMap.set(tokenId, to);
-          totalTokens++;
-          logger.debug('utils', `Token ${tokenId} minted to ${to}`, 'eth', contractKey);
-        } else {
-          tokenOwnerMap.set(tokenId, to);
-          logger.debug('utils', `Token ${tokenId} transferred to ${to}`, 'eth', contractKey);
-        }
+    filteredOwners.forEach((owner) => {
+      if (!owner.ownerAddress) return;
+      let wallet;
+      try {
+        wallet = getAddress(owner.ownerAddress).toLowerCase();
+      } catch (e) {
+        logger.warn(contractKey, `Invalid wallet address: ${owner.ownerAddress}`);
+        errorLog.push({ timestamp: new Date().toISOString(), phase: 'process_owner', ownerAddress: owner.ownerAddress, error: 'Invalid wallet address' });
+        return;
       }
-      logger.debug('utils', `Total tokens (Transfer events): ${totalTokens}`, 'eth', contractKey);
-    }
+      owner.tokenBalances.forEach((tb) => {
+        if (!tb.tokenId) return;
+        const tokenId = Number(tb.tokenId);
+        tokenOwnerMap.set(tokenId, wallet);
+        totalTokens++;
+      });
+    });
+    logger.debug(contractKey, `Total tokens: ${totalTokens}`);
 
     cacheState.progressState.totalNfts = totalTokens;
     cacheState.progressState.totalTiers = totalTokens;
@@ -282,7 +248,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     if (totalTokens === 0) {
       cacheState.progressState.step = 'completed';
       await saveCacheStateContract(contractKey, cacheState);
-      logger.debug('utils', `No tokens found, returning empty holdersMap`, 'eth', contractKey);
+      logger.debug(contractKey, `No tokens found, returning empty holdersMap`);
       return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
     }
 
@@ -307,7 +273,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
 
     const chunkSize = config.nftContracts[contractKey]?.maxTokensPerOwnerQuery || 1000;
     const concurrencyLimit = pLimit(4);
-    logger.debug('utils', `Fetching userRecords and tiers for ${tokenIds.length} tokens in chunks of ${chunkSize}`, 'eth', contractKey);
+    logger.debug(contractKey, `Fetching userRecords and tiers for ${tokenIds.length} tokens in chunks of ${chunkSize}`);
 
     // Batch userRecords calls
     const recordResults = [];
@@ -320,7 +286,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       recordResults.push(...results);
       cacheState.progressState.processedNfts = Math.min(i + chunkSize, tokenIds.length);
       await saveCacheStateContract(contractKey, cacheState);
-      logger.debug('utils', `Processed userRecords for ${cacheState.progressState.processedNfts}/${tokenIds.length} tokens`, 'eth', contractKey);
+      logger.debug(contractKey, `Processed userRecords for ${cacheState.progressState.processedNfts}/${tokenIds.length} tokens`);
     }
 
     // Batch getNFTAttribute calls
@@ -338,7 +304,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       tierResults.push(...results);
       cacheState.progressState.processedTiers = Math.min(i + chunkSize, tokenIds.length);
       await saveCacheStateContract(contractKey, cacheState);
-      logger.debug('utils', `Processed tiers for ${cacheState.progressState.processedTiers}/${tokenIds.length} tokens`, 'eth', contractKey);
+      logger.debug(contractKey, `Processed tiers for ${cacheState.progressState.processedTiers}/${tokenIds.length} tokens`);
     }
 
     // Group tokenIds by wallet for batchClaimableAmount
@@ -371,7 +337,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
       );
       claimableResults.push(...results);
-      logger.debug('utils', `Processed claimable amounts for ${i + chunk.length}/${claimableCalls.length} wallets`, 'eth', contractKey);
+      logger.debug(contractKey, `Processed claimable amounts for ${i + chunk.length}/${claimableCalls.length} wallets`);
     }
 
     // Process results and build holdersMap
@@ -384,7 +350,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     tokenIds.forEach((tokenId, i) => {
       const wallet = tokenOwnerMap.get(tokenId);
       if (!wallet) {
-        logger.warn('utils', `No owner found for token ${tokenId}`, 'eth', contractKey);
+        logger.warn(contractKey, `No owner found for token ${tokenId}`);
         errorLog.push({ timestamp: new Date().toISOString(), phase: 'process_token', tokenId, error: 'No owner found' });
         return;
       }
@@ -395,9 +361,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       if (recordResult.status === 'success' && Array.isArray(recordResult.result)) {
         shares = parseFloat(formatUnits(recordResult.result[0] || 0, 18));
         lockedAscendant = parseFloat(formatUnits(recordResult.result[1] || 0, 18));
-        logger.debug('utils', `userRecords for token ${tokenId}: shares=${shares}, lockedAscendant=${lockedAscendant}`, 'eth', contractKey);
+        logger.debug(contractKey, `userRecords for token ${tokenId}: shares=${shares}, lockedAscendant=${lockedAscendant}`);
       } else {
-        logger.error('utils', `Failed to fetch userRecords for token ${tokenId}: ${recordResult.error || 'unknown error'}`, 'eth', contractKey);
+        logger.error(contractKey, `Failed to fetch userRecords for token ${tokenId}: ${recordResult.error || 'unknown error'}`);
         errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_records', tokenId, wallet, error: recordResult.error || 'unknown error' });
         return;
       }
@@ -406,9 +372,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       const tierResult = tierResults[i];
       if (tierResult.status === 'success') {
         tier = Number(tierResult.result.tier || 0); // getNFTAttribute returns { rarityNumber, tier, rarity }
-        logger.debug('utils', `getNFTAttribute for token ${tokenId}: tier=${tier}`, 'eth', contractKey);
+        logger.debug(contractKey, `getNFTAttribute for token ${tokenId}: tier=${tier}`);
       } else {
-        logger.error('utils', `Failed to fetch getNFTAttribute for token ${tokenId}: ${tierResult.error || 'unknown error'}`, 'eth', contractKey);
+        logger.error(contractKey, `Failed to fetch getNFTAttribute for token ${tokenId}: ${tierResult.error || 'unknown error'}`);
         errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId, wallet, error: tierResult.error || 'unknown error' });
         return;
       }
@@ -434,9 +400,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         if (tier >= 1 && tier <= maxTier) {
           holder.tiers[tier - 1] += 1;
           holder.multiplierSum += config.contractTiers[contractKey][tier]?.multiplier || 0;
-          logger.debug('utils', `Assigned tier ${tier} to token ${tokenId}, wallet ${wallet}`, 'eth', contractKey);
+          logger.debug(contractKey, `Assigned tier ${tier} to token ${tokenId}, wallet ${wallet}`);
         } else {
-          logger.warn('utils', `Invalid tier ${tier} for token ${tokenId}, wallet ${wallet}`, 'eth', contractKey);
+          logger.warn(contractKey, `Invalid tier ${tier} for token ${tokenId}, wallet ${wallet}`);
           errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId, wallet, error: `Invalid tier ${tier}` });
         }
         holder.shares += shares;
@@ -457,9 +423,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       const claimableResult = claimableResults[claimableIndex];
       if (claimableResult?.status === 'success') {
         holder.claimableRewards = parseFloat(formatUnits(claimableResult.result || 0, 18));
-        logger.debug('utils', `Claimable rewards for wallet ${wallet}: ${holder.claimableRewards}`, 'eth', contractKey);
+        logger.debug(contractKey, `Claimable rewards for wallet ${wallet}: ${holder.claimableRewards}`);
       } else {
-        logger.error('utils', `Failed to fetch claimableRewards for wallet ${wallet}: ${claimableResult?.error || 'unknown error'}`, 'eth', contractKey);
+        logger.error(contractKey, `Failed to fetch claimableRewards for wallet ${wallet}: ${claimableResult?.error || 'unknown error'}`);
         errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_claimable', wallet, error: claimableResult?.error || 'unknown error' });
       }
       claimableIndex++;
@@ -481,12 +447,12 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       holder.pendingDay90 = holder.shares * pendingRewardPerShareDay90;
       holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
       holder.displayMultiplierSum = holder.multiplierSum;
-      logger.debug('utils', `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, shares=${holder.shares}`, 'eth', contractKey);
+      logger.debug(contractKey, `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, shares=${holder.shares}`);
     });
 
     holderList.sort((a, b) => b.shares - a.shares || b.multiplierSum - a.multiplierSum || b.total - a.total);
     holderList.forEach((holder, index) => (holder.rank = index + 1));
-    logger.debug('utils', `Sorted holders: count=${holderList.length}, topHolder=${JSON.stringify(holderList[0])}`, 'eth', contractKey);
+    logger.debug(contractKey, `Sorted holders: count=${holderList.length}, topHolder=${JSON.stringify(holderList[0])}`);
 
     cacheState.totalOwners = holderList.length;
     cacheState.totalLiveHolders = holderList.length;
@@ -505,7 +471,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       pendingRewards: toDistributeDay8 + toDistributeDay28 + toDistributeDay90,
     };
     await saveCacheStateContract(contractKey, cacheState);
-    logger.info('utils', `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}, totalShares=${totalShares}`, 'eth', contractKey);
+    logger.info(contractKey, `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}, totalShares=${totalShares}`);
 
     return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
   } else {
@@ -517,7 +483,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       },
       { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
     );
-    logger.debug('utils', `Total supply: ${totalSupply}`, 'eth', contractKey);
+    logger.debug(contractKey, `Total supply: ${totalSupply}`);
 
     let burnedCountContract = 0;
     try {
@@ -529,9 +495,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         },
         { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
       );
-      logger.debug('utils', `Burned count from contract: ${burnedCountContract}`, 'eth', contractKey);
+      logger.debug(contractKey, `Burned count from contract: ${burnedCountContract}`);
     } catch (error) {
-      logger.error('utils', `Failed to fetch totalBurned: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+      logger.error(contractKey, `Failed to fetch totalBurned: ${error.message}`, { stack: error.stack });
       errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_burned', error: error.message });
     }
     totalBurned = burnedCountContract;
@@ -544,30 +510,30 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     if (totalSupply === 0) {
       cacheState.progressState.step = 'completed';
       await saveCacheStateContract(contractKey, cacheState);
-      logger.debug('utils', `No NFTs (totalSupply=0), returning empty holdersMap`, 'eth', contractKey);
+      logger.debug(contractKey, `No NFTs (totalSupply=0), returning empty holdersMap`);
       return { holdersMap, totalBurned, lastBlock: Number(currentBlock) };
     }
 
     cacheState.progressState.step = 'fetching_owners';
     await saveCacheStateContract(contractKey, cacheState);
 
-    logger.debug('utils', `Fetching owners for ${totalSupply} tokens using getOwnersForContract`, 'eth', contractKey);
+    logger.debug(contractKey, `Fetching owners for ${totalSupply} tokens using Alchemy NFT API`);
     const owners = await retry(
       () => getOwnersForContract(contractAddress, abi, { withTokenBalances: true }),
       { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
     );
-    logger.debug('utils', `Fetched owners: count=${owners.length}, sample=${JSON.stringify(owners.slice(0, 2))}`, 'eth', contractKey);
+    logger.debug(contractKey, `Fetched owners: count=${owners.length}, sample=${JSON.stringify(owners.slice(0, 2))}`);
 
     let processedTokens = 0;
     for (const owner of owners) {
       const wallet = owner.ownerAddress.toLowerCase();
-      logger.debug('utils', `Processing owner: wallet=${wallet}, tokenBalancesCount=${owner.tokenBalances.length}`, 'eth', contractKey);
+      logger.debug(contractKey, `Processing owner: wallet=${wallet}, tokenBalancesCount=${owner.tokenBalances.length}`);
 
       const tokenIds = owner.tokenBalances
         .map(tb => {
           const tokenId = Number(tb.tokenId);
           if (isNaN(tokenId) || tokenId < 0) {
-            logger.warn('utils', `Invalid tokenId ${tb.tokenId} for wallet ${wallet}`, 'eth', contractKey);
+            logger.warn(contractKey, `Invalid tokenId ${tb.tokenId} for wallet ${wallet}`);
             return null;
           }
           return tokenId;
@@ -575,13 +541,13 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         .filter(id => id !== null);
 
       if (tokenIds.length === 0) {
-        logger.warn('utils', `No valid token IDs for wallet ${wallet}`, 'eth', contractKey);
+        logger.warn(contractKey, `No valid token IDs for wallet ${wallet}`);
         continue;
       }
 
       if (wallet === burnAddress.toLowerCase()) {
         totalBurned += owner.tokenBalances.reduce((sum, tb) => sum + Number(tb.balance), 0);
-        logger.debug('utils', `Incremented totalBurned by ${owner.tokenBalances.reduce((sum, tb) => sum + Number(tb.balance), 0)} for burn address`, 'eth', contractKey);
+        logger.debug(contractKey, `Incremented totalBurned by ${owner.tokenBalances.reduce((sum, tb) => sum + Number(tb.balance), 0)} for burn address`);
         continue;
       }
 
@@ -599,16 +565,16 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       holder.tokenIds.push(...tokenIds);
       holder.total += tokenIds.length;
       holdersMap.set(wallet, holder);
-      logger.debug('utils', `Added to holdersMap: wallet=${wallet}, totalTokens=${holder.total}`, 'eth', contractKey);
+      logger.debug(contractKey, `Added to holdersMap: wallet=${wallet}, totalTokens=${holder.total}`);
 
       cacheState.progressState.processedNfts = processedTokens;
       if (processedTokens % 1000 === 0) await saveCacheStateContract(contractKey, cacheState);
     }
 
-    logger.debug('utils', `Holders map size: ${holdersMap.size}, totalBurned: ${totalBurned}, processedTokens: ${processedTokens}`, 'eth', contractKey);
+    logger.debug(contractKey, `Holders map size: ${holdersMap.size}, totalBurned: ${totalBurned}, processedTokens: ${processedTokens}`);
     await saveCacheStateContract(contractKey, cacheState);
     await setCache(`${contractKey.toLowerCase()}_holders_partial`, { holders: Array.from(holdersMap.values()), totalBurned, timestamp: Date.now() }, 0, contractKey.toLowerCase());
-    logger.info('utils', `Fetched ${processedTokens} owners, ${holdersMap.size} unique holders`, 'eth', contractKey);
+    logger.info(contractKey, `Fetched ${processedTokens} owners, ${holdersMap.size} unique holders`);
 
     cacheState.progressState.step = 'fetching_tiers';
     cacheState.progressState.processedTiers = 0;
@@ -622,7 +588,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     }
 
     const validTokenIds = Array.from(tokenIdToOwner.keys());
-    logger.debug('utils', `Valid token IDs for tier fetching: count=${validTokenIds.length}, sample=${JSON.stringify(validTokenIds.slice(0, 5))}`, 'eth', contractKey);
+    logger.debug(contractKey, `Valid token IDs for tier fetching: count=${validTokenIds.length}, sample=${JSON.stringify(validTokenIds.slice(0, 5))}`);
     const tierCalls = validTokenIds.map(tokenId => ({
       address: contractAddress,
       abi,
@@ -633,13 +599,13 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     if (tierCalls.length > 0) {
       const chunkSize = config.nftContracts[contractKey]?.maxTokensPerOwnerQuery || 1000;
       const concurrencyLimit = pLimit(4);
-      logger.debug('utils', `Fetching tiers for ${tierCalls.length} tokens in chunks of ${chunkSize}`, 'eth', contractKey);
+      logger.debug(contractKey, `Fetching tiers for ${tierCalls.length} tokens in chunks of ${chunkSize}`);
       const tierPromises = [];
       for (let i = 0; i < tierCalls.length; i += chunkSize) {
         const chunk = tierCalls.slice(i, i + chunkSize);
         tierPromises.push(
           concurrencyLimit(async () => {
-            logger.debug('utils', `Processing tier batch ${i / chunkSize + 1} with ${chunk.length} calls`, 'eth', contractKey);
+            logger.debug(contractKey, `Processing tier batch ${i / chunkSize + 1} with ${chunk.length} calls`);
             try {
               const tierResults = await retry(() => batchMulticall(chunk, config.alchemy.batchSize), {
                 retries: config.alchemy.maxRetries,
@@ -650,7 +616,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
                 const tokenId = validTokenIds[i + index];
                 const owner = tokenIdToOwner.get(tokenId);
                 if (!owner) {
-                  logger.debug('utils', `Skipped tier for tokenId ${tokenId}: no owner found`, 'eth', contractKey);
+                  logger.debug(contractKey, `Skipped tier for tokenId ${tokenId}: no owner found`);
                   return;
                 }
 
@@ -661,22 +627,22 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
                   if (tier >= 1 && tier <= maxTier) {
                     holder.tiers[tier - 1]++;
                     holder.multiplierSum += config.contractTiers[contractKey][tier]?.multiplier || 0;
-                    logger.debug('utils', `Tier ${tier} for token ${tokenId} assigned to wallet ${owner}`, 'eth', contractKey);
+                    logger.debug(contractKey, `Tier ${tier} for token ${tokenId} assigned to wallet ${owner}`);
                   } else {
-                    logger.warn('utils', `Invalid tier ${tier} for token ${tokenId}, wallet ${owner}`, 'eth', contractKey);
+                    logger.warn(contractKey, `Invalid tier ${tier} for token ${tokenId}, wallet ${owner}`);
                     errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId, error: `Invalid tier ${tier}` });
                   }
                 } else {
-                  logger.warn('utils', `Failed to fetch tier for token ${tokenId}: ${result.error || 'unknown error'}`, 'eth', contractKey);
+                  logger.warn(contractKey, `Failed to fetch tier for token ${tokenId}: ${result.error || 'unknown error'}`);
                   errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId, error: result.error || 'unknown error' });
                 }
               });
 
               cacheState.progressState.processedTiers += chunk.length;
               await saveCacheStateContract(contractKey, cacheState);
-              logger.debug('utils', `Processed ${cacheState.progressState.processedTiers}/${cacheState.progressState.totalTiers} tiers`, 'eth', contractKey);
+              logger.debug(contractKey, `Processed ${cacheState.progressState.processedTiers}/${cacheState.progressState.totalTiers} tiers`);
             } catch (error) {
-              logger.error('utils', `Tier batch ${i / chunkSize + 1} failed: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+              logger.error(contractKey, `Tier batch ${i / chunkSize + 1} failed: ${error.message}`, { stack: error.stack });
               errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier_batch', batch: i / chunkSize + 1, error: error.message });
             }
           })
@@ -684,7 +650,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       }
       await Promise.all(tierPromises);
     } else {
-      logger.warn('utils', `No valid token IDs found for tier fetching`, 'eth', contractKey);
+      logger.warn(contractKey, `No valid token IDs found for tier fetching`);
     }
 
     cacheState.progressState.step = 'calculating_metrics';
@@ -695,12 +661,12 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     holderList.forEach(holder => {
       holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
       holder.displayMultiplierSum = holder.multiplierSum / (contractKey === 'element280' ? 10 : 1);
-      logger.debug('utils', `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, displayMultiplierSum=${holder.displayMultiplierSum}`, 'eth', contractKey);
+      logger.debug(contractKey, `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, displayMultiplierSum=${holder.displayMultiplierSum}`);
     });
 
     holderList.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
     holderList.forEach((holder, index) => (holder.rank = index + 1));
-    logger.debug('utils', `Sorted holders: count=${holderList.length}, topHolder=${JSON.stringify(holderList[0])}`, 'eth', contractKey);
+    logger.debug(contractKey, `Sorted holders: count=${holderList.length}, topHolder=${JSON.stringify(holderList[0])}`);
 
     cacheState.totalOwners = holderList.length;
     cacheState.totalLiveHolders = holderList.length;
@@ -710,7 +676,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     cacheState.progressState.error = null;
     cacheState.progressState.errorLog = errorLog;
     await saveCacheStateContract(contractKey, cacheState);
-    logger.info('utils', `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}`, 'eth', contractKey);
+    logger.info(contractKey, `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}`);
     return { holdersMap, totalBurned, lastBlock: Number(currentBlock) };
   }
 }
@@ -719,7 +685,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
 async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultAddress, vaultAbi, forceUpdate = false) {
   let cacheState = await getCacheState(contractKey);
   if (cacheState.isPopulating && !forceUpdate) {
-    logger.info('utils', 'Cache population already in progress', 'eth', contractKey);
+    logger.info(contractKey, 'Cache population already in progress');
     return { status: 'in_progress', holders: null };
   }
 
@@ -750,7 +716,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
       if (burnedTokenIds.length > 0 || transferTokenIds.length > 0) {
         const holdersMap = new Map();
         let totalBurned = cachedData.totalBurned || 0;
-        logger.debug('utils', `Initial totalBurned from cache: ${totalBurned}`, 'eth', contractKey);
+        logger.debug(contractKey, `Initial totalBurned from cache: ${totalBurned}`);
 
         for (const holder of cachedData.holders) {
           const updatedTokenIds = holder.tokenIds.filter(id => !burnedTokenIds.includes(id));
@@ -785,19 +751,19 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
             tierResults.forEach((result, index) => {
               if (result.status === 'success' && result.result) {
                 const tier = contractKey === 'ascendant'
-                  ? Number(result.result.tier || 0)
+                  ? (Array.isArray(result.result) ? Number(result.result[1] || 0) : Number(result.result.tier || 0))
                   : Number(result.result);
                 const maxTier = Object.keys(config.contractTiers[contractKey]).length;
                 if (tier >= 1 && tier <= maxTier) {
                   updatedHolder.tiers[tier - 1]++;
                   updatedHolder.multiplierSum += config.contractTiers[contractKey][tier]?.multiplier || 0;
-                  logger.debug('utils', `Tier ${tier} for token ${updatedTokenIds[index]} assigned to wallet ${holder.wallet}`, 'eth', contractKey);
+                  logger.debug(contractKey, `Tier ${tier} for token ${updatedTokenIds[index]} assigned to wallet ${holder.wallet}`);
                 } else {
-                  logger.warn('utils', `Invalid tier ${tier} for token ${updatedTokenIds[index]}, wallet ${holder.wallet}`, 'eth', contractKey);
+                  logger.warn(contractKey, `Invalid tier ${tier} for token ${updatedTokenIds[index]}, wallet ${holder.wallet}`);
                   errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId: updatedTokenIds[index], error: `Invalid tier ${tier}` });
                 }
               } else {
-                logger.warn('utils', `Failed to fetch tier for token ${updatedTokenIds[index]}: ${result.error || 'unknown error'}`, 'eth', contractKey);
+                logger.warn(contractKey, `Failed to fetch tier for token ${updatedTokenIds[index]}: ${result.error || 'unknown error'}`);
                 errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId: updatedTokenIds[index], error: result.error || 'unknown error' });
               }
             });
@@ -817,9 +783,9 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
                 if (result.status === 'success' && Array.isArray(result.result)) {
                   updatedHolder.shares += parseFloat(formatUnits(result.result[0] || 0, 18));
                   updatedHolder.lockedAscendant += parseFloat(formatUnits(result.result[1] || 0, 18));
-                  logger.debug('utils', `userRecords for token ${updatedTokenIds[index]}: shares=${updatedHolder.shares}, lockedAscendant=${updatedHolder.lockedAscendant}`, 'eth', contractKey);
+                  logger.debug(contractKey, `userRecords for token ${updatedTokenIds[index]}: shares=${updatedHolder.shares}, lockedAscendant=${updatedHolder.lockedAscendant}`);
                 } else {
-                  logger.error('utils', `Failed to fetch userRecords for token ${updatedTokenIds[index]}: ${result.error || 'unknown error'}`, 'eth', contractKey);
+                  logger.error(contractKey, `Failed to fetch userRecords for token ${updatedTokenIds[index]}: ${result.error || 'unknown error'}`);
                   errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_records', tokenId: updatedTokenIds[index], error: result.error || 'unknown error' });
                 }
               });
@@ -836,9 +802,9 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
               });
               if (claimableResults[0]?.status === 'success') {
                 updatedHolder.claimableRewards = parseFloat(formatUnits(claimableResults[0].result || 0, 18));
-                logger.debug('utils', `Claimable rewards for wallet ${holder.wallet}: ${updatedHolder.claimableRewards}`, 'eth', contractKey);
+                logger.debug(contractKey, `Claimable rewards for wallet ${holder.wallet}: ${updatedHolder.claimableRewards}`);
               } else {
-                logger.error('utils', `Failed to fetch claimableRewards for wallet ${holder.wallet}: ${claimableResults[0]?.error || 'unknown error'}`, 'eth', contractKey);
+                logger.error(contractKey, `Failed to fetch claimableRewards for wallet ${holder.wallet}: ${claimableResults[0]?.error || 'unknown error'}`);
                 errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_claimable', wallet: holder.wallet, error: claimableResults[0]?.error || 'unknown error' });
               }
 
@@ -894,7 +860,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
             holdersMap.set(holder.wallet, updatedHolder);
           } else {
             totalBurned += holder.total;
-            logger.debug('utils', `Incremented totalBurned by ${holder.total} for wallet ${holder.wallet}`, 'eth', contractKey);
+            logger.debug(contractKey, `Incremented totalBurned by ${holder.total} for wallet ${holder.wallet}`);
           }
         }
 
@@ -905,7 +871,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
             fromHolder.total = fromHolder.tokenIds.length;
             if (fromHolder.total === 0) {
               holdersMap.delete(transfer.from);
-              logger.debug('utils', `Removed empty holder: ${transfer.from}`, 'eth', contractKey);
+              logger.debug(contractKey, `Removed empty holder: ${transfer.from}`);
             } else {
               fromHolder.tiers = Array(Object.keys(config.contractTiers[contractKey]).length).fill(0);
               fromHolder.multiplierSum = 0;
@@ -919,12 +885,12 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
                 { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
               );
               const tier = contractKey === 'ascendant'
-                ? Number(tierResult.tier || 0)
+                ? (Array.isArray(tierResult) ? Number(tierResult[1] || 0) : Number(tierResult.tier || 0))
                 : Number(tierResult);
               if (tier >= 1 && tier <= Object.keys(config.contractTiers[contractKey]).length) {
                 fromHolder.tiers[tier - 1]++;
                 fromHolder.multiplierSum += config.contractTiers[contractKey][tier]?.multiplier || 0;
-                logger.debug('utils', `Tier ${tier} for token ${transfer.tokenId} updated for wallet ${transfer.from}`, 'eth', contractKey);
+                logger.debug(contractKey, `Tier ${tier} for token ${transfer.tokenId} updated for wallet ${transfer.from}`);
               }
               if (contractKey === 'ascendant') {
                 fromHolder.shares = 0;
@@ -946,7 +912,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
                 if (Array.isArray(recordResult)) {
                   fromHolder.shares += parseFloat(formatUnits(recordResult[0] || 0, 18));
                   fromHolder.lockedAscendant += parseFloat(formatUnits(recordResult[1] || 0, 18));
-                  logger.debug('utils', `userRecords for token ${transfer.tokenId}: shares=${fromHolder.shares}, lockedAscendant=${fromHolder.lockedAscendant}`, 'eth', contractKey);
+                  logger.debug(contractKey, `userRecords for token ${transfer.tokenId}: shares=${fromHolder.shares}, lockedAscendant=${fromHolder.lockedAscendant}`);
                 }
 
                 const claimableCall = [{
@@ -961,7 +927,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
                 });
                 if (claimableResults[0]?.status === 'success') {
                   fromHolder.claimableRewards = parseFloat(formatUnits(claimableResults[0].result || 0, 18));
-                  logger.debug('utils', `Claimable rewards for wallet ${transfer.from}: ${fromHolder.claimableRewards}`, 'eth', contractKey);
+                  logger.debug(contractKey, `Claimable rewards for wallet ${transfer.from}: ${fromHolder.claimableRewards}`);
                 }
 
                 const totalSharesRaw = await retry(
@@ -1045,12 +1011,12 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
             { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
           );
           const tier = contractKey === 'ascendant'
-            ? Number(tierResult.tier || 0)
+            ? (Array.isArray(tierResult) ? Number(tierResult[1] || 0) : Number(tierResult.tier || 0))
             : Number(tierResult);
           if (tier >= 1 && tier <= Object.keys(config.contractTiers[contractKey]).length) {
             toHolder.tiers[tier - 1]++;
             toHolder.multiplierSum += config.contractTiers[contractKey][tier]?.multiplier || 0;
-            logger.debug('utils', `Tier ${tier} for token ${transfer.tokenId} assigned to wallet ${transfer.to}`, 'eth', contractKey);
+            logger.debug(contractKey, `Tier ${tier} for token ${transfer.tokenId} assigned to wallet ${transfer.to}`);
           }
           if (contractKey === 'ascendant') {
             const recordResult = await retry(
@@ -1065,7 +1031,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
             if (Array.isArray(recordResult)) {
               toHolder.shares += parseFloat(formatUnits(recordResult[0] || 0, 18));
               toHolder.lockedAscendant += parseFloat(formatUnits(recordResult[1] || 0, 18));
-              logger.debug('utils', `userRecords for token ${transfer.tokenId}: shares=${toHolder.shares}, lockedAscendant=${toHolder.lockedAscendant}`, 'eth', contractKey);
+              logger.debug(contractKey, `userRecords for token ${transfer.tokenId}: shares=${toHolder.shares}, lockedAscendant=${toHolder.lockedAscendant}`);
             }
 
             const claimableCall = [{
@@ -1080,7 +1046,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
             });
             if (claimableResults[0]?.status === 'success') {
               toHolder.claimableRewards = parseFloat(formatUnits(claimableResults[0].result || 0, 18));
-              logger.debug('utils', `Claimable rewards for wallet ${transfer.to}: ${toHolder.claimableRewards}`, 'eth', contractKey);
+              logger.debug(contractKey, `Claimable rewards for wallet ${transfer.to}: ${toHolder.claimableRewards}`);
             }
 
             const totalSharesRaw = await retry(
@@ -1139,7 +1105,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
         holderList.forEach(holder => {
           holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
           holder.displayMultiplierSum = holder.multiplierSum / (contractKey === 'element280' ? 10 : 1);
-          logger.debug('utils', `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, displayMultiplierSum=${holder.displayMultiplierSum}`, 'eth', contractKey);
+          logger.debug(contractKey, `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, displayMultiplierSum=${holder.displayMultiplierSum}`);
         });
 
         holderList.sort((a, b) => contractKey === 'ascendant' ? b.shares - a.shares || b.multiplierSum - a.multiplierSum || b.total - a.total : b.multiplierSum - a.multiplierSum || b.total - a.total);
@@ -1154,13 +1120,13 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
             },
             { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
           );
-          logger.debug('utils', `Fetched burnedCountContract: ${burnedCountContract}`, 'eth', contractKey);
+          logger.debug(contractKey, `Fetched burnedCountContract: ${burnedCountContract}`);
         } catch (error) {
-          logger.error('utils', `Failed to fetch totalBurned: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+          logger.error(contractKey, `Failed to fetch totalBurned: ${error.message}`, { stack: error.stack });
           burnedCountContract = 0;
         }
         totalBurned = burnedCountContract || totalBurned;
-        logger.debug('utils', `Final totalBurned: ${totalBurned}`, 'eth', contractKey);
+        logger.debug(contractKey, `Final totalBurned: ${totalBurned}`);
 
         const cacheData = { holders: holderList, totalBurned, timestamp: Date.now() };
         await setCache(`${contractKey.toLowerCase()}_holders`, cacheData, 0, contractKey.toLowerCase());
@@ -1189,14 +1155,14 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
           };
         }
         await saveCacheStateContract(contractKey, cacheState);
-        logger.info('utils', `Cache updated: ${holderList.length} holders, totalBurned: ${totalBurned}`, 'eth', contractKey);
+        logger.info(contractKey, `Cache updated: ${holderList.length} holders, totalBurned: ${totalBurned}`);
         return { status: 'updated', holders: holderList };
       } else {
         cacheState.isPopulating = false;
         cacheState.progressState.step = 'completed';
         cacheState.lastProcessedBlock = Number(currentBlock);
         await saveCacheStateContract(contractKey, cacheState);
-        logger.info('utils', 'Cache is up to date', 'eth', contractKey);
+        logger.info(contractKey, 'Cache is up to date');
         return { status: 'up_to_date', holders: cachedData.holders };
       }
     }
@@ -1204,7 +1170,7 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
     const result = await getHoldersMap(contractKey, contractAddress, abi, vaultAddress, vaultAbi, cacheState);
     const holderList = Array.from(result.holdersMap.values());
     const totalBurned = result.totalBurned || 0;
-    logger.debug('utils', `getHoldersMap returned totalBurned: ${totalBurned}`, 'eth', contractKey);
+    logger.debug(contractKey, `getHoldersMap returned totalBurned: ${totalBurned}`);
     const cacheData = { holders: holderList, totalBurned, timestamp: Date.now() };
     await setCache(`${contractKey.toLowerCase()}_holders`, cacheData, 0, contractKey.toLowerCase());
     cacheState.lastUpdated = Date.now();
@@ -1224,14 +1190,14 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
       cacheState.globalMetrics = result.globalMetrics || {};
     }
     await saveCacheStateContract(contractKey, cacheState);
-    logger.info('utils', `Cache populated: ${holderList.length} holders, totalBurned: ${totalBurned}`, 'eth', contractKey);
+    logger.info(contractKey, `Cache populated: ${holderList.length} holders, totalBurned: ${totalBurned}`);
     return { status: 'completed', holders: holderList };
   } catch (error) {
     cacheState.progressState.step = 'error';
     cacheState.progressState.error = error.message;
     cacheState.progressState.errorLog = errorLog;
     await saveCacheStateContract(contractKey, cacheState);
-    logger.error('utils', `Cache population failed: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    logger.error(contractKey, `Cache population failed: ${error.message}`, { stack: error.stack });
     return { status: 'error', holders: null, error: error.message };
   } finally {
     cacheState.isPopulating = false;
@@ -1321,7 +1287,7 @@ export async function GET(request, { params }) {
     };
     return NextResponse.json(response);
   } catch (error) {
-    logger.error('utils', `GET error: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    logger.error(contractKey, `GET error: ${error.message}`, { stack: error.stack });
     return NextResponse.json({ error: `Failed to fetch ${contractKey} holders`, details: error.message }, { status: 500 });
   }
 }

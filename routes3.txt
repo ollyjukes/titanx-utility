@@ -1,4 +1,3 @@
-// app/api/holders/[contract]/route.js
 import { NextResponse } from 'next/server';
 import { parseAbiItem, formatUnits } from 'viem';
 import pLimit from 'p-limit';
@@ -20,19 +19,21 @@ async function getCacheState(contractKey) {
   try {
     const savedState = await loadCacheState(contractKey, contractKey.toLowerCase());
     if (savedState && typeof savedState === 'object') {
-      cacheState.isPopulating = savedState.isPopulating ?? false;
-      cacheState.totalOwners = savedState.totalOwners ?? 0;
-      cacheState.progressState = {
-        step: savedState.progressState?.step ?? 'idle',
-        processedNfts: savedState.progressState?.processedNfts ?? 0,
-        totalNfts: savedState.progressState?.totalNfts ?? 0,
-        processedTiers: savedState.progressState?.processedTiers ?? 0,
-        totalTiers: savedState.progressState?.totalTiers ?? 0,
-        error: savedState.progressState?.error ?? null,
-        errorLog: savedState.progressState?.errorLog ?? [],
-      };
-      cacheState.lastUpdated = savedState.lastUpdated ?? null;
-      cacheState.lastProcessedBlock = savedState.lastProcessedBlock ?? null;
+      Object.assign(cacheState, {
+        isPopulating: savedState.isPopulating ?? false,
+        totalOwners: savedState.totalOwners ?? 0,
+        progressState: {
+          step: savedState.progressState?.step ?? 'idle',
+          processedNfts: savedState.progressState?.processedNfts ?? 0,
+          totalNfts: savedState.progressState?.totalNfts ?? 0,
+          processedTiers: savedState.progressState?.processedTiers ?? 0,
+          totalTiers: savedState.progressState?.totalTiers ?? 0,
+          error: savedState.progressState?.error ?? null,
+          errorLog: savedState.progressState?.errorLog ?? [],
+        },
+        lastUpdated: savedState.lastUpdated ?? null,
+        lastProcessedBlock: savedState.lastProcessedBlock ?? null,
+      });
       logger.debug(contractKey, `Loaded cache state: totalOwners=${cacheState.totalOwners}, step=${cacheState.progressState.step}`);
     }
   } catch (error) {
@@ -132,11 +133,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   if (contractKey === 'ascendant') {
     const totalShares = await retry(
       async () => {
-        const result = await client.readContract({
-          address: contractAddress,
-          abi,
-          functionName: 'totalShares',
-        });
+        const result = await client.readContract({ address: contractAddress, abi, functionName: 'totalShares' });
         if (result === null || result === undefined) throw new Error('totalShares returned null');
         return Number(result);
       },
@@ -161,12 +158,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
 
     const userRecords = await retry(
       async () => {
-        const result = await client.readContract({
-          address: contractAddress,
-          abi,
-          functionName: 'userRecords',
-          args: [],
-        });
+        const result = await client.readContract({ address: contractAddress, abi, functionName: 'userRecords', args: [] });
         if (!result) throw new Error('userRecords returned null');
         return result;
       },
@@ -196,9 +188,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       logger.debug(contractKey, `Added to holdersMap: wallet=${wallet}, totalShares=${holder.total}`);
 
       cacheState.progressState.processedNfts = processedShares;
-      if (processedShares % 1000 === 0) {
-        await saveCacheStateContract(contractKey, cacheState);
-      }
+      if (processedShares % 1000 === 0) await saveCacheStateContract(contractKey, cacheState);
     }
 
     cacheState.progressState.step = 'fetching_tiers';
@@ -263,11 +253,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   } else {
     const totalSupply = await retry(
       async () => {
-        const result = await client.readContract({
-          address: contractAddress,
-          abi,
-          functionName: 'totalSupply',
-        });
+        const result = await client.readContract({ address: contractAddress, abi, functionName: 'totalSupply' });
         if (result === null || result === undefined) throw new Error('totalSupply returned null');
         return Number(result);
       },
@@ -279,11 +265,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     try {
       burnedCountContract = await retry(
         async () => {
-          const result = await client.readContract({
-            address: contractAddress,
-            abi,
-            functionName: 'totalBurned',
-          });
+          const result = await client.readContract({ address: contractAddress, abi, functionName: 'totalBurned' });
           if (result === null || result === undefined) throw new Error('totalBurned returned null');
           return Number(result);
         },
@@ -362,10 +344,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       logger.debug(contractKey, `Added to holdersMap: wallet=${wallet}, totalTokens=${holder.total}`);
 
       cacheState.progressState.processedNfts = processedTokens;
-      if (processedTokens % 1000 === 0) {
-        await saveCacheStateContract(contractKey, cacheState);
-      }
+      if (processedTokens % 1000 === 0) await saveCacheStateContract(contractKey, cacheState);
     }
+
     logger.debug(contractKey, `Holders map size: ${holdersMap.size}, totalBurned: ${totalBurned}, processedTokens: ${processedTokens}`);
     await saveCacheStateContract(contractKey, cacheState);
     await setCache(`${contractKey.toLowerCase()}_holders_partial`, { holders: Array.from(holdersMap.values()), totalBurned, timestamp: Date.now() }, 0, contractKey.toLowerCase());
@@ -448,131 +429,6 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       logger.warn(contractKey, `No valid token IDs found for tier fetching`);
     }
 
-    if (contractKey === 'element369' && vaultAddress && vaultAbi) {
-      cacheState.progressState.step = 'fetching_rewards';
-      await saveCacheStateContract(contractKey, cacheState);
-
-      const holderList = Array.from(holdersMap.values());
-      logger.debug(contractKey, `Fetching rewards for ${holderList.length} holders`);
-
-      const rewardBatchSize = config.alchemy.batchSize || 100;
-      const concurrencyLimit = pLimit(4);
-      const rewardPromises = [];
-      let processedHolders = 0;
-      for (let i = 0; i < holderList.length; i += rewardBatchSize) {
-        const batchHolders = holderList.slice(i, i + rewardBatchSize);
-        const rewardCalls = batchHolders.map(holder => ({
-          address: vaultAddress,
-          abi: vaultAbi,
-          functionName: 'getRewards',
-          args: [holder.tokenIds.map(id => BigInt(id)), holder.wallet, false],
-        }));
-
-        rewardPromises.push(
-          concurrencyLimit(async () => {
-            logger.debug(contractKey, `Processing reward batch ${i / rewardBatchSize + 1} with ${rewardCalls.length} calls`);
-            try {
-              const rewardsResults = await retry(() => batchMulticall(rewardCalls, rewardBatchSize), {
-                retries: config.alchemy.maxRetries,
-                delay: config.alchemy.batchDelayMs,
-              });
-
-              batchHolders.forEach((holder, j) => {
-                const result = rewardsResults[j];
-                if (result?.status === 'success' && result.result) {
-                  const [, , infernoPool, fluxPool, e280Pool] = result.result;
-                  holder.infernoRewards = Number(infernoPool || 0) / 1e18;
-                  holder.fluxRewards = Number(fluxPool || 0) / 1e18;
-                  holder.e280Rewards = Number(e280Pool || 0) / 1e18;
-                  logger.debug(contractKey, `Rewards for wallet ${holder.wallet}: inferno=${holder.infernoRewards}, flux=${holder.fluxRewards}, e280=${holder.e280Rewards}`);
-                } else {
-                  holder.infernoRewards = 0;
-                  holder.fluxRewards = 0;
-                  holder.e280Rewards = 0;
-                  const errorMsg = result?.error || 'Unknown error';
-                  logger.error(contractKey, `Failed to fetch rewards for wallet ${holder.wallet}: ${errorMsg}`);
-                  errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_rewards', wallet: holder.wallet, error: errorMsg });
-                }
-                holdersMap.set(holder.wallet, holder);
-              });
-
-              processedHolders += batchHolders.length;
-              cacheState.progressState.processedNfts = processedHolders;
-              cacheState.progressState.processedTiers = processedHolders;
-              await saveCacheStateContract(contractKey, cacheState);
-              logger.debug(contractKey, `Processed ${processedHolders}/${holderList.length} holders for rewards`);
-            } catch (error) {
-              logger.error(contractKey, `Reward batch ${i / rewardBatchSize + 1} failed: ${error.message}`, { stack: error.stack });
-              errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_rewards_batch', batch: i / rewardBatchSize + 1, error: error.message });
-            }
-          })
-        );
-      }
-      await Promise.all(rewardPromises);
-    }
-
-    if ((contractKey === 'element280' || contractKey === 'stax') && vaultAddress && vaultAbi) {
-      cacheState.progressState.step = 'fetching_rewards';
-      await saveCacheStateContract(contractKey, cacheState);
-
-      const holderList = Array.from(holdersMap.values());
-      logger.debug(contractKey, `Fetching rewards for ${holderList.length} holders`);
-
-      const rewardBatchSize = config.alchemy.batchSize || 100;
-      const concurrencyLimit = pLimit(4);
-      const rewardPromises = [];
-      let processedHolders = 0;
-      for (let i = 0; i < holderList.length; i += rewardBatchSize) {
-        const batchHolders = holderList.slice(i, i + rewardBatchSize);
-        const rewardCalls = batchHolders.map(holder => ({
-          address: vaultAddress,
-          abi: vaultAbi,
-          functionName: 'getRewards',
-          args: [holder.tokenIds.map(id => BigInt(id)), holder.wallet],
-        }));
-
-        rewardPromises.push(
-          concurrencyLimit(async () => {
-            logger.debug(contractKey, `Processing reward batch ${i / rewardBatchSize + 1} with ${rewardCalls.length} calls`);
-            try {
-              const rewardResults = await retry(() => batchMulticall(rewardCalls, rewardBatchSize), {
-                retries: config.alchemy.maxRetries,
-                delay: config.alchemy.batchDelayMs,
-              });
-
-              batchHolders.forEach((holder, j) => {
-                const result = rewardResults[j];
-                if (result.status === 'success') {
-                  const rewardValue = BigInt(result.result[1] || 0);
-                  holder.claimableRewards = Number(rewardValue) / 1e18;
-                  if (isNaN(holder.claimableRewards)) {
-                    holder.claimableRewards = 0;
-                  }
-                  logger.debug(contractKey, `Rewards for wallet ${holder.wallet}: claimable=${holder.claimableRewards}`);
-                } else {
-                  holder.claimableRewards = 0;
-                  const errorMsg = result?.error || 'Unknown error';
-                  logger.error(contractKey, `Failed to fetch rewards for wallet ${holder.wallet}: ${errorMsg}`);
-                  errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_rewards', wallet: holder.wallet, error: errorMsg });
-                }
-                holdersMap.set(holder.wallet, holder);
-              });
-
-              processedHolders += batchHolders.length;
-              cacheState.progressState.processedNfts = processedHolders;
-              cacheState.progressState.processedTiers = processedHolders;
-              await saveCacheStateContract(contractKey, cacheState);
-              logger.debug(contractKey, `Processed ${processedHolders}/${holderList.length} holders for rewards`);
-            } catch (error) {
-              logger.error(contractKey, `Reward batch ${i / rewardBatchSize + 1} failed: ${error.message}`, { stack: error.stack });
-              errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_rewards_batch', batch: i / rewardBatchSize + 1, error: error.message });
-            }
-          })
-        );
-      }
-      await Promise.all(rewardPromises);
-    }
-
     cacheState.progressState.step = 'calculating_metrics';
     await saveCacheStateContract(contractKey, cacheState);
 
@@ -597,6 +453,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     await saveCacheStateContract(contractKey, cacheState);
     logger.info(contractKey, `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}`);
     return { holdersMap, totalBurned, lastBlock: Number(currentBlock) };
+  }
 }
 
 // Populate holders map cache
@@ -704,13 +561,12 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
               fromHolder.tiers = Array(Object.keys(config.contractTiers[contractKey]).length).fill(0);
               fromHolder.multiplierSum = 0;
               const tierResult = await retry(
-                () =>
-                  client.readContract({
-                    address: contractAddress,
-                    abi,
-                    functionName: contractKey === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
-                    args: [BigInt(transfer.tokenId)],
-                  }),
+                () => client.readContract({
+                  address: contractAddress,
+                  abi,
+                  functionName: contractKey === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
+                  args: [BigInt(transfer.tokenId)],
+                }),
                 { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
               );
               const tier = contractKey === 'ascendant'
@@ -745,13 +601,12 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
           toHolder.tokenIds.push(transfer.tokenId);
           toHolder.total = toHolder.tokenIds.length;
           const tierResult = await retry(
-            () =>
-              client.readContract({
-                address: contractAddress,
-                abi,
-                functionName: contractKey === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
-                args: [BigInt(transfer.tokenId)],
-              }),
+            () => client.readContract({
+              address: contractAddress,
+              abi,
+              functionName: contractKey === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
+              args: [BigInt(transfer.tokenId)],
+            }),
             { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
           );
           const tier = contractKey === 'ascendant'
@@ -766,149 +621,21 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
         }
 
         const holderList = Array.from(holdersMap.values());
+        const totalMultiplierSum = holderList.reduce((sum, h) => sum + h.multiplierSum, 0);
+        holderList.forEach(holder => {
+          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+          holder.displayMultiplierSum = holder.multiplierSum / (contractKey === 'element280' ? 10 : 1);
+          logger.debug(contractKey, `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, displayMultiplierSum=${holder.displayMultiplierSum}`);
+        });
 
-        if (contractKey === 'element369' && vaultAddress && vaultAbi) {
-          const rewardCalls = holderList.map(holder => ({
-            address: vaultAddress,
-            abi: vaultAbi,
-            functionName: 'getRewards',
-            args: [holder.tokenIds.map(id => BigInt(id)), holder.wallet, false],
-          }));
-          const rewardsResults = await retry(() => batchMulticall(rewardCalls, config.alchemy.batchSize), {
-            retries: config.alchemy.maxRetries,
-            delay: config.alchemy.batchDelayMs,
-          });
-          holderList.forEach((holder, i) => {
-            if (rewardsResults[i]?.status === 'success' && rewardsResults[i].result) {
-              const [, , infernoPool, fluxPool, e280Pool] = rewardsResults[i].result;
-              holder.infernoRewards = Number(infernoPool || 0) / 1e18;
-              holder.fluxRewards = Number(fluxPool || 0) / 1e18;
-              holder.e280Rewards = Number(e280Pool || 0) / 1e18;
-              logger.debug(contractKey, `Rewards for wallet ${holder.wallet}: inferno=${holder.infernoRewards}, flux=${holder.fluxRewards}, e280=${holder.e280Rewards}`);
-            } else {
-              holder.infernoRewards = 0;
-              holder.fluxRewards = 0;
-              holder.e280Rewards = 0;
-              const errorMsg = rewardsResults[i]?.error || 'Unknown error';
-              logger.error(contractKey, `Failed to fetch rewards for wallet ${holder.wallet}: ${errorMsg}`);
-              errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_rewards', wallet: holder.wallet, error: errorMsg });
-            }
-            holdersMap.set(holder.wallet, holder);
-          });
-        }
-
-        if ((contractKey === 'element280' || contractKey === 'stax') && vaultAddress && vaultAbi) {
-          const rewardCalls = holderList.flatMap(holder =>
-            holder.tokenIds.map(tokenId => ({
-              address: vaultAddress,
-              abi: vaultAbi,
-              functionName: 'getRewards',
-              args: [[BigInt(tokenId)], holder.wallet],
-            }))
-          );
-          const rewardResults = await retry(() => batchMulticall(rewardCalls, config.alchemy.batchSize), {
-            retries: config.alchemy.maxRetries,
-            delay: config.alchemy.batchDelayMs,
-          });
-          let resultIndex = 0;
-          holderList.forEach(holder => {
-            let totalRewards = 0n;
-            holder.tokenIds.forEach(() => {
-              const result = rewardResults[resultIndex++];
-              if (result.status === 'success') {
-                const rewardValue = BigInt(result.result[1] || 0);
-                totalRewards += rewardValue;
-              }
-            });
-            holder.claimableRewards = Number(totalRewards) / 1e18;
-            if (isNaN(holder.claimableRewards)) {
-              holder.claimableRewards = 0;
-            }
-            logger.debug(contractKey, `Rewards for wallet ${holder.wallet}: claimable=${holder.claimableRewards}`);
-            holdersMap.set(holder.wallet, holder);
-          });
-        }
-
-        if (contractKey === 'ascendant') {
-          const recordCalls = holderList.flatMap(holder =>
-            holder.tokenIds.map(tokenId => ({
-              address: contractAddress,
-              abi,
-              functionName: 'userRecords',
-              args: [BigInt(tokenId)],
-            }))
-          );
-          const recordResults = await retry(() => batchMulticall(recordCalls, config.alchemy.batchSize), {
-            retries: config.alchemy.maxRetries,
-            delay: config.alchemy.batchDelayMs,
-          });
-          const claimableCalls = holderList.map(holder => ({
-            address: contractAddress,
-            abi,
-            functionName: 'batchClaimableAmount',
-            args: [holder.tokenIds.map(id => BigInt(id))],
-          }));
-          const claimableResults = await retry(() => batchMulticall(claimableCalls, config.alchemy.batchSize), {
-            retries: config.alchemy.maxRetries,
-            delay: config.alchemy.batchDelayMs,
-          });
-
-          const totalSharesRaw = await retry(
-            () => client.readContract({ address: contractAddress, abi, functionName: 'totalShares' }),
-            { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
-          );
-          const totalShares = parseFloat(formatUnits(totalSharesRaw.toString(), 18));
-          const toDistributeDay8Raw = await retry(
-            () => client.readContract({ address: contractAddress, abi, functionName: 'toDistribute', args: [0] }),
-            { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
-          );
-          const toDistributeDay8 = parseFloat(formatUnits(toDistributeDay8Raw.toString(), 18));
-          const toDistributeDay28Raw = await retry(
-            () => client.readContract({ address: contractAddress, abi, functionName: 'toDistribute', args: [1] }),
-            { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
-          );
-          const toDistributeDay28 = parseFloat(formatUnits(toDistributeDay28Raw.toString(), 18));
-          const toDistributeDay90Raw = await retry(
-            () => client.readContract({ address: contractAddress, abi, functionName: 'toDistribute', args: [2] }),
-            { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
-          );
-          const toDistributeDay90 = parseFloat(formatUnits(toDistributeDay90Raw.toString(), 18));
-
-          let resultIndex = 0;
-          holderList.forEach((holder, i) => {
-            holder.shares = 0;
-            holder.lockedAscendant = 0;
-            holder.tokenIds.forEach(() => {
-              const recordResult = recordResults[resultIndex++];
-              if (recordResult?.status === 'success' && Array.isArray(recordResult.result)) {
-                const sharesRaw = recordResult.result[0] || '0';
-                const lockedAscendantRaw = recordResult.result[1] || '0';
-                holder.shares += parseFloat(formatUnits(sharesRaw, 18));
-                holder.lockedAscendant += parseFloat(formatUnits(lockedAscendantRaw, 18));
-              }
-            });
-            if (claimableResults[i]?.status === 'success') {
-              holder.claimableRewards = parseFloat(formatUnits(claimableResults[i].result || '0', 18));
-            }
-            const pendingRewardPerShareDay8 = totalShares > 0 ? toDistributeDay8 / totalShares : 0;
-            const pendingRewardPerShareDay28 = totalShares > 0 ? toDistributeDay28 / totalShares : 0;
-            const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
-            holder.pendingDay8 = holder.shares * pendingRewardPerShareDay8;
-            holder.pendingDay28 = holder.shares * pendingRewardPerShareDay28;
-            holder.pendingDay90 = holder.shares * pendingRewardPerShareDay90;
-            holdersMap.set(holder.wallet, holder);
-          });
-        }
+        holderList.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+        holderList.forEach((holder, index) => (holder.rank = index + 1));
 
         let burnedCountContract;
         try {
           burnedCountContract = await retry(
             async () => {
-              const result = await client.readContract({
-                address: contractAddress,
-                abi,
-                functionName: 'totalBurned',
-              });
+              const result = await client.readContract({ address: contractAddress, abi, functionName: 'totalBurned' });
               return Number(result);
             },
             { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
@@ -920,16 +647,6 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
         }
         totalBurned = burnedCountContract || totalBurned;
         logger.debug(contractKey, `Final totalBurned: ${totalBurned}`);
-
-        const totalMultiplierSum = holderList.reduce((sum, h) => sum + h.multiplierSum, 0);
-        holderList.forEach(holder => {
-          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-          holder.displayMultiplierSum = holder.multiplierSum / (contractKey === 'element280' ? 10 : 1);
-          logger.debug(contractKey, `Calculated metrics for wallet ${holder.wallet}: percentage=${holder.percentage}, displayMultiplierSum=${holder.displayMultiplierSum}`);
-        });
-
-        holderList.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-        holderList.forEach((holder, index) => (holder.rank = index + 1));
 
         const cacheData = { holders: holderList, totalBurned, timestamp: Date.now() };
         await setCache(`${contractKey.toLowerCase()}_holders`, cacheData, 0, contractKey.toLowerCase());
@@ -1006,8 +723,6 @@ export async function GET(request, { params }) {
 
   const contractAddress = config.contractAddresses[contractKey]?.address;
   const abi = config.abis[contractKey]?.main;
-  const vaultAddress = config.vaultAddresses[contractKey]?.address;
-  const vaultAbi = config.abis[contractKey]?.vault;
 
   try {
     const cacheState = await getCacheState(contractKey);
@@ -1025,162 +740,6 @@ export async function GET(request, { params }) {
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '0', 10);
     const pageSize = parseInt(searchParams.get('pageSize') || config.contractDetails[contractKey].pageSize, 10);
-    const wallet = searchParams.get('wallet');
-
-    if (wallet) {
-      const cachedData = await getCache(`${contractKey}_holder_${contractAddress}-${wallet.toLowerCase()}`, contractKey.toLowerCase());
-      if (cachedData) {
-        return NextResponse.json(cachedData);
-      }
-
-      const nfts = await retry(
-        () => getOwnersForContract(contractAddress, abi, { withTokenBalances: true }),
-        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
-      ).then(owners =>
-        owners.filter(o => o.ownerAddress.toLowerCase() === wallet.toLowerCase() && o.ownerAddress.toLowerCase() !== config.burnAddress.toLowerCase())
-      );
-
-      const holder = {
-        wallet: wallet.toLowerCase(),
-        total: nfts.length,
-        tiers: Array(Object.keys(config.contractTiers[contractKey]).length).fill(0),
-        tokenIds: nfts.map(nft => Number(nft.tokenId)),
-        multiplierSum: 0,
-        displayMultiplierSum: 0,
-        percentage: 0,
-        rank: 0,
-        ...(contractKey === 'element369' ? { infernoRewards: 0, fluxRewards: 0, e280Rewards: 0 } : {}),
-        ...(contractKey === 'element280' || contractKey === 'stax' ? { claimableRewards: 0 } : {}),
-        ...(contractKey === 'ascendant' ? {
-          shares: 0,
-          lockedAscendant: 0,
-          pendingDay8: 0,
-          pendingDay28: 0,
-          pendingDay90: 0,
-          claimableRewards: 0,
-        } : {}),
-      };
-
-      if (nfts.length === 0) {
-        return NextResponse.json({ message: 'No holder data found for wallet' }, { status: 404 });
-      }
-
-      const calls = [];
-      nfts.forEach(nft => {
-        calls.push({
-          address: contractAddress,
-          abi,
-          functionName: contractKey === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
-          args: [BigInt(nft.tokenId)],
-        });
-        if (contractKey === 'ascendant') {
-          calls.push({
-            address: contractAddress,
-            abi,
-            functionName: 'userRecords',
-            args: [BigInt(nft.tokenId)],
-          });
-        } else if (contractKey === 'element369' && vaultAddress && vaultAbi) {
-          calls.push({
-            address: vaultAddress,
-            abi: vaultAbi,
-            functionName: 'getRewards',
-            args: [[BigInt(nft.tokenId)], wallet.toLowerCase(), false],
-          });
-        } else if ((contractKey === 'element280' || contractKey === 'stax') && vaultAddress && vaultAbi) {
-          calls.push({
-            address: vaultAddress,
-            abi: vaultAbi,
-            functionName: 'getRewards',
-            args: [[BigInt(nft.tokenId)], wallet.toLowerCase()],
-          });
-        }
-      });
-
-      if (contractKey === 'ascendant') {
-        calls.push({
-          address: contractAddress,
-          abi,
-          functionName: 'batchClaimableAmount',
-          args: [nfts.map(nft => BigInt(nft.tokenId))],
-        });
-      }
-
-      const results = await batchMulticall(calls);
-      let resultIndex = 0;
-      nfts.forEach(() => {
-        const tierResult = results[resultIndex++];
-        if (tierResult.status === 'success') {
-          const tier = contractKey === 'ascendant' 
-            ? (Array.isArray(tierResult.result) ? Number(tierResult.result[1] || 0) : Number(tierResult.result.tier || 0))
-            : Number(tierResult.result);
-          const maxTier = Object.keys(config.contractTiers[contractKey]).length;
-          if (tier >= 1 && tier <= maxTier) {
-            holder.tiers[tier - 1]++;
-            holder.multiplierSum += config.contractTiers[contractKey][tier]?.multiplier || 0;
-          }
-        }
-
-        if (contractKey === 'ascendant') {
-          const recordResult = results[resultIndex++];
-          if (recordResult?.status === 'success' && Array.isArray(recordResult.result)) {
-            const sharesRaw = recordResult.result[0] || '0';
-            const lockedAscendantRaw = recordResult.result[1] || '0';
-            holder.shares += parseFloat(formatUnits(sharesRaw, 18));
-            holder.lockedAscendant += parseFloat(formatUnits(lockedAscendantRaw, 18));
-          }
-        } else if (contractKey === 'element369') {
-          const rewardResult = results[resultIndex++];
-          if (rewardResult.status === 'success' && rewardResult.result) {
-            const [, , infernoPool, fluxPool, e280Pool] = rewardResult.result;
-            holder.infernoRewards += Number(infernoPool || 0) / 1e18;
-            holder.fluxRewards += Number(fluxPool || 0) / 1e18;
-            holder.e280Rewards += Number(e280Pool || 0) / 1e18;
-          }
-        } else if (contractKey === 'element280' || contractKey === 'stax') {
-          const rewardResult = results[resultIndex++];
-          if (rewardResult.status === 'success') {
-            const rewardValue = BigInt(rewardResult.result[1] || 0);
-            holder.claimableRewards += Number(rewardValue) / 1e18;
-          }
-        }
-      });
-
-      if (contractKey === 'ascendant') {
-        const claimableResult = results[resultIndex];
-        if (claimableResult?.status === 'success') {
-          holder.claimableRewards = parseFloat(formatUnits(claimableResult.result || '0', 18));
-        }
-
-        const totalSharesRaw = await client.readContract({ address: contractAddress, abi, functionName: 'totalShares' });
-        const totalShares = parseFloat(formatUnits(totalSharesRaw.toString(), 18));
-        const toDistributeDay8Raw = await client.readContract({ address: contractAddress, abi, functionName: 'toDistribute', args: [0] });
-        const toDistributeDay8 = parseFloat(formatUnits(toDistributeDay8Raw.toString(), 18));
-        const toDistributeDay28Raw = await client.readContract({ address: contractAddress, abi, functionName: 'toDistribute', args: [1] });
-        const toDistributeDay28 = parseFloat(formatUnits(toDistributeDay28Raw.toString(), 18));
-        const toDistributeDay90Raw = await client.readContract({ address: contractAddress, abi, functionName: 'toDistribute', args: [2] });
-        const toDistributeDay90 = parseFloat(formatUnits(toDistributeDay90Raw.toString(), 18));
-
-        const pendingRewardPerShareDay8 = totalShares > 0 ? toDistributeDay8 / totalShares : 0;
-        const pendingRewardPerShareDay28 = totalShares > 0 ? toDistributeDay28 / totalShares : 0;
-        const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
-        holder.pendingDay8 = holder.shares * pendingRewardPerShareDay8;
-        holder.pendingDay28 = holder.shares * pendingRewardPerShareDay28;
-        holder.pendingDay90 = holder.shares * pendingRewardPerShareDay90;
-      }
-
-      holder.displayMultiplierSum = holder.multiplierSum / (contractKey === 'element280' ? 10 : 1);
-      const cachedHolders = await getCache(`${contractKey.toLowerCase()}_holders`, contractKey.toLowerCase());
-      if (cachedHolders && cachedHolders.holders) {
-        const totalMultiplierSum = cachedHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
-        holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-        const sortedHolders = cachedHolders.holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-        holder.rank = sortedHolders.findIndex(h => h.multiplierSum <= holder.multiplierSum && h.total <= holder.total) + 1;
-      }
-
-      await setCache(`${contractKey}_holder_${wallet.toLowerCase()}`, holder, config.cache.nodeCache.stdTTL, contractKey.toLowerCase());
-      return NextResponse.json(holder);
-    }
 
     const cachedData = await getCache(`${contractKey.toLowerCase()}_holders`, contractKey.toLowerCase());
     if (cachedData) {
@@ -1200,17 +759,12 @@ export async function GET(request, { params }) {
             return acc;
           }, []),
           multiplierPool: cachedData.holders.reduce((sum, h) => sum + h.multiplierSum, 0),
-          totalRewardPool: cachedData.holders.reduce((sum, h) => sum + (h.claimableRewards || 0) + (h.infernoRewards || 0) + (h.fluxRewards || 0) + (h.e280Rewards || 0), 0),
         },
       };
-      if (contractKey === 'ascendant') {
-        response.summary.totalShares = cachedData.totalShares || 0;
-        response.summary.pendingRewards = cachedData.pendingRewards || 0;
-      }
       return NextResponse.json(response);
     }
 
-    const { status, holders } = await populateHoldersMapCache(contractKey, contractAddress, abi, vaultAddress, vaultAbi);
+    const { status, holders } = await populateHoldersMapCache(contractKey, contractAddress, abi, null, null);
     if (status === 'error') throw new Error('Cache population failed');
 
     const paginatedHolders = holders.slice(page * pageSize, (page + 1) * pageSize);
@@ -1229,13 +783,8 @@ export async function GET(request, { params }) {
           return acc;
         }, []),
         multiplierPool: holders.reduce((sum, h) => sum + h.multiplierSum, 0),
-        totalRewardPool: holders.reduce((sum, h) => sum + (h.claimableRewards || 0) + (h.infernoRewards || 0) + (h.fluxRewards || 0) + (h.e280Rewards || 0), 0),
       },
     };
-    if (contractKey === 'ascendant') {
-      response.summary.totalShares = (await getCache(`${contractKey.toLowerCase()}_holders`, contractKey.toLowerCase()))?.totalShares || 0;
-      response.summary.pendingRewards = (await getCache(`${contractKey.toLowerCase()}_holders`, contractKey.toLowerCase()))?.pendingRewards || 0;
-    }
     return NextResponse.json(response);
   } catch (error) {
     logger.error(contractKey, `GET error: ${error.message}`, { stack: error.stack });
@@ -1257,8 +806,6 @@ export async function POST(request, { params }) {
 
   const contractAddress = config.contractAddresses[contractKey]?.address;
   const abi = config.abis[contractKey]?.main;
-  const vaultAddress = config.vaultAddresses[contractKey]?.address;
-  const vaultAbi = config.abis[contractKey]?.vault;
 
   try {
     const { forceUpdate } = await request.json().catch(() => ({}));
@@ -1266,7 +813,7 @@ export async function POST(request, { params }) {
     if (cacheState.isPopulating && !forceUpdate) {
       return NextResponse.json({ message: 'Cache population already in progress', status: 'in_progress' }, { status: 202 });
     }
-    const { status, error } = await populateHoldersMapCache(contractKey, contractAddress, abi, vaultAddress, vaultAbi, forceUpdate === true);
+    const { status, error } = await populateHoldersMapCache(contractKey, contractAddress, abi, null, null, forceUpdate === true);
     if (status === 'error') throw new Error(error || 'Cache population failed');
     return NextResponse.json({ 
       message: status === 'up_to_date' ? 'Cache is up to date' : `${contractKey} cache population triggered`, 
@@ -1276,8 +823,7 @@ export async function POST(request, { params }) {
     logger.error(contractKey, `POST error: ${error.message}`, { stack: error.stack });
     return NextResponse.json({ error: `Failed to populate ${contractKey} cache`, details: error.message }, { status: 500 });
   }
-}
-import { NextResponse } from 'next/server';
+}import { NextResponse } from 'next/server';
 import { logger, loadCacheState } from '@/app/api/utils';
 import config from '@/config';
 
