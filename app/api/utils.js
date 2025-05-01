@@ -1,13 +1,21 @@
-// app/api/utils.js
+// File: app/api/utils.js
 import NodeCache from 'node-cache';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import pino from 'pino';
 import { Redis } from '@upstash/redis';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
+import { Alchemy } from 'alchemy-sdk';
 import config from '@/config';
+import pLimit from 'p-limit';
+import { logger } from '@/lib/logger';
+import chalk from 'chalk';
+
+console.log(chalk.cyan('[Utils] Initializing utils...'));
+logger.info('utils', 'Utils module loaded', 'eth', 'general').catch(error => {
+  console.error(chalk.red('[Utils] Logger error:'), error.message);
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,22 +23,16 @@ const __dirname = path.dirname(__filename);
 const isDebug = process.env.DEBUG === 'true';
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Configure pino logger
-const logger = pino({
-  level: isDebug ? 'debug' : 'error',
-  formatters: {
-    level: (label) => ({ level: label.toUpperCase() }),
-  },
-  timestamp: pino.stdTimeFunctions.isoTime,
-});
-
 const cache = new NodeCache({
   stdTTL: 0,
   checkperiod: 120,
 });
 
-const cacheDir = path.join(__dirname, '../../cache');
-const redisEnabled = process.env.DISABLE_STAX_REDIS !== 'true' && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
+const cacheDir = path.join(process.cwd(), 'cache');
+
+const redisEnabled = Object.keys(config.nftContracts).some(
+  contract => process.env[`DISABLE_${contract.toUpperCase()}_REDIS`] !== 'true' && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+);
 let redis = null;
 
 if (redisEnabled) {
@@ -39,17 +41,16 @@ if (redisEnabled) {
       url: process.env.UPSTASH_REDIS_REST_URL,
       token: process.env.UPSTASH_REDIS_REST_TOKEN,
     });
-    logger.info('utils', 'Upstash Redis initialized');
+    logger.info('utils', 'Upstash Redis initialized', 'eth', 'general');
   } catch (error) {
-    logger.error('utils', `Failed to initialize Upstash Redis: ${error.message}`, { stack: error.stack });
+    logger.error('utils', `Failed to initialize Upstash Redis: ${error.message}`, { stack: error.stack }, 'eth', 'general');
     redis = null;
   }
 }
 
-// Initialize viem client
 const alchemyApiKey = config.alchemy.apiKey || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
 if (!alchemyApiKey) {
-  logger.error('utils', 'Alchemy API key is missing');
+  logger.error('utils', 'Alchemy API key is missing', {}, 'eth', 'general');
   throw new Error('Alchemy API key is missing');
 }
 
@@ -58,112 +59,235 @@ const client = createPublicClient({
   transport: http(`https://eth-mainnet.g.alchemy.com/v2/${alchemyApiKey}`),
 });
 
-// Retry function for blockchain calls
-async function retry(operation, { retries, delay = 1000 }) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      if (attempt === retries) {
-        logger.error('utils', `Retry failed after ${retries} attempts: ${error.message}`, { stack: error.stack });
-        throw error;
-      }
-      logger.warn('utils', `Retry attempt ${attempt}/${retries} failed: ${error.message}`);
-      await new Promise(resolve => setTimeout(resolve, delay * attempt));
-    }
-  }
-}
+const alchemy = new Alchemy({
+  apiKey: config.alchemy.apiKey,
+  network: 'eth-mainnet',
+});
 
-// Ensure cache directory exists
 async function ensureCacheDir() {
   try {
     await fs.mkdir(cacheDir, { recursive: true });
     await fs.chmod(cacheDir, 0o755);
-    logger.debug('utils', `Ensured cache directory: ${cacheDir}`);
+    logger.info('utils', `Created/chmod cache directory: ${cacheDir}`, 'eth', 'general');
   } catch (error) {
-    logger.error('utils', `Failed to create/chmod cache directory ${cacheDir}: ${error.message}`, { stack: error.stack });
+    logger.error('utils', `Failed to create/chmod cache directory ${cacheDir}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
     throw error;
   }
 }
 
-// Initialize cache from disk or Redis
 async function initializeCache() {
   try {
+    logger.info('utils', 'Starting cache initialization', 'eth', 'general');
+    await ensureCacheDir();
+
+    // Check node-cache
+    const testKey = 'test_node_cache';
+    const testValue = { ready: true };
+    const nodeCacheSuccess = cache.set(testKey, testValue);
+    if (nodeCacheSuccess) {
+      logger.info('utils', 'Node-cache is ready', 'eth', 'general');
+      cache.del(testKey);
+    } else {
+      logger.error('utils', 'Node-cache failed to set test key', {}, 'eth', 'general');
+    }
+
+    // Check Redis
     if (redisEnabled && redis) {
       try {
-        const data = await redis.get('stax_stax_holders');
-        if (data) {
-          const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-          if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
-            const success = cache.set('stax_stax_holders', parsed);
-            logger.info('utils', `Initialized cache from Redis: stax_holders, success: ${success}, holders: ${parsed.holders.length}`);
-            return true;
-          } else {
-            logger.warn('utils', 'Invalid cache data in Redis for stax_holders');
-          }
+        await redis.set('test_redis', JSON.stringify(testValue));
+        const redisData = await redis.get('test_redis');
+        if (redisData && JSON.parse(redisData).ready) {
+          logger.info('utils', 'Redis cache is ready', 'eth', 'general');
+          await redis.del('test_redis');
+        } else {
+          logger.error('utils', 'Redis cache test failed: invalid data', {}, 'eth', 'general');
         }
       } catch (error) {
-        logger.error('utils', `Failed to initialize cache from Redis: ${error.message}`, { stack: error.stack });
+        logger.error('utils', `Redis cache test failed: ${error.message}`, { stack: error.stack }, 'eth', 'general');
       }
     }
-    
-    await ensureCacheDir();
-    const cacheFile = path.join(cacheDir, 'stax_holders.json');
-    try {
-      const data = await fs.readFile(cacheFile, 'utf8');
-      const parsed = JSON.parse(data);
-      if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
-        const success = cache.set('stax_stax_holders', parsed);
-        logger.info('utils', `Initialized cache from disk: stax_holders, success: ${success}, holders: ${parsed.holders.length}`);
-        return true;
-      } else {
-        logger.warn('utils', `Invalid cache data in ${cacheFile}`);
-      }
-    } catch (error) {
-      if (error.code !== 'ENOENT') {
-        logger.error('utils', `Failed to read cache from ${cacheFile}: ${error.message}`, { stack: error.stack });
-      } else {
-        logger.debug('utils', `No cache file at ${cacheFile}`);
+
+    // Create empty cache files for each collection
+    const collections = Object.keys(config.nftContracts).filter(key => !config.nftContracts[key].disabled).map(key => key.toLowerCase());
+    for (const collection of collections) {
+      const cacheFile = path.join(cacheDir, `${collection}_holders.json`);
+      try {
+        await fs.access(cacheFile);
+        logger.info('utils', `Cache file exists: ${cacheFile}`, 'eth', collection);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          await fs.writeFile(cacheFile, JSON.stringify({ holders: [], totalBurned: 0, timestamp: Date.now() }));
+          await fs.chmod(cacheFile, 0o644);
+          logger.info('utils', `Created empty cache file: ${cacheFile}`, 'eth', collection);
+        } else {
+          logger.error('utils', `Failed to access cache file ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', collection);
+        }
       }
     }
-    return false;
+
+    logger.info('utils', 'Cache initialization completed', 'eth', 'general');
+    return true;
   } catch (error) {
-    logger.error('utils', `Cache initialization error: ${error.message}`, { stack: error.stack });
+    logger.error('utils', `Cache initialization error: ${error.message}`, { stack: error.stack }, 'eth', 'general');
     return false;
   }
 }
 
-// Initialize cache on module load
-initializeCache().catch(error => {
-  logger.error('utils', `Cache initialization failed: ${error.message}`, { stack: error.stack });
-});
+async function retry(operation, { retries, delay = 1000 }) {
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (error.message.includes('429') && attempt === retries) {
+        logger.error('utils', `Circuit breaker: Rate limit exceeded after ${retries} attempts`, {}, 'eth', 'general');
+        throw new Error('Rate limit exceeded');
+      }
+      logger.warn('utils', `Retry attempt ${attempt}/${retries} failed: ${error.message}`, 'eth', 'general');
+      await new Promise(resolve => setTimeout(resolve, delay * Math.min(attempt, 3)));
+    }
+  }
+  throw lastError;
+}
+
+async function batchMulticall(calls, batchSize = config.alchemy.batchSize || 10) {
+  const results = [];
+  const delay = async () => new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs || 500));
+
+  const concurrencyLimit = pLimit(3);
+  const batchPromises = [];
+  for (let i = 0; i < calls.length; i += batchSize) {
+    const batch = calls.slice(i, i + batchSize);
+    batchPromises.push(
+      concurrencyLimit(async () => {
+        try {
+          await delay();
+          const batchResults = await client.multicall({
+            contracts: batch.map(call => ({
+              address: call.address,
+              abi: call.abi,
+              functionName: call.functionName,
+              args: call.args || [],
+            })),
+            allowFailure: true,
+          });
+
+          const batchResult = batchResults.map((result, index) => ({
+            status: result.status === 'success' ? 'success' : 'failure',
+            result: result.status === 'success' ? result.result : null,
+            error: result.status === 'failure' ? result.error?.message || 'Unknown error' : null,
+          }));
+          return batchResult;
+        } catch (error) {
+          logger.error('utils', `Batch multicall failed: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+          return batch.map(() => ({
+            status: 'failure',
+            result: null,
+            error: error.message,
+          }));
+        }
+      })
+    );
+  }
+
+  const batchResults = (await Promise.all(batchPromises)).flat();
+  results.push(...batchResults);
+  return results;
+}
+
+async function getOwnersForContract(contractAddress, abi, options = {}) {
+  let owners = [];
+  let pageKey = options.pageKey || null;
+  const maxPages = options.maxPages || 10; // Safety limit to prevent infinite loops
+  let pageCount = 0;
+
+  logger.debug('utils', `Fetching owners for contract: ${contractAddress} with options: ${JSON.stringify(options)}`, 'eth', 'general');
+
+  do {
+    try {
+      const response = await alchemy.nft.getOwnersForContract(contractAddress, {
+        withTokenBalances: options.withTokenBalances || false,
+        pageKey,
+      });
+
+      logger.debug('utils', `Raw Alchemy response: ownersExists=${!!response.owners}, isArray=${Array.isArray(response.owners)}, ownersLength=${response.owners?.length || 0}, pageKey=${response.pageKey || null}, responseKeys=${Object.keys(response)}, sampleOwners=${JSON.stringify(response.owners?.slice(0, 2) || [])}`, 'eth', 'general');
+
+      if (!response.owners || !Array.isArray(response.owners)) {
+        logger.error('utils', `Invalid Alchemy response for ${contractAddress}: ${JSON.stringify(response)}`, {}, 'eth', 'general');
+        throw new Error('Invalid owners response from Alchemy API');
+      }
+
+      for (const owner of response.owners) {
+        const tokenBalances = owner.tokenBalances || [];
+        logger.debug('utils', `Processing owner: ${owner.ownerAddress}, tokenBalancesCount=${tokenBalances.length}`, 'eth', 'general');
+
+        if (tokenBalances.length > 0) {
+          const validBalances = tokenBalances.filter(
+            tb => tb.tokenId && Number(tb.balance) > 0
+          );
+          if (validBalances.length > 0) {
+            owners.push({
+              ownerAddress: owner.ownerAddress.toLowerCase(),
+              tokenBalances: validBalances.map(tb => ({
+                tokenId: Number(tb.tokenId),
+                balance: Number(tb.balance),
+              })),
+            });
+          }
+        }
+      }
+
+      pageKey = response.pageKey || null;
+      pageCount++;
+      logger.debug('utils', `Fetched page ${pageCount}, owners: ${owners.length}, pageKey: ${pageKey}`, 'eth', 'general');
+
+      if (pageCount >= maxPages) {
+        logger.warn('utils', `Reached max pages (${maxPages}) for owner fetching`, 'eth', 'general');
+        break;
+      }
+    } catch (error) {
+      logger.error('utils', `Failed to fetch owners for ${contractAddress}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+      throw error;
+    }
+  } while (pageKey);
+
+  logger.debug('utils', `Processed owners: count=${owners.length}, sample=${JSON.stringify(owners.slice(0, 2))}`, 'eth', 'general');
+  logger.info('utils', `Fetched ${owners.length} owners for contract: ${contractAddress}`, 'eth', 'general');
+  return owners;
+}
 
 async function setCache(key, value, ttl, prefix) {
   try {
     const cacheKey = `${prefix}_${key}`;
     const success = cache.set(cacheKey, value);
-    logger.debug('utils', `Set cache: ${cacheKey}, success: ${success}, holders: ${value.holders?.length || 'unknown'}`);
-    
-    if (key === 'stax_holders' && prefix === 'stax') {
-      if (redisEnabled && redis) {
+    logger.info('utils', `Set in-memory cache: ${cacheKey}, success: ${success}, holders: ${value.holders?.length || 'unknown'}`, 'eth', prefix.toLowerCase());
+
+    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
+      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
         try {
-          await redis.set('stax_stax_holders', JSON.stringify(value));
-          logger.info('utils', `Persisted stax_holders to Redis, holders: ${value.holders.length}`);
+          await redis.set(cacheKey, JSON.stringify(value));
+          logger.info('utils', `Persisted ${cacheKey} to Redis, holders: ${value.holders.length}`, 'eth', prefix.toLowerCase());
         } catch (error) {
-          logger.error('utils', `Failed to persist stax_holders to Redis: ${error.message}`, { stack: error.stack });
+          logger.error('utils', `Failed to persist ${cacheKey} to Redis: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
         }
       } else {
-        const cacheFile = path.join(cacheDir, 'stax_holders.json');
+        const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
+        logger.info('utils', `Writing to cache file: ${cacheFile}`, 'eth', prefix.toLowerCase());
         await ensureCacheDir();
-        await fs.writeFile(cacheFile, JSON.stringify(value));
-        await fs.chmod(cacheFile, 0o644);
-        logger.info('utils', `Persisted stax_holders to ${cacheFile}, holders: ${value.holders.length}`);
+        try {
+          await fs.writeFile(cacheFile, JSON.stringify(value));
+          await fs.chmod(cacheFile, 0o644);
+          logger.info('utils', `Persisted ${cacheKey} to ${cacheFile}, holders: ${value.holders.length}`, 'eth', prefix.toLowerCase());
+        } catch (error) {
+          logger.error('utils', `Failed to write cache file ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+          throw error;
+        }
       }
     }
-    
     return success;
   } catch (error) {
-    logger.error('utils', `Failed to set cache ${prefix}_${key}: ${error.message}`, { stack: error.stack });
+    logger.error('utils', `Failed to set cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
     return false;
   }
 }
@@ -173,53 +297,53 @@ async function getCache(key, prefix) {
     const cacheKey = `${prefix}_${key}`;
     let data = cache.get(cacheKey);
     if (data !== undefined) {
-      logger.debug('utils', `Cache hit: ${cacheKey}, holders: ${data.holders?.length || 'unknown'}`);
+      logger.debug('utils', `Cache hit: ${cacheKey}, holders: ${data.holders?.length || 'unknown'}`, 'eth', prefix.toLowerCase());
       return data;
     }
 
-    if (key === 'stax_holders' && prefix === 'stax') {
-      if (redisEnabled && redis) {
+    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
+      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
         try {
-          const redisData = await redis.get('stax_stax_holders');
+          const redisData = await redis.get(cacheKey);
           if (redisData) {
             const parsed = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
             if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
               const success = cache.set(cacheKey, parsed);
-              logger.info('utils', `Loaded stax_holders from Redis, cached: ${success}, holders: ${parsed.holders.length}`);
+              logger.info('utils', `Loaded ${cacheKey} from Redis, cached: ${success}, holders: ${parsed.holders.length}`, 'eth', prefix.toLowerCase());
               return parsed;
             } else {
-              logger.warn('utils', `Invalid data in Redis for ${cacheKey}`);
+              logger.warn('utils', `Invalid data in Redis for ${cacheKey}`, 'eth', prefix.toLowerCase());
             }
           }
         } catch (error) {
-          logger.error('utils', `Failed to load cache from Redis: ${error.message}`, { stack: error.stack });
+          logger.error('utils', `Failed to load cache from Redis for ${cacheKey}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
         }
       }
-      
-      const cacheFile = path.join(cacheDir, 'stax_holders.json');
+
+      const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
       try {
         const fileData = await fs.readFile(cacheFile, 'utf8');
         const parsed = JSON.parse(fileData);
         if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
           const success = cache.set(cacheKey, parsed);
-          logger.info('utils', `Loaded stax_holders from ${cacheFile}, cached: ${success}, holders: ${parsed.holders.length}`);
+          logger.info('utils', `Loaded ${cacheKey} from ${cacheFile}, cached: ${success}, holders: ${parsed.holders.length}`, 'eth', prefix.toLowerCase());
           return parsed;
         } else {
-          logger.warn('utils', `Invalid data in ${cacheFile}`);
+          logger.warn('utils', `Invalid data in ${cacheFile}`, 'eth', prefix.toLowerCase());
         }
       } catch (error) {
         if (error.code !== 'ENOENT') {
-          logger.error('utils', `Failed to load cache from ${cacheFile}: ${error.message}`, { stack: error.stack });
+          logger.error('utils', `Failed to load cache from ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
         } else {
-          logger.debug('utils', `No cache file at ${cacheFile}`);
+          logger.debug('utils', `No cache file at ${cacheFile}`, 'eth', prefix.toLowerCase());
         }
       }
     }
 
-    logger.info('utils', `Cache miss: ${cacheKey}`);
+    logger.info('utils', `Cache miss: ${cacheKey}`, 'eth', prefix.toLowerCase());
     return null;
   } catch (error) {
-    logger.error('utils', `Failed to get cache ${prefix}_${key}: ${error.message}`, { stack: error.stack });
+    logger.error('utils', `Failed to get cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
     return null;
   }
 }
@@ -230,9 +354,9 @@ async function saveCacheState(collection, state, prefix) {
     await ensureCacheDir();
     await fs.writeFile(cacheFile, JSON.stringify(state));
     await fs.chmod(cacheFile, 0o644);
-    logger.debug('utils', `Saved cache state for ${prefix}: ${cacheFile}`);
+    logger.debug('utils', `Saved cache state for ${prefix}: ${cacheFile}`, 'eth', prefix.toLowerCase());
   } catch (error) {
-    logger.error('utils', `Failed to save cache state for ${prefix}: ${error.message}`, { stack: error.stack });
+    logger.error('utils', `Failed to save cache state for ${prefix}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
   }
 }
 
@@ -241,16 +365,31 @@ async function loadCacheState(collection, prefix) {
     const cacheFile = path.join(cacheDir, `cache_state_${prefix.toLowerCase()}.json`);
     const data = await fs.readFile(cacheFile, 'utf8');
     const parsed = JSON.parse(data);
-    logger.debug('utils', `Loaded cache state for ${prefix}: ${cacheFile}`);
+    logger.debug('utils', `Loaded cache state for ${prefix}: ${cacheFile}`, 'eth', prefix.toLowerCase());
     return parsed;
   } catch (error) {
     if (error.code === 'ENOENT') {
-      logger.debug('utils', `No cache state found for ${prefix}`);
+      logger.debug('utils', `No cache state found for ${prefix}`, 'eth', prefix.toLowerCase());
       return null;
     }
-    logger.error('utils', `Failed to load cache state for ${prefix}: ${error.message}`, { stack: error.stack });
+    logger.error('utils', `Failed to load cache state for ${prefix}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
     return null;
   }
 }
 
-export { client, retry, logger, getCache, setCache, saveCacheState, loadCacheState };
+async function getTransactionReceipt(transactionHash) {
+  try {
+    const receipt = await client.getTransactionReceipt({ hash: transactionHash });
+    logger.debug('utils', `Fetched transaction receipt for ${transactionHash}`, 'eth', 'general');
+    return receipt;
+  } catch (error) {
+    logger.error('utils', `Failed to fetch transaction receipt for ${transactionHash}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    return null;
+  }
+}
+
+async function log(scope, message, chain = 'eth', collection = 'general') {
+  await logger.info(scope, message, chain, collection);
+}
+
+export { client, retry, logger, getCache, setCache, saveCacheState, loadCacheState, batchMulticall, getOwnersForContract, getTransactionReceipt, log, initializeCache };

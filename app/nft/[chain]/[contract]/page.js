@@ -1,17 +1,13 @@
-// File: app/nft/[chain]/[contract]/page.js
 'use client';
-
 import { useState, useEffect } from 'react';
 import { notFound } from 'next/navigation';
 import nextDynamic from 'next/dynamic';
 import config from '@/config';
 import LoadingIndicator from '@/components/LoadingIndicator';
 import { useNFTStore } from '@/app/store';
+import { HoldersResponseSchema } from '@/lib/schemas';
 
-// Dynamically import NFTPageWrapper
 const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), { ssr: false });
-
-// Force dynamic rendering to skip static prerendering
 export const dynamic = 'force-dynamic';
 
 async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
@@ -22,12 +18,17 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       return { error: `${apiKey} is not available` };
     }
 
-    let endpoint = apiEndpoint;
-    if (!endpoint || !endpoint.startsWith('http')) {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
-      endpoint = `${baseUrl}${apiEndpoint}`;
-      console.log(`[NFTContractPage] [INFO] Adjusted endpoint: ${endpoint}`);
-    }
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+    const endpoint = apiEndpoint.startsWith('http') ? apiEndpoint : `${baseUrl}${apiEndpoint}`;
+
+    const pollProgress = async () => {
+      const progressUrl = `${endpoint}/progress`;
+      const res = await fetch(progressUrl, { cache: 'no-store', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+      if (!res.ok) throw new Error(`Progress fetch failed: ${res.status}`);
+      const progress = await res.json();
+      console.log(`[NFTContractPage] [DEBUG] Progress: ${JSON.stringify(progress)}`);
+      return progress;
+    };
 
     let allHolders = [];
     let totalTokens = 0;
@@ -37,41 +38,59 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     let page = 0;
     let totalPages = Infinity;
 
+    const maxPollTime = 180000; // 180 seconds
+    const startTime = Date.now();
+    let progress = await pollProgress();
+
+    while (progress.isPopulating || progress.phase !== 'Completed') {
+      if (Date.now() - startTime > maxPollTime) {
+        console.error(`[NFTContractPage] [ERROR] Cache population timeout for ${apiKey}`);
+        return { error: 'Cache population timed out' };
+      }
+      console.log(`[NFTContractPage] [INFO] Waiting for ${apiKey} cache: ${progress.phase} (${progress.progressPercentage}%)`);
+      await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+      progress = await pollProgress();
+      if (progress.phase === 'Error') {
+        console.error(`[NFTContractPage] [ERROR] Cache population failed: ${progress.error || 'Unknown error'}`);
+        return { error: `Cache population failed: ${progress.error || 'Unknown error'}` };
+      }
+    }
+
     while (page < totalPages) {
       const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
       console.log(`[NFTContractPage] [DEBUG] Fetching ${url}`);
       const res = await fetch(url, { cache: 'force-cache' });
-      console.log(`[NFTContractPage] [DEBUG] Response status: ${res.status}, headers: ${JSON.stringify([...res.headers])}`);
+      console.log(`[NFTContractPage] [DEBUG] Response status: ${res.status}`);
 
       if (!res.ok) {
         const errorText = await res.text();
         console.error(`[NFTContractPage] [ERROR] Failed to fetch ${url}: ${res.status} ${errorText}`);
-        return { error: `Failed to fetch ${url}: ${res.status} ${errorText}` };
+        return { error: `Failed to fetch data: ${res.status}` };
       }
 
       const json = await res.json();
       console.log(`[NFTContractPage] [DEBUG] Response body: ${JSON.stringify(json, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
 
-      if (json.error) {
-        console.error(`[NFTContractPage] [ERROR] API error for ${apiKey}: ${json.error}`);
-        return { error: json.error };
+      if (json.isCachePopulating) {
+        return { isCachePopulating: true, progress }; // Trigger polling
       }
-      if (!json.holders || !Array.isArray(json.holders)) {
-        console.error(`[NFTContractPage] [ERROR] Invalid holders data for ${url}: ${JSON.stringify(json)}`);
+
+      const validation = HoldersResponseSchema.safeParse(json);
+      if (!validation.success) {
+        console.error(`[NFTContractPage] [ERROR] Invalid holders data: ${JSON.stringify(validation.error.errors)}`);
         if (apiKey === 'ascendant') {
-          console.log(`[NFTContractPage] [INFO] Triggering POST to refresh cache for ${apiKey}`);
-          await fetch(endpoint, { method: 'POST', cache: 'force-cache' });
-          // Retry fetching the page
+          console.log(`[NFTContractPage] [INFO] Triggering POST for ${apiKey}`);
+          await fetch(endpoint, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forceUpdate: false }) });
           const retryRes = await fetch(url, { cache: 'no-store' });
           if (!retryRes.ok) {
             const retryError = await retryRes.text();
-            console.error(`[NFTContractPage] [ERROR] Retry failed for ${url}: ${retryRes.status} ${retryError}`);
+            console.error(`[NFTContractPage] [ERROR] Retry failed: ${retryRes.status} ${retryError}`);
             return { error: `Retry failed: ${retryRes.status}` };
           }
           const retryJson = await retryRes.json();
-          console.log(`[NFTContractPage] [DEBUG] Retry response: ${JSON.stringify(retryJson, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
-          if (!retryJson.holders || !Array.isArray(retryJson.holders)) {
-            console.error(`[NFTContractPage] [ERROR] Retry invalid holders data: ${JSON.stringify(retryJson)}`);
+          const retryValidation = HoldersResponseSchema.safeParse(retryJson);
+          if (!retryValidation.success) {
+            console.error(`[NFTContractPage] [ERROR] Retry invalid holders data: ${JSON.stringify(retryValidation.error.errors)}`);
             return { error: 'Invalid holders data after retry' };
           }
           json.holders = retryJson.holders;
@@ -113,6 +132,7 @@ export default function NFTContractPage({ params }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(null);
 
   const { getCache, setCache } = useNFTStore();
 
@@ -127,7 +147,7 @@ export default function NFTContractPage({ params }) {
 
   useEffect(() => {
     if (!config.supportedChains.includes(chain) || !apiKey) {
-      console.log(`[NFTContractPage] [ERROR] Not found: chain=${chain}, contract=${contract}`);
+      console.log(`[NFTContractPage] [ERROR] Invalid chain=${chain} or contract=${contract}`);
       notFound();
     }
 
@@ -137,10 +157,9 @@ export default function NFTContractPage({ params }) {
       setData(null);
 
       const contractConfig = config.contractDetails[apiKey] || {};
-
-      // Check cache first
       const cacheKey = `contract_${apiKey}`;
       const cachedData = getCache(cacheKey);
+
       if (cachedData) {
         console.log(`[NFTContractPage] [INFO] Cache hit for ${cacheKey}`);
         setData(cachedData);
@@ -148,16 +167,33 @@ export default function NFTContractPage({ params }) {
         return;
       }
 
-      // Fetch data if not cached
       console.log(`[NFTContractPage] [INFO] Cache miss for ${cacheKey}, fetching data`);
       const result = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
-      if (result.error) {
+
+      if (result.isCachePopulating) {
+        const poll = async () => {
+          const progressResult = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+          setProgress(progressResult.progress);
+          if (progressResult.isCachePopulating) {
+            setTimeout(poll, config.alchemy.batchDelayMs);
+          } else if (progressResult.error) {
+            setError(progressResult.error);
+            setLoading(false);
+          } else {
+            setCache(cacheKey, progressResult);
+            setData(progressResult);
+            setLoading(false);
+          }
+        };
+        poll();
+      } else if (result.error) {
         setError(result.error);
+        setLoading(false);
       } else {
         setCache(cacheKey, result);
         setData(result);
+        setLoading(false);
       }
-      setLoading(false);
     }
 
     fetchData();
@@ -171,7 +207,10 @@ export default function NFTContractPage({ params }) {
     return (
       <div className="container page-content">
         <h1 className="title mb-6">{contract} Collection</h1>
-        <LoadingIndicator status="Loading collection..." />
+        <LoadingIndicator
+          status={`Loading ${contract} data... ${progress ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`}
+          progress={progress}
+        />
       </div>
     );
   }

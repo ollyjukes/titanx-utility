@@ -1,4 +1,5 @@
 // app/nft/page.js
+'use client';
 import { motion } from 'framer-motion';
 import { fetchCollectionData } from '@/lib/fetchCollectionData';
 import config from '@/config';

@@ -1,5 +1,4 @@
 // config.js
-import element280NftStatus from './element280_nft_status.json' assert { type: 'json' };
 import element280MainAbi from './abi/element280.json' assert { type: 'json' };
 import element280VaultAbi from './abi/element280Vault.json' assert { type: 'json' };
 import element369MainAbi from './abi/element369.json' assert { type: 'json' };
@@ -252,10 +251,10 @@ const config = {
   alchemy: {
     apiKey: process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
     network: 'eth-mainnet',
-    batchSize: 10,
-    batchDelayMs: 1000,
-    retryMaxDelayMs: 30000,
-    maxRetries: 3,
+    batchSize: 50, // Increased for larger batches
+    batchDelayMs: 500, // Reduced for speed
+    retryMaxDelayMs: 10000, // Reduced to fail faster
+    maxRetries: 2, // Reduced to minimize retry overhead
     timeoutMs: 30000,
   },
   

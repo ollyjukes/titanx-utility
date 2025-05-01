@@ -1,8 +1,8 @@
-// next.config.mjs
+// File: next.config.mjs
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ['viem', 'alchemy-sdk', 'pino'],
+  serverExternalPackages: ['viem', 'alchemy-sdk'],
   webpack: (config) => {
     config.resolve.fallback = { fs: false, path: false };
     return config;
@@ -10,4 +10,3 @@ const nextConfig = {
 };
 
 export default nextConfig;
-

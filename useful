@@ -111,16 +111,10 @@ echo -e "\nReferenced Files Not Found:" >> "$SUMMARY_FILE"
 echo "---------------------------" >> "$SUMMARY_FILE"
 
 REFERENCED_FILES=(
-"./app/ClientProvider.js"
-"./app/api/holders/Ascendant/route.js"
-"./app/api/holders/E280/route.js"
-"./app/api/holders/Element280/progress/route.js"
-"./app/api/holders/Element280/route.js"
 "./app/api/holders/Element280/validate-burned/route.js"
-"./app/api/holders/Element369/route.js"
-"./app/api/holders/Stax/route.js"
+"./app/api/holders/\[contract\]/route.js"
+"./app/api/holders/\[contract\]/progress/route.js"
 "./app/api/utils.js"
-"./app/auctions/page.js"
 "./app/layout.js"
 "./app/mining/page.js"
 "./app/nft/\[chain\]/\[contract\]/page.js"
@@ -137,7 +131,6 @@ REFERENCED_FILES=(
 "./components/NFTSummary.js"
 "./components/Navbar.jsx"
 "./components/SearchResultsModal.js"
-"./components/loadElement280NFTsDB.js"
 "./config.js"
 )
 

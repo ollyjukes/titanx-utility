@@ -273,24 +273,44 @@ app/api/holders/Element369/route.js \
 app/api/holders/Element369/progress/route.js \
 app/store.js config.js app/api/utils.js > ./routes1.txt
 
+cat app/api/holders/Ascendant/route.js app/api/holders/Ascendant/progress/route.js \
+app/api/holders/E280/route.js \
+app/api/holders/E280/progress/route.js \
+app/api/holders/Element369/route.js \
+app/api/holders/Element369/progress/route.js \
+app/store.js config.js app/api/utils.js > ./routes1.txt
+
 cat app/api/holders/Element280/route.js \
 app/api/holders/Element280/progress/route.js \
 app/api/holders/Element280/validate-burned/route.js \
 app/api/holders/Stax/route.js \
 app/store.js config.js app/api/utils.js \
-app/api/holders/Stax/progress/route.js > ./routes2.txt
+app/api/holders/Stax/progress/route.js  lib/* > ./routes2.txt
 
-grep app/api/holders/ ./routes1.txt >> routes1.txt
-grep app/api/holders/ ./routes2.txt >> routes2.txt
+cat \
+app/api/holders/\[contract\]/route.js \
+app/api/holders/\[contract\]/progress/route.js \
+app/api/holders/Element280/validate-burned/route.js \
+app/api/debug/route.js \
+app/api/init/* \
+app/store.js \
+config.js \
+app/api/utils.js \
+lib/* > ./routes3.txt
 
-cat components/*.js  components/*.jsx components/HolderTable/*.js config.js app/store.js app/page.js app/layout.js app/nft/layout.js app/nft/page.js app/nft/\[chain\]/\[contract\]/page.js   > ./ClientStuff.txt
+cat components/*.js  components/*.jsx components/HolderTable/*.js config.js app/store.js  \
+app/page.js app/layout.js app/nft/layout.js app/nft/page.js  lib/* \
+app/nft/\[chain\]/\[contract\]/page.js   > ./ClientStuff.txt
 
-cat package.json next.config.mjs jsconfig.json tailwind.config.js .env.local .env.development.local lib/* > ./envs.txt
+cat package.json next.config.mjs jsconfig.json tailwind.config.js .env.local .env.development.local lib/*  app/store.js config.js app/api/utils.js > ./envs.txt
 
 clear; cat envs.txt
 clear; cat envs.txt  ./routes1.txt 
-clear; cat envs.txt ./routes2.txt 
-clear; cat ClientStuff.txt
+clear; cat envs.txt ./routes2.txt
+
+clear;  cat ./routes3.txt 
+clear; cat envs.txt ./routes3.txt 
+clear; cat envs.txt ClientStuff.txt
 
 clear;npm run build
 
@@ -306,3 +326,55 @@ time curl -X POST http://localhost:3000/api/holders/Stax;
 time curl -X POST http://localhost:3000/api/holders/Stax;
 time curl -X POST http://localhost:3000/api/holders/Stax;
 time curl -X POST http://localhost:3000/api/holders/Stax;
+
+time curl -X POST http://localhost:3000/api/holders/element369;
+time curl -X POST http://localhost:3000/api/holders/element369;
+time curl -X POST http://localhost:3000/api/holders/element369;
+
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl -X POST http://localhost:3000/api/holders/element280;
+
+time curl -X POST http://localhost:3000/api/holders/ascendant;
+time curl -X POST http://localhost:3000/api/holders/ascendant;
+time curl -X POST http://localhost:3000/api/holders/ascendant;
+
+time curl -X POST http://localhost:3000/api/holders/e280;
+
+
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/element369;
+time curl -X POST http://localhost:3000/api/holders/e280;
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl -X POST http://localhost:3000/api/holders/ascendant;
+
+curl http://localhost:3000/api/holders/Stax/progress
+curl http://localhost:3000/api/holders/element369/progress
+curl http://localhost:3000/api/holders/e280/progress
+curl http://localhost:3000/api/holders/element280/progress
+curl http://localhost:3000/api/holders/ascendant/progress
+
+
+route file basic structure
+
+import { NextResponse } from 'next/server';
+import { parseAbiItem, formatUnits } from 'viem';
+import pLimit from 'p-limit';
+import config from '@/config.js';
+import { client, retry, logger, getCache, setCache, saveCacheState, loadCacheState, batchMulticall, getOwnersForContract } from '@/app/api/utils';
+import { HoldersResponseSchema } from '@/lib/schemas';
+
+const limit = pLimit(5);
+
+// Helper functions
+async function getCacheState(contractKey) { ... }
+async function saveCacheStateContract(contractKey, cacheState) { ... }
+async function getNewEvents(contractKey, contractAddress, fromBlock, errorLog) { ... }
+async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, vaultAbi, cacheState) { ... }
+async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultAddress, vaultAbi, forceUpdate = false) { ... }
+
+// GET handler
+export async function GET(request, { params }) { ... }
+
+// POST handler
+export async function POST(request, { params }) { ... }

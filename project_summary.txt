@@ -9,6 +9,7 @@ Dependencies from package.json:
   - @upstash/redis
   - alchemy-sdk
   - async-mutex
+  - chalk
   - chart.js
   - dotenv
   - framer-motion
@@ -22,6 +23,7 @@ Dependencies from package.json:
   - react-virtualized
   - uuid
   - viem
+  - zod
   - zustand
 
 Dev Dependencies from package.json:
@@ -36,5 +38,3 @@ Dev Dependencies from package.json:
 
 Referenced Files Not Found:
 ---------------------------
-- ./app/ClientProvider.js (Referenced but not found in project structure)
-- ./components/loadElement280NFTsDB.js (Referenced but not found in project structure)

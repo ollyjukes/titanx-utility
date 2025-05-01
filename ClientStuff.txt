@@ -1,34 +1,26 @@
-import { motion } from 'framer-motion';
+import { memo } from 'react';
 
-export default function LoadingIndicator({ status, progress }) {
-  const percentage = progress?.totalOwners > 0 ? (progress.totalWallets / progress.totalOwners) * 100 : 0;
-
+function LoadingIndicator({ status, progress }) {
   return (
-    <div className="loading-container">
-      <motion.svg
-        className="spinner"
-        animate={{ scale: [1, 1.2, 1], rotate: 360 }}
-        transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-      >
+    <div className="flex flex-col items-center justify-center p-6 bg-gray-800 rounded-lg">
+      <svg className="animate-spin h-8 w-8 text-blue-500" viewBox="0 0 24 24">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path
-          className="opacity-75"
-          fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-        />
-      </motion.svg>
-      <p className="text-body">{status}</p>
-      {progress?.totalOwners > 0 && (
-        <div className="progress-bar">
-          <div className="progress-fill" style={{ width: `${percentage}%` }}></div>
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+      </svg>
+      <p className="mt-4 text-gray-200">{status}</p>
+      {progress && (
+        <div className="mt-2 w-64 bg-gray-700 rounded-full h-2.5">
+          <div
+            className="bg-blue-600 h-2.5 rounded-full"
+            style={{ width: `${progress.progressPercentage}%` }}
+          />
         </div>
       )}
     </div>
   );
-}// File: components/NFTLayout.js
+}
+
+export default memo(LoadingIndicator);// File: components/NFTLayout.js
 
 'use client';
 
@@ -2285,7 +2277,6 @@ const HolderTable = ({ chain, contract, holders, totalTokens, totalShares, rewar
 };
 
 export default HolderTable;// config.js
-import element280NftStatus from './element280_nft_status.json' assert { type: 'json' };
 import element280MainAbi from './abi/element280.json' assert { type: 'json' };
 import element280VaultAbi from './abi/element280Vault.json' assert { type: 'json' };
 import element369MainAbi from './abi/element369.json' assert { type: 'json' };
@@ -2538,10 +2529,10 @@ const config = {
   alchemy: {
     apiKey: process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
     network: 'eth-mainnet',
-    batchSize: 10,
-    batchDelayMs: 1000,
-    retryMaxDelayMs: 30000,
-    maxRetries: 3,
+    batchSize: 50, // Increased for larger batches
+    batchDelayMs: 500, // Reduced for speed
+    retryMaxDelayMs: 10000, // Reduced to fail faster
+    maxRetries: 2, // Reduced to minimize retry overhead
     timeoutMs: 30000,
   },
   
@@ -2702,35 +2693,30 @@ export default function RootLayout({ children }) {
     </html>
   );
 }// File: app/nft/layout.js
-
+'use client';
+import Navbar from '@/components/Navbar';
 import NFTLayoutWrapper from '@/components/NFTLayoutWrapper';
 import '@/app/global.css'; // Target global.css in app directory
 import { Inter } from 'next/font/google';
+import { Suspense } from 'react';
 
 const inter = Inter({ subsets: ['latin'] });
 
-export const metadata = {
-  title: 'TitanXUtils',
-  description: 'NFT tracking and management platform for TitanX ecosystem',
-};
-
-export default function RootLayout({ children }) {
+export default function NFTLayout({ children }) {
   return (
-    <html lang="en" className="bg-gray-900 text-gray-100">
-      <head>
-        <title>TitanXUtils</title>
-      </head>
-      <body className={inter.className}>
-        <NFTLayoutWrapper>
-          <main className="flex-grow container page-content">{children}</main>
-          <footer className="footer">
-            <p>© {new Date().getFullYear()} TitanXUtils. All rights reserved.</p>
-          </footer>
-        </NFTLayoutWrapper>
-      </body>
-    </html>
+    <NFTLayoutWrapper>
+      <main className={`flex-grow container page-content ${inter.className}`}>
+        <Suspense fallback={<div>Loading...</div>}>
+          {children}
+        </Suspense>
+      </main>
+      <footer className="footer">
+        <p>© {new Date().getFullYear()} TitanXUtils. All rights reserved.</p>
+      </footer>
+    </NFTLayoutWrapper>
   );
 }// app/nft/page.js
+'use client';
 import { motion } from 'framer-motion';
 import { fetchCollectionData } from '@/lib/fetchCollectionData';
 import config from '@/config';
@@ -2795,35 +2781,93 @@ export default function NFTOverview() {
       {collectionsData.length > 0 && !loading && <NFTSummary collectionsData={collectionsData} />}
     </div>
   );
-}// File: app/nft/[chain]/[contract]/page.js
-'use client';
-
-import { useState, useEffect } from 'react';
-import { notFound } from 'next/navigation';
-import nextDynamic from 'next/dynamic';
+}export const barChartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top', labels: { color: '#e5e7eb' } }, // Gray-200
+      title: {
+        display: true,
+        text: 'NFT Tier Distribution',
+        color: '#e5e7eb',
+        font: { size: 16, weight: 'bold' },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: { display: true, text: 'Number of NFTs', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' }, // Gray-300
+      },
+      x: {
+        title: { display: true, text: 'Tiers', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' },
+      },
+    },
+  };// lib/fetchCollectionData.js
 import config from '@/config';
-import LoadingIndicator from '@/components/LoadingIndicator';
-import { useNFTStore } from '@/app/store';
 
-// Dynamically import NFTPageWrapper
-const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), { ssr: false });
-
-// Force dynamic rendering to skip static prerendering
-export const dynamic = 'force-dynamic';
-
-async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
-  console.log(`[NFTContractPage] [INFO] Fetching data for ${apiKey} from ${apiEndpoint}`);
+export async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[FetchCollectionData] [INFO] Fetching ${apiKey} from ${apiEndpoint}`);
   try {
     if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
-      console.log(`[NFTContractPage] [INFO] ${apiKey} is disabled`);
-      return { error: `${apiKey} is not available` };
+      return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' };
     }
 
-    let endpoint = apiEndpoint;
-    if (!endpoint || !endpoint.startsWith('http')) {
-      const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
-      endpoint = `${baseUrl}${apiEndpoint}`;
-      console.log(`[NFTContractPage] [INFO] Adjusted endpoint: ${endpoint}`);
+    let endpoint = apiEndpoint.startsWith('http') ? apiEndpoint : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${apiEndpoint}`;
+    
+    // Poll /progress until cache is complete
+    let progress;
+    let attempts = 0;
+    const maxAttempts = config.alchemy.maxRetries;
+    while (attempts < maxAttempts) {
+      try {
+        const res = await fetch(`${endpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Progress fetch failed: ${res.status} ${errorText}`);
+        }
+        progress = await res.json();
+        if (progress.phase === 'Idle' || progress.totalOwners === 0) {
+          console.log(`[FetchCollectionData] [INFO] Triggering POST for ${apiKey}`);
+          const postRes = await fetch(endpoint, { method: 'POST', cache: 'force-cache' });
+          if (!postRes.ok) {
+            const errorText = await postRes.text();
+            console.error(`[FetchCollectionData] [ERROR] Cache population trigger failed: ${postRes.status} ${errorText}`);
+            throw new Error(`Cache population trigger failed: ${postRes.status}`);
+          }
+        }
+        break;
+      } catch (error) {
+        attempts++;
+        console.error(`[FetchCollectionData] [ERROR] Progress fetch attempt ${attempts}/${maxAttempts} failed: ${error.message}`);
+        if (attempts >= maxAttempts) {
+          return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Failed to fetch cache progress' };
+        }
+        await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs * attempts));
+      }
+    }
+
+    const maxPollTime = 60000; // 60 seconds max polling
+    const startTime = Date.now();
+    while (progress.phase !== 'Completed' && progress.phase !== 'Error') {
+      if (Date.now() - startTime > maxPollTime) {
+        console.error(`[FetchCollectionData] [ERROR] Cache population timeout for ${apiKey}`);
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Cache population timed out' };
+      }
+      console.log(`[FetchCollectionData] [INFO] Waiting for ${apiKey} cache: ${progress.phase} (${progress.progressPercentage}%)`);
+      await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+      const res = await fetch(`${endpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FetchCollectionData] [ERROR] Progress fetch failed: ${res.status} ${errorText}`);
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Failed to fetch cache progress' };
+      }
+      progress = await res.json();
+    }
+
+    if (progress.phase === 'Error') {
+      console.error(`[FetchCollectionData] [ERROR] Cache population failed for ${apiKey}: ${progress.error || 'Unknown error'}`);
+      return { holders: [], totalTokens: 0, totalBurned: 0, error: `Cache population failed: ${progress.error || 'Unknown error'}` };
     }
 
     let allHolders = [];
@@ -2836,39 +2880,350 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
 
     while (page < totalPages) {
       const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[FetchCollectionData] [DEBUG] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'force-cache' });
+      console.log(`[FetchCollectionData] [DEBUG] Status: ${res.status}, headers: ${JSON.stringify([...res.headers])}`);
+
+      if (res.status === 202) {
+        console.log(`[FetchCollectionData] [INFO] Cache still populating for ${apiKey}, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+        continue;
+      }
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FetchCollectionData] [ERROR] Failed: ${res.status} ${errorText}`);
+        throw new Error(`API request failed: ${res.status}`);
+      }
+
+      const json = await res.json();
+      console.log(`[FetchCollectionData] [DEBUG] Response: ${JSON.stringify(json, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+
+      if (json.error) {
+        console.error(`[FetchCollectionData] [ERROR] API error: ${json.error}`);
+        throw new Error(json.error);
+      }
+      if (!json.holders || !Array.isArray(json.holders)) {
+        console.error(`[FetchCollectionData] [ERROR] Invalid holders: ${JSON.stringify(json)}`);
+        if (apiKey === 'ascendant') {
+          console.log(`[FetchCollectionData] [INFO] Triggering POST for ${apiKey}`);
+          await fetch(endpoint, { method: 'POST', cache: 'force-cache' });
+          const retryRes = await fetch(url, { cache: 'no-store' });
+          if (!retryRes.ok) {
+            const retryError = await retryRes.text();
+            console.error(`[FetchCollectionData] [ERROR] Retry failed: ${retryRes.status} ${retryError}`);
+            throw new Error(`Retry failed: ${retryRes.status}`);
+          }
+          const retryJson = await retryRes.json();
+          console.log(`[FetchCollectionData] [DEBUG] Retry response: ${JSON.stringify(retryJson, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+          if (!retryJson.holders || !Array.isArray(retryJson.holders)) {
+            console.error(`[FetchCollectionData] [ERROR] Retry invalid holders: ${JSON.stringify(retryJson)}`);
+            throw new Error('Invalid holders data after retry');
+          }
+          json.holders = retryJson.holders;
+          json.totalTokens = retryJson.totalTokens;
+          json.totalShares = retryJson.totalShares;
+          json.totalBurned = retryJson.totalBurned;
+          json.summary = retryJson.summary;
+          json.totalPages = retryJson.totalPages;
+        } else {
+          throw new Error('Invalid holders data');
+        }
+      }
+
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalTokens;
+      totalBurned = json.totalBurned || totalBurned;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[FetchCollectionData] [INFO] Fetched page ${page}: ${json.holders.length} holders`);
+    }
+
+    return { holders: allHolders, totalTokens, totalShares, totalBurned, summary };
+  } catch (error) {
+    console.error(`[FetchCollectionData] [ERROR] ${apiKey}: ${error.message}, stack: ${error.stack}`);
+    return { holders: [], totalTokens: 0, totalBurned: 0, error: error.message };
+  }
+}import fs from 'fs/promises';
+import path from 'path';
+import chalk from 'chalk';
+
+// Use process.cwd() to reference the project root
+const logDir = path.join(process.cwd(), 'logs');
+
+console.log(chalk.cyan('[Logger] Initializing logger...'));
+console.log(chalk.cyan('[Logger] process.env.DEBUG:'), process.env.DEBUG);
+console.log(chalk.cyan('[Logger] process.env.NODE_ENV:'), process.env.NODE_ENV);
+console.log(chalk.cyan('[Logger] Log directory:'), logDir);
+
+const isDebug = process.env.DEBUG === 'true';
+console.log(chalk.cyan('[Logger] isDebug:'), isDebug);
+
+async function ensureLogDir() {
+  try {
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.chmod(logDir, 0o755);
+    console.log(chalk.cyan('[Logger] Created or verified log directory:'), logDir);
+  } catch (error) {
+    console.error(chalk.red('[Logger] Failed to create log directory:'), error.message);
+  }
+}
+
+ensureLogDir().catch(error => {
+  console.error(chalk.red('[Logger] ensureLogDir error:'), error.message);
+});
+
+export const logger = {
+  info: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [INFO] ${message}`;
+    console.log(chalk.green(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote INFO log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write INFO log:'), error.message);
+      }
+    }
+  },
+  error: async (scope, message, details = {}, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [ERROR] ${message} ${JSON.stringify(details)}`;
+    console.error(chalk.red(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote ERROR log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write ERROR log:'), error.message);
+      }
+    }
+  },
+  debug: async (scope, message, chain = 'eth', collection = 'general') => {
+    if (!isDebug) return;
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [DEBUG] ${message}`;
+    console.log(chalk.blue(log));
+    try {
+      const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+      await fs.appendFile(logFile, `${log}\n`);
+      console.log(chalk.cyan('[Logger] Wrote DEBUG log to:'), logFile);
+    } catch (error) {
+      console.error(chalk.red('[Logger] Failed to write DEBUG log:'), error.message);
+    }
+  },
+};
+
+try {
+  logger.info('startup', 'Logger module loaded').catch(error => {
+    console.error(chalk.red('[Logger] Startup log error:'), error.message);
+  });
+} catch (error) {
+  console.error(chalk.red('[Logger] Immediate log error:'), error.message);
+}// File: lib/schemas.js
+import { z } from 'zod';
+
+export const HoldersResponseSchema = z.object({
+  holders: z.array(z.object({
+    wallet: z.string(),
+    total: z.number().optional(),
+    tiers: z.array(z.number()).optional(),
+    shares: z.number().optional(),
+  })),
+  totalTokens: z.number().optional(),
+  totalShares: z.number().optional(),
+  totalBurned: z.number().optional(),
+  summary: z.object({}).optional(),
+  totalPages: z.number().optional(),
+});// File: lib/serverInit.js
+import { logger } from '@/lib/logger';
+import { initializeCache } from '@/app/api/utils';
+import chalk from 'chalk';
+
+console.log(chalk.cyan('[ServerInit] Initializing server...'));
+
+try {
+  logger.info('serverInit', 'Server initialization started');
+  await initializeCache();
+} catch (error) {
+  logger.error('serverInit', `Initialize cache error: ${error.message}`, { stack: error.stack });
+  console.error(chalk.red('[ServerInit] Initialization error:'), error.message);
+}
+
+export const serverInit = true;// lib/useNFTData.js
+'use client';
+import { useQuery } from '@tanstack/react-query';
+import { useNFTStore } from '@/app/store';
+import config from '@/config';
+import { HoldersResponseSchema } from '@/lib/schemas';
+
+async function fetchNFTData(apiKey, apiEndpoint, pageSize, page = 0) {
+  if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+    return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' };
+  }
+
+  const endpoint = apiEndpoint.startsWith('http') ? apiEndpoint : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${apiEndpoint}`;
+  const progressUrl = `${endpoint}/progress`;
+
+  const progressRes = await fetch(progressUrl, { cache: 'no-store' });
+  if (!progressRes.ok) throw new Error(`Progress fetch failed: ${progressRes.status}`);
+  const progress = await progressRes.json();
+
+  if (progress.isPopulating || progress.phase !== 'Completed') {
+    throw new Error('Cache is populating');
+  }
+
+  let allHolders = [];
+  let totalTokens = 0;
+  let totalShares = 0;
+  let totalBurned = 0;
+  let summary = {};
+  let totalPages = Infinity;
+
+  while (page < totalPages) {
+    const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+    const res = await fetch(url, { cache: 'force-cache' });
+    if (!res.ok) throw new Error(`API request failed: ${res.status}`);
+    const json = await res.json();
+
+    if (json.message === 'Cache is populating' || json.isCachePopulating) {
+      throw new Error('Cache is populating');
+    }
+
+    const validation = HoldersResponseSchema.safeParse(json);
+    if (!validation.success) {
+      throw new Error(`Invalid holders schema: ${JSON.stringify(validation.error.errors)}`);
+    }
+
+    allHolders = allHolders.concat(json.holders);
+    totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+    totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+    totalBurned = json.totalBurned || totalBurned;
+    summary = json.summary || summary;
+    totalPages = json.totalPages || 1;
+    page++;
+  }
+
+  return { holders: allHolders, totalTokens, totalShares, totalBurned, summary };
+}
+
+export function useNFTData(apiKey, pageSize) {
+  const { getCache, setCache } = useNFTStore();
+
+  return useQuery({
+    queryKey: ['nft', apiKey],
+    queryFn: async () => {
+      const cachedData = getCache(apiKey);
+      if (cachedData) return cachedData;
+
+      const data = await fetchNFTData(apiKey, config.contractDetails[apiKey].apiEndpoint, pageSize);
+      setCache(apiKey, data);
+      return data;
+    },
+    retry: config.alchemy.maxRetries,
+    retryDelay: attempt => config.alchemy.batchDelayMs * (attempt + 1),
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    refetchInterval: progress => (progress?.isPopulating ? 2000 : false),
+    onError: error => console.error(`[useNFTData] [ERROR] ${apiKey}: ${error.message}`),
+  });
+}'use client';
+import { useState, useEffect } from 'react';
+import { notFound } from 'next/navigation';
+import nextDynamic from 'next/dynamic';
+import config from '@/config';
+import LoadingIndicator from '@/components/LoadingIndicator';
+import { useNFTStore } from '@/app/store';
+import { HoldersResponseSchema } from '@/lib/schemas';
+
+const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), { ssr: false });
+export const dynamic = 'force-dynamic';
+
+async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[NFTContractPage] [INFO] Fetching data for ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+      console.log(`[NFTContractPage] [INFO] ${apiKey} is disabled`);
+      return { error: `${apiKey} is not available` };
+    }
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+    const endpoint = apiEndpoint.startsWith('http') ? apiEndpoint : `${baseUrl}${apiEndpoint}`;
+
+    const pollProgress = async () => {
+      const progressUrl = `${endpoint}/progress`;
+      const res = await fetch(progressUrl, { cache: 'no-store', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+      if (!res.ok) throw new Error(`Progress fetch failed: ${res.status}`);
+      const progress = await res.json();
+      console.log(`[NFTContractPage] [DEBUG] Progress: ${JSON.stringify(progress)}`);
+      return progress;
+    };
+
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalShares = 0;
+    let totalBurned = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+
+    const maxPollTime = 180000; // 180 seconds
+    const startTime = Date.now();
+    let progress = await pollProgress();
+
+    while (progress.isPopulating || progress.phase !== 'Completed') {
+      if (Date.now() - startTime > maxPollTime) {
+        console.error(`[NFTContractPage] [ERROR] Cache population timeout for ${apiKey}`);
+        return { error: 'Cache population timed out' };
+      }
+      console.log(`[NFTContractPage] [INFO] Waiting for ${apiKey} cache: ${progress.phase} (${progress.progressPercentage}%)`);
+      await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+      progress = await pollProgress();
+      if (progress.phase === 'Error') {
+        console.error(`[NFTContractPage] [ERROR] Cache population failed: ${progress.error || 'Unknown error'}`);
+        return { error: `Cache population failed: ${progress.error || 'Unknown error'}` };
+      }
+    }
+
+    while (page < totalPages) {
+      const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
       console.log(`[NFTContractPage] [DEBUG] Fetching ${url}`);
       const res = await fetch(url, { cache: 'force-cache' });
-      console.log(`[NFTContractPage] [DEBUG] Response status: ${res.status}, headers: ${JSON.stringify([...res.headers])}`);
+      console.log(`[NFTContractPage] [DEBUG] Response status: ${res.status}`);
 
       if (!res.ok) {
         const errorText = await res.text();
         console.error(`[NFTContractPage] [ERROR] Failed to fetch ${url}: ${res.status} ${errorText}`);
-        return { error: `Failed to fetch ${url}: ${res.status} ${errorText}` };
+        return { error: `Failed to fetch data: ${res.status}` };
       }
 
       const json = await res.json();
       console.log(`[NFTContractPage] [DEBUG] Response body: ${JSON.stringify(json, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
 
-      if (json.error) {
-        console.error(`[NFTContractPage] [ERROR] API error for ${apiKey}: ${json.error}`);
-        return { error: json.error };
+      if (json.isCachePopulating) {
+        return { isCachePopulating: true, progress }; // Trigger polling
       }
-      if (!json.holders || !Array.isArray(json.holders)) {
-        console.error(`[NFTContractPage] [ERROR] Invalid holders data for ${url}: ${JSON.stringify(json)}`);
+
+      const validation = HoldersResponseSchema.safeParse(json);
+      if (!validation.success) {
+        console.error(`[NFTContractPage] [ERROR] Invalid holders data: ${JSON.stringify(validation.error.errors)}`);
         if (apiKey === 'ascendant') {
-          console.log(`[NFTContractPage] [INFO] Triggering POST to refresh cache for ${apiKey}`);
-          await fetch(endpoint, { method: 'POST', cache: 'force-cache' });
-          // Retry fetching the page
+          console.log(`[NFTContractPage] [INFO] Triggering POST for ${apiKey}`);
+          await fetch(endpoint, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forceUpdate: false }) });
           const retryRes = await fetch(url, { cache: 'no-store' });
           if (!retryRes.ok) {
             const retryError = await retryRes.text();
-            console.error(`[NFTContractPage] [ERROR] Retry failed for ${url}: ${retryRes.status} ${retryError}`);
+            console.error(`[NFTContractPage] [ERROR] Retry failed: ${retryRes.status} ${retryError}`);
             return { error: `Retry failed: ${retryRes.status}` };
           }
           const retryJson = await retryRes.json();
-          console.log(`[NFTContractPage] [DEBUG] Retry response: ${JSON.stringify(retryJson, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
-          if (!retryJson.holders || !Array.isArray(retryJson.holders)) {
-            console.error(`[NFTContractPage] [ERROR] Retry invalid holders data: ${JSON.stringify(retryJson)}`);
+          const retryValidation = HoldersResponseSchema.safeParse(retryJson);
+          if (!retryValidation.success) {
+            console.error(`[NFTContractPage] [ERROR] Retry invalid holders data: ${JSON.stringify(retryValidation.error.errors)}`);
             return { error: 'Invalid holders data after retry' };
           }
           json.holders = retryJson.holders;
@@ -2910,6 +3265,7 @@ export default function NFTContractPage({ params }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(null);
 
   const { getCache, setCache } = useNFTStore();
 
@@ -2924,7 +3280,7 @@ export default function NFTContractPage({ params }) {
 
   useEffect(() => {
     if (!config.supportedChains.includes(chain) || !apiKey) {
-      console.log(`[NFTContractPage] [ERROR] Not found: chain=${chain}, contract=${contract}`);
+      console.log(`[NFTContractPage] [ERROR] Invalid chain=${chain} or contract=${contract}`);
       notFound();
     }
 
@@ -2934,10 +3290,9 @@ export default function NFTContractPage({ params }) {
       setData(null);
 
       const contractConfig = config.contractDetails[apiKey] || {};
-
-      // Check cache first
       const cacheKey = `contract_${apiKey}`;
       const cachedData = getCache(cacheKey);
+
       if (cachedData) {
         console.log(`[NFTContractPage] [INFO] Cache hit for ${cacheKey}`);
         setData(cachedData);
@@ -2945,16 +3300,33 @@ export default function NFTContractPage({ params }) {
         return;
       }
 
-      // Fetch data if not cached
       console.log(`[NFTContractPage] [INFO] Cache miss for ${cacheKey}, fetching data`);
       const result = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
-      if (result.error) {
+
+      if (result.isCachePopulating) {
+        const poll = async () => {
+          const progressResult = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+          setProgress(progressResult.progress);
+          if (progressResult.isCachePopulating) {
+            setTimeout(poll, config.alchemy.batchDelayMs);
+          } else if (progressResult.error) {
+            setError(progressResult.error);
+            setLoading(false);
+          } else {
+            setCache(cacheKey, progressResult);
+            setData(progressResult);
+            setLoading(false);
+          }
+        };
+        poll();
+      } else if (result.error) {
         setError(result.error);
+        setLoading(false);
       } else {
         setCache(cacheKey, result);
         setData(result);
+        setLoading(false);
       }
-      setLoading(false);
     }
 
     fetchData();
@@ -2968,7 +3340,10 @@ export default function NFTContractPage({ params }) {
     return (
       <div className="container page-content">
         <h1 className="title mb-6">{contract} Collection</h1>
-        <LoadingIndicator status="Loading collection..." />
+        <LoadingIndicator
+          status={`Loading ${contract} data... ${progress ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`}
+          progress={progress}
+        />
       </div>
     );
   }
