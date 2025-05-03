@@ -1,0 +1,1914 @@
+// app/api/utils.js
+import { createPublicClient, http, parseAbi } from 'viem';
+import { mainnet } from 'viem/chains';
+import { Alchemy, Network } from 'alchemy-sdk';
+
+// Shared cache for routes that import it
+export const cache = {};
+
+// Import all ABI JSON files using @ notation
+import staxNFTAbi from '@/abi/staxNFT.json';
+import element369Abi from '@/abi/element369.json';
+import element369VaultAbi from '@/abi/element369Vault.json';
+import staxVaultAbi from '@/abi/staxVault.json';
+import ascendantNFTAbi from '@/abi/ascendantNFT.json';
+import element280Abi from '@/abi/element280.json';
+import element280VaultAbi from '@/abi/element280Vault.json';
+
+export const alchemy = new Alchemy({
+  apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || (() => { throw new Error('Alchemy API key missing'); })(),
+  network: Network.ETH_MAINNET,
+});
+
+export const client = createPublicClient({
+  chain: mainnet,
+  transport: http(
+    process.env.ETH_RPC_URL ||
+    `https://eth-mainnet.g.alchemy.com/v2/${process.env.NEXT_PUBLIC_ALCHEMY_API_KEY}`
+  ),
+});
+
+// Generic NFT ABI for common functions
+export const nftAbi = parseAbi([
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function getNftTier(uint256 tokenId) view returns (uint8)',
+]);
+
+// Ascendant NFT ABI with specific functions
+export const ascendantAbi = parseAbi([
+  'function ownerOf(uint256 tokenId) view returns (address)',
+  'function getNFTAttribute(uint256 tokenId) view returns (uint256 rarityNumber, uint8 tier, uint8 rarity)',
+  'function userRecords(uint256 tokenId) view returns (uint256 shares, uint256 lockedAscendant, uint256 rewardDebt, uint32 startTime, uint32 endTime)',
+  'function totalShares() view returns (uint256)',
+  'function toDistribute(uint8 pool) view returns (uint256)',
+  'function rewardPerShare() view returns (uint256)',
+  'error NonExistentToken(uint256 tokenId)',
+]);
+
+// Export all ABIs
+export {
+  staxNFTAbi,
+  element369Abi,
+  element369VaultAbi,
+  staxVaultAbi,
+  ascendantNFTAbi,
+  element280Abi,
+  element280VaultAbi,
+};
+
+export const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export function log(message) {
+  console.log(`[PROD_DEBUG] ${message}`);
+}
+
+export async function batchMulticall(calls, batchSize = 50) {
+  log(`batchMulticall: Processing ${calls.length} calls in batches of ${batchSize}`);
+  const results = [];
+  for (let i = 0; i < calls.length; i += batchSize) {
+    const batch = calls.slice(i, i + batchSize);
+    try {
+      const batchResults = await client.multicall({ contracts: batch });
+      results.push(...batchResults);
+      log(`batchMulticall: Batch ${i}-${i + batchSize - 1} completed with ${batchResults.length} results`);
+    } catch (error) {
+      console.error(`[PROD_ERROR] batchMulticall failed for batch ${i}-${i + batchSize - 1}: ${error.message}`);
+      results.push(...batch.map(() => ({ status: 'failure', result: null })));
+    }
+  }
+  log(`batchMulticall: Completed with ${results.length} results`);
+  return results;
+}// File: app/api/utils/blockchain.js
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import { Alchemy } from 'alchemy-sdk';
+import config from '@/config';
+import { logger } from '@/lib/logger.js';
+import chalk from 'chalk';
+
+const alchemyApiKey = config.alchemy.apiKey || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+if (!alchemyApiKey) {
+  logger.error('blockchain', 'Alchemy API key is missing', {}, 'eth', 'general');
+  throw new Error('Alchemy API key is missing');
+}
+
+const client = createPublicClient({
+  chain: mainnet,
+  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${alchemyApiKey}`),
+});
+
+const alchemy = new Alchemy({
+  apiKey: config.alchemy.apiKey,
+  network: 'eth-mainnet',
+});
+
+logger.info('blockchain', 'Blockchain clients initialized', 'eth', 'general');
+
+export { client, alchemy };import NodeCache from 'node-cache';
+import fs from 'fs/promises';
+import path from 'path';
+import { Redis } from '@upstash/redis';
+import config from '@/config';
+import { logger } from '@/lib/logger.js';
+import chalk from 'chalk';
+
+const cacheDir = path.join(process.cwd(), 'cache');
+const isDebug = process.env.DEBUG === 'true';
+
+const cache = new NodeCache({
+  stdTTL: 0,
+  checkperiod: 120,
+});
+
+const redisEnabled = Object.keys(config.nftContracts).some(
+  contract => process.env[`DISABLE_${contract.toUpperCase()}_REDIS`] !== 'true' && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+);
+let redis = null;
+
+if (redisEnabled) {
+  try {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    logger.info('cache', 'Upstash Redis initialized', 'eth', 'general');
+  } catch (error) {
+    logger.error('cache', `Failed to initialize Upstash Redis: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    redis = null;
+  }
+}
+
+async function ensureCacheDir() {
+  try {
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.chmod(cacheDir, 0o755);
+    logger.info('cache', `Created/chmod cache directory: ${cacheDir}`, 'eth', 'general');
+  } catch (error) {
+    logger.error('cache', `Failed to create/chmod cache directory ${cacheDir}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    throw error;
+  }
+}
+
+async function initializeCache() {
+  try {
+    logger.info('cache', 'Starting cache initialization', 'eth', 'general');
+    await ensureCacheDir();
+
+    // Check node-cache
+    const testKey = 'test_node_cache';
+    const testValue = { ready: true };
+    const nodeCacheSuccess = cache.set(testKey, testValue);
+    if (nodeCacheSuccess) {
+      logger.info('cache', 'Node-cache is ready', 'eth', 'general');
+      cache.del(testKey);
+    } else {
+      logger.error('cache', 'Node-cache failed to set test key', {}, 'eth', 'general');
+    }
+
+    // Check Redis
+    if (redisEnabled && redis) {
+      try {
+        await redis.set('test_redis', JSON.stringify(testValue));
+        const redisData = await redis.get('test_redis');
+        if (redisData && JSON.parse(redisData).ready) {
+          logger.info('cache', 'Redis cache is ready', 'eth', 'general');
+          await redis.del('test_redis');
+        } else {
+          logger.error('cache', 'Redis cache test failed: invalid data', {}, 'eth', 'general');
+        }
+      } catch (error) {
+        logger.error('cache', `Redis cache test failed: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+      }
+    }
+
+    // Create empty cache files for each collection
+    const collections = Object.keys(config.nftContracts).filter(key => !config.nftContracts[key].disabled).map(key => key.toLowerCase());
+    for (const collection of collections) {
+      const cacheFile = path.join(cacheDir, `${collection}_holders.json`);
+      try {
+        await fs.access(cacheFile);
+        logger.info('cache', `Cache file exists: ${cacheFile}`, 'eth', collection);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          await fs.writeFile(cacheFile, JSON.stringify({ holders: [], totalBurned: 0, timestamp: Date.now() }));
+          await fs.chmod(cacheFile, 0o644);
+          logger.info('cache', `Created empty cache file: ${cacheFile}`, 'eth', collection);
+        } else {
+          logger.error('cache', `Failed to access cache file ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', collection);
+        }
+      }
+    }
+
+    logger.info('cache', 'Cache initialization completed', 'eth', 'general');
+    return true;
+  } catch (error) {
+    logger.error('cache', `Cache initialization error: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    return false;
+  }
+}
+
+async function setCache(key, value, ttl, prefix) {
+  try {
+    const cacheKey = `${prefix}_${key}`;
+    const success = cache.set(cacheKey, value);
+    logger.info('cache', `Set in-memory cache: ${cacheKey}, success: ${success}, holders: ${value.holders?.length || 'unknown'}`, 'eth', prefix.toLowerCase());
+
+    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
+      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
+        try {
+          await redis.set(cacheKey, JSON.stringify(value));
+          logger.info('cache', `Persisted ${cacheKey} to Redis, holders: ${value.holders.length}`, 'eth', prefix.toLowerCase());
+        } catch (error) {
+          logger.error('cache', `Failed to persist ${cacheKey} to Redis: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+        }
+      } else {
+        const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
+        logger.info('cache', `Writing to cache file: ${cacheFile}`, 'eth', prefix.toLowerCase());
+        await ensureCacheDir();
+        try {
+          await fs.writeFile(cacheFile, JSON.stringify(value));
+          await fs.chmod(cacheFile, 0o644);
+          logger.info('cache', `Persisted ${cacheKey} to ${cacheFile}, holders: ${value.holders.length}`, 'eth', prefix.toLowerCase());
+        } catch (error) {
+          logger.error('cache', `Failed to write cache file ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+          throw error;
+        }
+      }
+    }
+    return success;
+  } catch (error) {
+    logger.error('cache', `Failed to set cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+    return false;
+  }
+}
+
+async function getCache(key, prefix) {
+  try {
+    const cacheKey = `${prefix}_${key}`;
+    let data = cache.get(cacheKey);
+    if (data !== undefined) {
+      logger.debug('cache', `Cache hit: ${cacheKey}, holders: ${data.holders?.length || 'unknown'}`, 'eth', prefix.toLowerCase());
+      return data;
+    }
+
+    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
+      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
+        try {
+          const redisData = await redis.get(cacheKey);
+          if (redisData) {
+            const parsed = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
+            if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
+              const success = cache.set(cacheKey, parsed);
+              logger.info('cache', `Loaded ${cacheKey} from Redis, cached: ${success}, holders: ${parsed.holders.length}`, 'eth', prefix.toLowerCase());
+              return parsed;
+            } else {
+              logger.warn('cache', `Invalid data in Redis for ${cacheKey}`, 'eth', prefix.toLowerCase());
+            }
+          }
+        } catch (error) {
+          logger.error('cache', `Failed to load cache from Redis for ${cacheKey}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+        }
+      }
+
+      const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
+      try {
+        const fileData = await fs.readFile(cacheFile, 'utf8');
+        const parsed = JSON.parse(fileData);
+        if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
+          const success = cache.set(cacheKey, parsed);
+          logger.info('cache', `Loaded ${cacheKey} from ${cacheFile}, cached: ${success}, holders: ${parsed.holders.length}`, 'eth', prefix.toLowerCase());
+          return parsed;
+        } else {
+          logger.warn('cache', `Invalid data in ${cacheFile}`, 'eth', prefix.toLowerCase());
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          logger.error('cache', `Failed to load cache from ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+        } else {
+          logger.debug('cache', `No cache file at ${cacheFile}`, 'eth', prefix.toLowerCase());
+        }
+      }
+    }
+
+    logger.info('cache', `Cache miss: ${cacheKey}`, 'eth', prefix.toLowerCase());
+    return null;
+  } catch (error) {
+    logger.error('cache', `Failed to get cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+    return null;
+  }
+}
+
+async function saveCacheState(collection, state, prefix) {
+  try {
+    const cacheFile = path.join(cacheDir, `cache_state_${prefix.toLowerCase()}.json`);
+    await ensureCacheDir();
+    await fs.writeFile(cacheFile, JSON.stringify(state));
+    await fs.chmod(cacheFile, 0o644);
+    logger.debug('cache', `Saved cache state for ${prefix}: ${cacheFile}`, 'eth', prefix.toLowerCase());
+  } catch (error) {
+    logger.error('cache', `Failed to save cache state for ${prefix}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+  }
+}
+
+async function loadCacheState(collection, prefix) {
+  try {
+    const cacheFile = path.join(cacheDir, `cache_state_${prefix.toLowerCase()}.json`);
+    const data = await fs.readFile(cacheFile, 'utf8');
+    const parsed = JSON.parse(data);
+    logger.debug('cache', `Loaded cache state for ${prefix}: ${cacheFile}`, 'eth', prefix.toLowerCase());
+    return parsed;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      logger.debug('cache', `No cache state found for ${prefix}`, 'eth', prefix.toLowerCase());
+      return null;
+    }
+    logger.error('cache', `Failed to load cache state for ${prefix}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+    return null;
+  }
+}
+
+export { initializeCache, setCache, getCache, saveCacheState, loadCacheState };import { parseAbiItem, formatUnits, getAddress } from 'viem';
+import pLimit from 'p-limit';
+import config from '@/config';
+import { client, alchemy } from './blockchain.js';
+import { retry, batchMulticall, logger, saveCacheState } from './index.js';
+
+const concurrencyLimit = pLimit(4);
+
+async function getOwnersForContract(contractAddress, abi, options = {}) {
+  let owners = [];
+  let pageKey = options.pageKey || null;
+  const maxPages = options.maxPages || 10;
+  let pageCount = 0;
+
+  logger.debug('contracts', `Fetching owners for contract: ${contractAddress}`, 'eth', 'general');
+
+  do {
+    try {
+      const response = await alchemy.nft.getOwnersForContract(contractAddress, {
+        withTokenBalances: options.withTokenBalances || false,
+        pageKey,
+      });
+
+      if (!response?.owners || !Array.isArray(response.owners)) {
+        logger.warn('contracts', `Invalid Alchemy response for ${contractAddress}`, {}, 'eth', 'general');
+        return owners;
+      }
+
+      for (const owner of response.owners) {
+        const tokenBalances = owner.tokenBalances || [];
+        if (tokenBalances.length > 0) {
+          const validBalances = tokenBalances.filter(tb => tb.tokenId && Number(tb.balance) > 0);
+          if (validBalances.length > 0) {
+            owners.push({
+              ownerAddress: owner.ownerAddress.toLowerCase(),
+              tokenBalances: validBalances.map(tb => ({
+                tokenId: Number(tb.tokenId),
+                balance: Number(tb.balance),
+              })),
+            });
+          }
+        }
+      }
+
+      pageKey = response.pageKey || null;
+      pageCount++;
+    } catch (error) {
+      logger.error('contracts', `Failed to fetch owners for ${contractAddress}: ${error.message}`, {}, 'eth', 'general');
+      return owners;
+    }
+  } while (pageKey && pageCount < maxPages);
+
+  logger.info('contracts', `Fetched ${owners.length} owners for contract: ${contractAddress}`, 'eth', 'general');
+  return owners;
+}
+
+async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, vaultAbi, cacheState, addressFilter = null) {
+  if (!contractAddress || !abi) {
+    throw new Error('Contract address or ABI missing');
+  }
+
+  const burnAddress = config.burnAddress || '0x0000000000000000000000000000000000000000';
+  const holdersMap = new Map();
+  let totalBurned = 0;
+  const errorLog = [];
+
+  cacheState.progressState.step = 'fetching_supply';
+  await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+
+  let currentBlock;
+  try {
+    currentBlock = await client.getBlockNumber();
+    logger.debug('contracts', `Fetched current block: ${currentBlock}`, 'eth', contractKey);
+  } catch (error) {
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_block_number', error: error.message });
+    throw error;
+  }
+
+  if (contractKey === 'ascendant') {
+    let transferLogs = [];
+    try {
+      transferLogs = await retry(
+        async () => {
+          const logs = await client.getLogs({
+            address: contractAddress,
+            event: parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'),
+            fromBlock: BigInt(config.deploymentBlocks[contractKey]?.block || 0),
+            toBlock: currentBlock,
+          });
+          return logs;
+        },
+        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+      );
+    } catch (error) {
+      logger.error('contracts', `Failed to fetch transfer logs for ${contractAddress}: ${error.message}`, {}, 'eth', contractKey);
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_logs', error: error.message });
+      return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    }
+
+    if (!Array.isArray(transferLogs)) {
+      logger.warn('contracts', `No valid transfer logs for ${contractAddress}`, {}, 'eth', contractKey);
+      return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    }
+
+    for (const log of transferLogs) {
+      const from = log.args.from.toLowerCase();
+      const to = log.args.to.toLowerCase();
+      const tokenId = Number(log.args.tokenId);
+
+      if (to === burnAddress.toLowerCase()) {
+        totalBurned += 1;
+        holdersMap.delete(tokenId);
+        logger.debug('contracts', `Token ${tokenId} burned`, 'eth', contractKey);
+        continue;
+      }
+
+      if (addressFilter && to !== addressFilter.toLowerCase()) {
+        continue;
+      }
+
+      holdersMap.set(tokenId, { owner: to, balance: 1 });
+      logger.debug('contracts', `Token ${tokenId} assigned to ${to}`, 'eth', contractKey);
+    }
+
+    cacheState.progressState.totalNfts = holdersMap.size;
+    cacheState.progressState.totalTiers = holdersMap.size;
+    await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+
+    if (holdersMap.size === 0) {
+      cacheState.progressState.step = 'completed';
+      await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+      return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    }
+
+    return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+  } else {
+    let totalSupply = 0;
+    try {
+      totalSupply = await retry(
+        async () => {
+          const result = await client.readContract({ address: contractAddress, abi, functionName: 'totalSupply' });
+          if (result === null || result === undefined) throw new Error('totalSupply returned null');
+          return Number(result);
+        },
+        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+      );
+      logger.debug('contracts', `Total supply: ${totalSupply}`, 'eth', contractKey);
+    } catch (error) {
+      logger.error('contracts', `Failed to fetch totalSupply: ${error.message}`, {}, 'eth', contractKey);
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_supply', error: error.message });
+      return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    }
+
+    let burnedCountContract = 0;
+    try {
+      burnedCountContract = await retry(
+        async () => {
+          const result = await client.readContract({ address: contractAddress, abi, functionName: 'totalBurned' });
+          if (result === null || result === undefined) throw new Error('totalBurned returned null');
+          return Number(result);
+        },
+        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+      );
+      logger.debug('contracts', `Burned count from contract: ${burnedCountContract}`, 'eth', contractKey);
+    } catch (error) {
+      logger.error('contracts', `Failed to fetch totalBurned: ${error.message}`, {}, 'eth', contractKey);
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_burned', error: error.message });
+    }
+    totalBurned = burnedCountContract;
+
+    cacheState.progressState.totalNfts = totalSupply;
+    cacheState.progressState.totalTiers = totalSupply;
+    cacheState.lastProcessedBlock = Number(currentBlock);
+    await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+
+    if (totalSupply === 0) {
+      cacheState.progressState.step = 'completed';
+      await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+      logger.debug('contracts', `No NFTs (totalSupply=0) for ${contractAddress}`, 'eth', contractKey);
+      return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    }
+
+    cacheState.progressState.step = 'fetching_owners';
+    await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+
+    let owners = [];
+    try {
+      owners = await retry(
+        () => getOwnersForContract(contractAddress, abi, { withTokenBalances: true }),
+        { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+      );
+    } catch (error) {
+      logger.error('contracts', `Failed to fetch owners: ${error.message}`, {}, 'eth', contractKey);
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_owners', error: error.message });
+      return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    }
+
+    if (!Array.isArray(owners)) {
+      logger.warn('contracts', `No valid owners found for ${contractAddress}`, {}, 'eth', contractKey);
+      return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    }
+
+    logger.debug('contracts', `Fetched owners: count=${owners.length}`, 'eth', contractKey);
+
+    let processedTokens = 0;
+    for (const owner of owners) {
+      const wallet = owner.ownerAddress.toLowerCase();
+      if (addressFilter && wallet !== addressFilter.toLowerCase()) {
+        continue;
+      }
+
+      const tokenIds = owner.tokenBalances
+        .map(tb => Number(tb.tokenId))
+        .filter(id => !isNaN(id) && id >= 0);
+
+      if (tokenIds.length === 0) {
+        logger.debug('contracts', `No valid token IDs for wallet ${wallet}`, 'eth', contractKey);
+        continue;
+      }
+
+      if (wallet === burnAddress.toLowerCase()) {
+        totalBurned += owner.tokenBalances.reduce((sum, tb) => sum + Number(tb.balance), 0);
+        logger.debug('contracts', `Burned tokens: ${owner.tokenBalances.reduce((sum, tb) => sum + Number(tb.balance), 0)}`, 'eth', contractKey);
+        continue;
+      }
+
+      processedTokens += tokenIds.length;
+
+      const holder = holdersMap.get(wallet) || {
+        wallet,
+        tokenIds: [],
+        tiers: Array(Object.keys(config.contractTiers[contractKey]).length).fill(0),
+        total: 0,
+        multiplierSum: 0,
+      };
+      holder.tokenIds.push(...tokenIds);
+      holder.total += tokenIds.length;
+      holdersMap.set(wallet, holder);
+      logger.debug('contracts', `Added wallet ${wallet} with ${tokenIds.length} tokens`, 'eth', contractKey);
+
+      cacheState.progressState.processedNfts = processedTokens;
+      if (processedTokens % 1000 === 0) {
+        await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+      }
+    }
+
+    cacheState.progressState.step = 'completed';
+    cacheState.progressState.processedNfts = processedTokens;
+    cacheState.progressState.processedTiers = processedTokens;
+    cacheState.totalOwners = holdersMap.size;
+    cacheState.totalLiveHolders = holdersMap.size;
+    await saveCacheState(contractKey, cacheState, contractKey.toLowerCase());
+
+    return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+  }
+}
+
+export { getHoldersMap, getOwnersForContract };const defaultConfig = {
+    alchemy: {
+      maxRetries: 2,
+      batchDelayMs: 500,
+      retryMaxDelayMs: 10000,
+    },
+  };
+  
+  export async function retry(
+    fn,
+    attempts = defaultConfig.alchemy.maxRetries,
+    delay = (retryCount) =>
+      Math.min(
+        defaultConfig.alchemy.batchDelayMs * 2 ** retryCount,
+        defaultConfig.alchemy.retryMaxDelayMs
+      )
+  ) {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (error) {
+        console.error(`[Helpers] [ERROR] Retry ${i + 1}/${attempts}: ${error.message}`);
+        if (i === attempts - 1) {
+          throw new Error(`Failed after ${attempts} attempts: ${error.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay(i)));
+      }
+    }
+  }
+  
+  export function isValidAddress(address) {
+    return /^0x[a-fA-F0-9]{40}$/.test(address);
+  }
+  
+  export function timeout(ms) {
+    return new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms)
+    );
+  }
+  
+  export function normalizeAddress(address) {
+    if (!isValidAddress(address)) {
+      throw new Error('Invalid Ethereum address');
+    }
+    return address.toLowerCase();
+  }
+  
+  export function formatNumber(value, decimals = 2) {
+    if (typeof value !== 'number') return 'N/A';
+    return value.toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  }// File: app/api/utils/index.js
+export * from './helpers.js';
+export * from './blockchain.js';
+export * from './contracts.js';
+export * from './cache.js';
+export * from './logger.js';
+export * from './serverInit.js';
+export { logger,log } from '@/lib/logger.js';import { initializeCache } from './cache.js';
+import { logger } from '@/lib/logger';
+
+export async function initServer() {
+  try {
+    const cacheInitialized = await initializeCache();
+    if (!cacheInitialized) {
+      logger.error('server', 'Cache initialization failed', {}, 'eth', 'general');
+      throw new Error('Cache initialization failed');
+    }
+    logger.info('server', 'Cache initialized successfully', 'eth', 'general');
+  } catch (error) {
+    logger.error('server', `Server initialization failed: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    throw error;
+  }
+}// lib/logger.js
+import fs from 'fs/promises';
+import path from 'path';
+import chalk from 'chalk';
+
+// Use process.cwd() to reference the project root
+const logDir = path.join(process.cwd(), 'logs');
+
+console.log(chalk.cyan('[Logger] Initializing logger...'));
+console.log(chalk.cyan('[Logger] process.env.DEBUG:'), process.env.DEBUG);
+console.log(chalk.cyan('[Logger] process.env.NODE_ENV:'), process.env.NODE_ENV);
+console.log(chalk.cyan('[Logger] Log directory:'), logDir);
+
+const isDebug = process.env.DEBUG === 'true';
+console.log(chalk.cyan('[Logger] isDebug:'), isDebug);
+
+async function ensureLogDir() {
+  try {
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.chmod(logDir, 0o755);
+    console.log(chalk.cyan('[Logger] Created or verified log directory:'), logDir);
+  } catch (error) {
+    console.error(chalk.red('[Logger] Failed to create log directory:'), error.message);
+  }
+}
+
+ensureLogDir().catch(error => {
+  console.error(chalk.red('[Logger] ensureLogDir error:'), error.message);
+});
+
+export const logger = {
+  info: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [INFO] ${message}`;
+    console.log(chalk.green(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote INFO log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write INFO log:'), error.message);
+      }
+    }
+  },
+  warn: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [WARN] ${message}`;
+    console.log(chalk.yellow(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote WARN log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write WARN log:'), error.message);
+      }
+    }
+  },
+  error: async (scope, message, details = {}, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [ERROR] ${message} ${JSON.stringify(details)}`;
+    console.error(chalk.red(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote ERROR log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write ERROR log:'), error.message);
+      }
+    }
+  },
+  debug: async (scope, message, chain = 'eth', collection = 'general') => {
+    if (!isDebug) return;
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [DEBUG] ${message}`;
+    console.log(chalk.blue(log));
+    try {
+      const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+      await fs.appendFile(logFile, `${log}\n`);
+      console.log(chalk.cyan('[Logger] Wrote DEBUG log to:'), logFile);
+    } catch (error) {
+      console.error(chalk.red('[Logger] Failed to write DEBUG log:'), error.message);
+    }
+  },
+};
+
+try {
+  logger.info('startup', 'Logger module loaded').catch(error => {
+    console.error(chalk.red('[Logger] Startup log error:'), error.message);
+  });
+} catch (error) {
+  console.error(chalk.red('[Logger] Immediate log error:'), error.message);
+}import { memo } from 'react';
+
+function LoadingIndicator({ status, progress }) {
+  return (
+    <div className="flex flex-col items-center justify-center p-6 bg-gray-800 rounded-lg">
+      <svg className="animate-spin h-8 w-8 text-blue-500" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+      </svg>
+      <p className="mt-4 text-gray-200">{status}</p>
+      {progress && (
+        <div className="mt-2 w-64 bg-gray-700 rounded-full h-2.5">
+          <div
+            className="bg-blue-600 h-2.5 rounded-full"
+            style={{ width: `${progress.progressPercentage}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default memo(LoadingIndicator);// File: components/NFTLayout.js
+'use client';
+
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import config from '@/config.js';
+import { useNFTStore } from '@/app/store';
+import { useDebounce } from 'use-debounce';
+
+// Dynamically import SearchResultsModal
+const SearchResultsModal = dynamic(() => import('@/components/SearchResultsModal'), { ssr: false });
+
+export default function NFTLayout({ children }) {
+  const [selectedChain, setSelectedChain] = useState(null);
+  const [showE280Message, setShowE280Message] = useState(false);
+  const [searchAddress, setSearchAddress] = useState('');
+  const [debouncedAddress] = useDebounce(searchAddress, 500);
+  const [searchResults, setSearchResults] = useState({});
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+
+  const { getCache, setCache } = useNFTStore();
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  const chains = [
+    { name: 'ETH', id: 'eth' },
+    { name: 'BASE', id: 'base' },
+  ];
+
+  const ethNFTs = [
+    { name: 'Element280', href: '/nft/ETH/Element280', apiKey: 'element280' },
+    { name: 'Element369', href: '/nft/ETH/Element369', apiKey: 'element369' },
+    { name: 'Stax', href: '/nft/ETH/Stax', apiKey: 'stax' },
+    { name: 'Ascendant', href: '/nft/ETH/Ascendant', apiKey: 'ascendant' },
+  ];
+
+  const baseNFTs = [
+    { name: 'E280', href: null, apiKey: 'e280' },
+  ];
+
+  const allNFTs = Object.keys(config.contractDetails).map((key) => ({
+    name: config.contractDetails[key].name,
+    apiKey: key,
+    href:
+      key === 'e280'
+        ? null
+        : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${config.contractDetails[key].name.replace(/\s+/g, '')}`,
+  }));
+
+  const fetchSearchData = async (address, apiKey, apiEndpoint) => {
+    console.log(`[NFTLayout] Fetching search data for ${apiKey} with address: ${address}`);
+    try {
+      if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+        console.log(`[NFTLayout] ${apiKey} is disabled`);
+        return { error: `${apiKey} is not available` };
+      }
+
+      let endpoint = apiEndpoint;
+      if (!endpoint || !endpoint.startsWith('http')) {
+        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+        endpoint = `${baseUrl}${apiEndpoint}`;
+        console.log(`[NFTLayout] Adjusted endpoint: ${endpoint}`);
+      }
+
+      const url = `${endpoint}?address=${encodeURIComponent(address)}`;
+      console.log(`[NFTLayout] Fetching ${url}`);
+      const res = await fetch(url, {
+        cache: 'no-store', // Ensure fresh data for address-specific queries
+        signal: AbortSignal.timeout(config.alchemy.timeoutMs || 30000),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
+      }
+
+      const json = await res.json();
+      console.log(`[NFTLayout] Response for ${apiKey}:`, json);
+
+      if (json.error) {
+        console.log(`[NFTLayout] API error for ${apiKey}: ${json.error}`);
+        return { error: json.error };
+      }
+
+      if (!json.holders || !Array.isArray(json.holders)) {
+        throw new Error(`Invalid holders data for ${url}`);
+      }
+
+      return {
+        holders: json.holders,
+        totalTokens: json.totalTokens || json.summary?.totalLive || 0,
+        totalShares: json.totalShares || json.summary?.multiplierPool || 0,
+        totalBurned: json.totalBurned || 0,
+        summary: json.summary || {},
+      };
+    } catch (error) {
+      console.error(`[NFTLayout] Error fetching ${apiKey}: ${error.message}`);
+      return { error: error.message };
+    }
+  };
+
+  const handleSearch = async () => {
+    console.log('[NFTLayout] handleSearch called with address:', searchAddress);
+    if (!searchAddress || !/^0x[a-fA-F0-9]{40}$/.test(searchAddress)) {
+      setError('Please enter a valid Ethereum address (e.g., 0x...)');
+      setSearchResults({});
+      setIsModalOpen(false);
+      return;
+    }
+  
+    setSearchLoading(true);
+    setError(null);
+    setSearchResults({});
+  
+    try {
+      const searchResults = {};
+      const lowerSearchAddress = searchAddress.toLowerCase();
+  
+      for (const { apiKey } of allNFTs) {
+        if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+          searchResults[apiKey] = { error: `${apiKey} is not available` };
+          console.log(`[NFTLayout] Skipping disabled contract ${apiKey}`);
+          continue;
+        }
+  
+        const contractConfig = config.contractDetails[apiKey] || {};
+        const data = await fetchSearchData(lowerSearchAddress, apiKey, contractConfig.apiEndpoint);
+  
+        if (data.error) {
+          searchResults[apiKey] = { error: data.error };
+        } else {
+          searchResults[apiKey] = {
+            holders: data.holders || [],
+            totalTokens: data.totalTokens,
+            totalShares: apiKey === 'ascendant' ? data.totalShares : undefined,
+            totalBurned: data.totalBurned,
+            rewardToken: config.contractDetails[apiKey]?.rewardToken,
+            summary: data.summary,
+          };
+          console.log(`[NFTLayout] ${apiKey} search result:`, searchResults[apiKey]);
+        }
+      }
+  
+      setSearchResults(searchResults);
+      setIsModalOpen(true);
+    } catch (err) {
+      console.error('[NFTLayout] Search error:', err.message, err.stack);
+      setError(`Search failed: ${err.message}`);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (debouncedAddress && /^0x[a-fA-F0-9]{40}$/.test(debouncedAddress)) {
+      handleSearch();
+    }
+  }, [debouncedAddress]);
+
+  const handleChainSelect = (chainId) => {
+    console.log('[NFTLayout] Chain selected:', chainId);
+    setShowE280Message(false);
+    setSelectedChain(chainId === selectedChain ? null : chainId);
+  };
+
+  const handleE280Click = () => {
+    console.log('[NFTLayout] E280 button clicked, selectedChain:', selectedChain);
+    if (selectedChain === 'base') {
+      setShowE280Message(true);
+    }
+  };
+
+  const handleCollectionClick = (name, href) => {
+    console.log(`[NFTLayout] Collection button clicked: ${name}, href: ${href}`);
+    setShowE280Message(false);
+  };
+
+  if (!isClient) {
+    return (
+      <div className="flex-1 p-6 flex flex-col items-center bg-gray-900 min-h-screen">
+        <h1 className="title mb-8">TitanX NFT Protocols</h1>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 p-6 flex flex-col items-center bg-gray-900 min-h-screen">
+      <h1 className="title mb-8">TitanX NFT Protocols</h1>
+
+      <div className="w-full max-w-2xl mb-6">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={searchAddress}
+            onChange={(e) => setSearchAddress(e.target.value.trim())}
+            placeholder="Search by wallet address (e.g., 0x...)"
+            className="search-input"
+            disabled={searchLoading}
+          />
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleSearch}
+            disabled={searchLoading}
+            className={`btn btn-primary ${searchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            {searchLoading ? 'Searching...' : 'Search'}
+          </motion.button>
+        </div>
+        {error && <p className="text-error mt-2">{error}</p>}
+      </div>
+
+      <div className="flex space-x-4 mb-6">
+        {chains.map((chain) => (
+          <motion.button
+            key={chain.id}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => handleChainSelect(chain.id)}
+            className={`btn btn-secondary ${
+              selectedChain === chain.id ? 'bg-blue-500 text-gray-100' : ''
+            }`}
+          >
+            {chain.name}
+          </motion.button>
+        ))}
+      </div>
+
+      {selectedChain === 'eth' && (
+        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl">
+          {ethNFTs.map((nft) => (
+            <Link key={nft.name} href={nft.href} className="flex-1">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => handleCollectionClick(nft.name, nft.href)}
+                className="btn btn-secondary w-full"
+              >
+                {nft.name}
+              </motion.button>
+            </Link>
+          ))}
+        </div>
+      )}
+      {selectedChain === 'base' && (
+        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl">
+          {baseNFTs.map((nft) =>
+            nft.href ? (
+              <Link key={nft.name} href={nft.href} className="flex-1">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => handleCollectionClick(nft.name, nft.href)}
+                  className="btn btn-secondary w-full"
+                >
+                  {nft.name}
+                </motion.button>
+              </Link>
+            ) : (
+              <motion.button
+                key={nft.name}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleE280Click}
+                className="btn btn-secondary flex-1 w-full"
+              >
+                {nft.name}
+              </motion.button>
+            )
+          )}
+        </div>
+      )}
+      {showE280Message && selectedChain === 'base' && (
+        <div className="mt-6 text-center text-gray-100">
+          <p className="text-body">Contract not yet deployed. Coming soon...</p>
+        </div>
+      )}
+
+      <SearchResultsModal
+        searchResult={searchResults}
+        searchAddress={searchAddress}
+        closeModal={() => setIsModalOpen(false)}
+        handleBackgroundClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}
+        isOpen={isModalOpen}
+        isLoading={searchLoading}
+      />
+
+      <div className="w-full max-w-6xl mt-6">{children}</div>
+    </div>
+  );
+}'use client';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import dynamic from 'next/dynamic';
+import LoadingIndicator from '@/components/LoadingIndicator';
+import config from '@/config.js';
+import { motion, AnimatePresence } from 'framer-motion';
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import { useNFTStore } from '@/app/store';
+import { barChartOptions } from '@/lib/chartOptions';
+import { retry } from '@/app/api/utils/helpers.js'; // Updated import
+import { clientLogger } from '@/lib/clientLogger.js';
+
+// Dynamically import chart component
+const Bar = dynamic(() => import('react-chartjs-2').then(mod => mod.Bar), { ssr: false });
+
+// Default timeout for fetches
+const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
+
+
+// Fetch summary data for Element280
+async function fetchContractData() {
+  const contractAddress = config.contractAddresses.element280.address;
+  const vaultAddress = config.vaultAddresses.element280.address;
+  clientLogger.info('NFTPage', `Fetching contract data for Element280: contract=${contractAddress}, vault=${vaultAddress}`);
+  if (!contractAddress || !vaultAddress) {
+    throw new Error('Element280 contract or vault address not configured');
+  }
+  if (!config.alchemy.apiKey) {
+    throw new Error('Alchemy API key not configured');
+  }
+
+  const client = createPublicClient({
+    chain: mainnet,
+    transport: http(`https://eth-mainnet.g.alchemy.com/v2/${config.alchemy.apiKey}`, { timeout: Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS }),
+  });
+
+  try {
+    const results = await retry(() =>
+      client.multicall({
+        contracts: [
+          { address: contractAddress, abi: config.abis.element280.main, functionName: 'totalSupply' },
+          { address: contractAddress, abi: config.abis.element280.main, functionName: 'getTotalNftsPerTiers' },
+          { address: contractAddress, abi: config.abis.element280.main, functionName: 'multiplierPool' },
+          { address: vaultAddress, abi: config.abis.element280.vault, functionName: 'totalRewardPool' },
+        ],
+      })
+    );
+    clientLogger.info(`[NFTPage] [DEBUG] multicall results: ${JSON.stringify(results, (k, v) => (typeof v === 'bigint' ? v.toString() : v), 2)}`);
+    const [totalSupply, tierCounts, multiplierPool, totalRewardPool] = results;
+    if (totalSupply.status === 'failure') {
+      throw new Error(`totalSupply call failed: ${totalSupply.error}`);
+    }
+    if (tierCounts.status === 'failure' || !tierCounts.result) {
+      console.warn(`[NFTPage] [WARN] getTotalNftsPerTiers failed or returned no data: ${tierCounts.error || 'empty result'}`);
+    }
+    if (multiplierPool.status === 'failure' || !multiplierPool.result) {
+      console.warn(`[NFTPage] [WARN] multiplierPool failed or returned no data: ${multiplierPool.error || 'empty result'}`);
+    }
+    if (totalRewardPool.status === 'failure') {
+      throw new Error(`totalRewardPool call failed: ${totalRewardPool.error}`);
+    }
+
+    let burnedDistribution = [0, 0, 0, 0, 0, 0];
+    let totalBurned = 0;
+    try {
+      const res = await fetch('/api/holders/Element280/validate-burned', { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+      if (res.ok) {
+        const reader = res.body.getReader();
+        let events = [];
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          const lines = chunk.split('\n').filter(line => line);
+          for (const line of lines) {
+            const data = JSON.parse(line);
+            if (data.event) {
+              const tier = data.event.tier;
+              if (tier >= 1 && tier <= 6) {
+                burnedDistribution[tier - 1]++;
+              }
+            }
+            if (data.complete) {
+              events = data.result.events;
+              totalBurned = data.result.burnedCount;
+            }
+          }
+        }
+        clientLogger.info(`[NFTPage] [DEBUG] Burned distribution: ${burnedDistribution}, total events: ${events.length}, totalBurned: ${totalBurned}`);
+      } else {
+        console.error(`[NFTPage] [ERROR] Failed to fetch burned distribution: ${res.status}`);
+      }
+    } catch (err) {
+      console.error(`[NFTPage] [ERROR] Burned distribution fetch error: ${err.message}, stack: ${err.stack}`);
+    }
+
+    return {
+      totalMinted: Number(totalSupply.result) + totalBurned,
+      totalBurned,
+      totalLive: Number(totalSupply.result),
+      tierDistribution: tierCounts.status === 'success' && tierCounts.result ? tierCounts.result.map(Number) : [0, 0, 0, 0, 0, 0],
+      multiplierPool: multiplierPool.status === 'success' && multiplierPool.result ? Number(multiplierPool.result) : 0,
+      totalRewardPool: Number(totalRewardPool.result) / 1e18,
+      burnedDistribution,
+    };
+  } catch (error) {
+    console.error(`[NFTPage] [ERROR] fetchContractData failed: ${error.message}, stack: ${error.stack}`);
+    throw new Error(`Failed to fetch contract data: ${error.message}`);
+  }
+}
+
+// Map contract to HolderTable component
+const holderTableComponents = {
+  e280: dynamic(() => import('./HolderTable/E280'), { ssr: false }),
+  ascendant: dynamic(() => import('./HolderTable/Ascendant'), { ssr: false }),
+  element280: dynamic(() => import('./HolderTable/Element280'), { ssr: false }),
+  element369: dynamic(() => import('./HolderTable/Element369'), { ssr: false }),
+  stax: dynamic(() => import('./HolderTable/Stax'), { ssr: false }),
+};
+
+export default function NFTPage({ chain, contract }) {
+  clientLogger.info(`[NFTPage] [INFO] Received props: chain=${chain}, contract=${contract}`);
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showChart, setShowChart] = useState(false);
+  const [progress, setProgress] = useState({ isPopulating: true, totalWallets: 0, totalOwners: 0, phase: 'Initializing', progressPercentage: 0 });
+  const [isInvalidContract, setIsInvalidContract] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+
+  // Call useNFTStore unconditionally
+  const { getCache, setCache } = useNFTStore();
+  // Use useMemo to stabilize effectiveGetCache and effectiveSetCache
+  const effectiveGetCache = useMemo(() => (isClient ? getCache : () => null), [isClient, getCache]);
+  const effectiveSetCache = useMemo(() => (isClient ? setCache : () => {}), [isClient, setCache]);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  const contractId = contract ? contract.toLowerCase() : null;
+  clientLogger.info(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
+
+  const contractConfig = config.contractDetails[contractId] || {};
+  const { name, apiEndpoint, rewardToken, pageSize, disabled } = contractConfig;
+  const isElement280 = contractId === 'element280';
+
+  const fetchData = useCallback(async () => {
+    if (!apiEndpoint) {
+      console.error(`[NFTPage] [ERROR] Invalid contract configuration for ${contractId}`);
+      setError('Invalid contract configuration');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      let progressData = { isPopulating: false, phase: 'Idle', progressPercentage: 0, totalOwners: 0 };
+      if (isElement280) {
+        try {
+          clientLogger.info(`[NFTPage] [INFO] Fetching progress from ${apiEndpoint}/progress`);
+          const res = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+          if (!res.ok) {
+            console.error(`[NFTPage] [ERROR] Progress fetch failed: ${res.status}`);
+          } else {
+            progressData = await res.json();
+            if (progressData.totalOwners === 0 && progressData.phase === 'Idle') {
+              clientLogger.info(`[NFTPage] [INFO] Stale progress, triggering cache refresh`);
+              await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
+              const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+              if (retryRes.ok) progressData = await retryRes.json();
+            }
+          }
+        } catch (err) {
+          console.error(`[NFTPage] [ERROR] Progress fetch error: ${err.message}, stack: ${err.stack}`);
+        }
+        setProgress(progressData);
+      }
+
+      const cacheKey = `contract_data_${contractId}`;
+      const cachedData = isClient ? effectiveGetCache(cacheKey) : null;
+      if (cachedData && cachedData.totalMinted > 0) {
+        console.log(`[NFTPage] [INFO] Cache hit for ${cacheKey}`);
+        setData(cachedData);
+        setLoading(false);
+        return;
+      }
+
+      let contractData;
+      if (isElement280) {
+        contractData = await fetchContractData();
+      } else {
+        contractData = {
+          totalMinted: 0,
+          totalBurned: 0,
+          totalLive: 0,
+          tierDistribution: [0, 0, 0, 0, 0, 0],
+          multiplierPool: 0,
+          totalRewardPool: 0,
+          burnedDistribution: [0, 0, 0, 0, 0, 0],
+        };
+        clientLogger.info(`[NFTPage] [INFO] Using placeholder data for non-Element280 contract: ${contractId}`);
+      }
+
+      if (isClient) {
+        effectiveSetCache(cacheKey, contractData);
+      }
+      setData(contractData);
+      setLoading(false);
+    } catch (err) {
+      console.error(`[NFTPage] [ERROR] Fetch error: ${err.message}, stack: ${err.stack}`);
+      setError(`Failed to load ${name} data: ${err.message}. Please try again later.`);
+      setLoading(false);
+    }
+  }, [apiEndpoint, contractId, isElement280, isClient, effectiveGetCache, effectiveSetCache, name]);
+
+  const fetchAllHolders = useCallback(async () => {
+    const cacheKey = `holders_${contractId}`;
+    const cachedData = isClient ? effectiveGetCache(cacheKey) : null;
+    if (cachedData) {
+      clientLogger.info(`[NFTPage] [INFO] Cache hit for ${cacheKey}, holders: ${cachedData.holders.length}`);
+      setData(prev => ({ ...prev, holders: cachedData.holders, summary: cachedData.summary }));
+      setLoading(false);
+      return;
+    }
+    clientLogger.info(`[NFTPage] [INFO] Cache miss for ${cacheKey}, fetching holders`);
+
+    try {
+      clientLogger.info(`[NFTPage] [INFO] Starting holders fetch for ${contractId} at ${apiEndpoint}`);
+
+      let allHolders = [];
+      let totalTokens = 0;
+      let totalLockedAscendant = 0;
+      let totalShares = 0;
+      let toDistributeDay8 = 0;
+      let toDistributeDay28 = 0;
+      let toDistributeDay90 = 0;
+      let pendingRewards = 0;
+      let totalClaimableRewards = 0;
+      let totalInfernoRewards = 0;
+      let totalFluxRewards = 0;
+      let totalE280Rewards = 0;
+      let summary = {};
+      let burnedNfts = [];
+      let page = 0;
+      let totalPages = Infinity;
+      const effectivePageSize = pageSize || config.contractDetails[contractId]?.pageSize;
+
+      let progressData = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) }).then(res => res.json()).catch(() => ({}));
+      if (progressData.phase === 'Idle' || progressData.totalOwners === 0) {
+        clientLogger.info(`[NFTPage] [INFO] Cache is Idle or empty, triggering POST`);
+        await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
+      }
+
+      while (page < totalPages) {
+        let attempts = 0;
+        const maxAttempts = config.alchemy.maxRetries;
+        let success = false;
+
+        while (attempts < maxAttempts && !success) {
+          try {
+            const url = `${apiEndpoint}?page=${page}&pageSize=${effectivePageSize}`;
+            clientLogger.info(`[NFTPage] [INFO] Fetching ${contractId} page ${page} at ${url}`);
+            const res = await fetch(url, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
+            if (!res.ok) {
+              const errorText = await res.text();
+              console.error(`[NFTPage] [ERROR] Fetch failed for ${url}: ${res.status} - ${errorText}`);
+              throw new Error(`Page ${page} failed with status: ${res.status} - ${errorText}`);
+            }
+
+            const json = await res.json();
+            clientLogger.info(`[NFTPage] [DEBUG] API response for ${url}: holders=${json.holders?.length}, totalTokens=${json.totalTokens}`);
+            if (json.error) {
+              console.error(`[NFTPage] [ERROR] API error for ${url}: ${json.error}`);
+              throw new Error(json.error);
+            }
+            if (!json.holders || !Array.isArray(json.holders)) {
+              console.error(`[NFTPage] [ERROR] Invalid holders data for ${url}: ${JSON.stringify(json, null, 2)}`);
+              await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
+              throw new Error(`Invalid holders data: retrying after POST`);
+            }
+            const newHolders = json.holders;
+            allHolders = allHolders.concat(newHolders);
+            totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+            totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
+            totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+            toDistributeDay8 = json.toDistributeDay8 || toDistributeDay8;
+            toDistributeDay28 = json.toDistributeDay28 || toDistributeDay28;
+            toDistributeDay90 = json.toDistributeDay90 || toDistributeDay90;
+            pendingRewards = json.pendingRewards || pendingRewards;
+            totalClaimableRewards = json.totalClaimableRewards || totalClaimableRewards;
+            totalInfernoRewards = json.totalInfernoRewards || totalInfernoRewards;
+            totalFluxRewards = json.totalFluxRewards || totalFluxRewards;
+            totalE280Rewards = json.totalE280Rewards || totalE280Rewards;
+            summary = json.summary || summary;
+            burnedNfts = json.burnedNfts || burnedNfts;
+            totalPages = json.totalPages || 1;
+            page++;
+            success = true;
+            if (!newHolders.length && json.totalPages === 0) {
+              clientLogger.info(`[NFTPage] [INFO] Empty holders with zero pages, accepting as valid`);
+              break;
+            }
+          } catch (err) {
+            attempts++;
+            console.error(`[NFTPage] [ERROR] Attempt ${attempts}/${maxAttempts} failed for page ${page}: ${err.message}`);
+            if (attempts >= maxAttempts) {
+              throw new Error(`Failed to fetch page ${page} after ${maxAttempts} attempts: ${err.message}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs * attempts));
+          }
+        }
+      }
+
+      const holdersData = {
+        holders: allHolders,
+        totalTokens,
+        totalLockedAscendant,
+        totalShares,
+        toDistributeDay8,
+        toDistributeDay28,
+        toDistributeDay90,
+        pendingRewards,
+        totalClaimableRewards,
+        totalInfernoRewards,
+        totalFluxRewards,
+        totalE280Rewards,
+        summary,
+        burnedNfts,
+      };
+
+      clientLogger.info(`[NFTPage] [INFO] Fetched ${allHolders.length} holders for ${contractId}`);
+      if (isClient) {
+        effectiveSetCache(cacheKey, holdersData);
+      }
+      setData(prev => ({ ...prev, ...holdersData }));
+      setLoading(false);
+    } catch (err) {
+      console.error(`[NFTPage] [ERROR] Holders fetch error: ${err.message}, stack: ${err.stack}`);
+      setError(`Failed to load ${name} data: ${err.message}. Please try again later.`);
+      setLoading(false);
+    }
+  }, [apiEndpoint, contractId, isClient, effectiveGetCache, effectiveSetCache, name, pageSize]);
+
+  useEffect(() => {
+    if (!contractId || !config.contractDetails[contractId]) {
+      console.error(`[NFTPage] [ERROR] Invalid or missing contract: chain=${chain}, contract=${contract}`);
+      setIsInvalidContract(true);
+      setLoading(false);
+    } else if (disabled) {
+      clientLogger.info(`[NFTPage] [INFO] Contract ${name} is disabled`);
+      setError(`${name} is not yet supported (contract not deployed).`);
+      setLoading(false);
+    } else {
+      setIsInvalidContract(false);
+      fetchData();
+      fetchAllHolders();
+    }
+  }, [contractId, chain, contract, disabled, name, fetchData, fetchAllHolders]);
+
+  if (!isClient) {
+    return (
+      <div className="container page-content">
+        <h1 className="title mb-6">{name || 'Unknown Contract'} Holders</h1>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  const HolderTable = holderTableComponents[contractId] || null;
+
+  const chartData = data && isElement280 ? {
+    labels: ['Tier 1', 'Tier 2', 'Tier 3', 'Tier 4', 'Tier 5', 'Tier 6'],
+    datasets: [
+      {
+        label: 'Live NFTs',
+        data: data.tierDistribution || [0, 0, 0, 0, 0, 0],
+        backgroundColor: 'rgba(96, 165, 250, 0.6)', // text-blue-400
+      },
+      {
+        label: 'Burned NFTs',
+        data: data.burnedDistribution || [0, 0, 0, 0, 0, 0],
+        backgroundColor: 'rgba(248, 113, 113, 0.6)', // text-red-400
+      },
+    ],
+  } : null;
+
+  if (isInvalidContract) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="container text-center-section"
+      >
+        <h1 className="title mb-4">Invalid Contract</h1>
+        <p className="text-error text-lg">
+          The contract "{contractId || 'none specified'}" is not supported.
+        </p>
+      </motion.div>
+    );
+  }
+
+  if (!HolderTable) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="container text-center-section"
+      >
+        <h1 className="title mb-4">{name || 'Unknown Contract'} Holders</h1>
+        <p className="text-error text-lg">
+          Error: Holder table component for {contractId} not found.
+        </p>
+      </motion.div>
+    );
+  }
+
+  // Define props for each HolderTable component
+  const holderTableProps = {
+    e280: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    ascendant: { holders: data?.holders || [], loading, totalShares: data?.totalShares || 0, totalTokens: data?.totalTokens || 0, rewardToken },
+    element280: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    element369: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+    stax: { holders: data?.holders || [], loading, totalTokens: data?.totalTokens || 0, rewardToken },
+  };
+
+  return (
+    <div className="container page-content">
+      <motion.h1
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="title mb-6"
+      >
+        {name || 'Unknown Contract'} Holders
+      </motion.h1>
+
+      <AnimatePresence>
+        {loading && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="card text-center-section"
+          >
+            <LoadingIndicator
+              status={`Loading ${name} data... ${
+                isElement280 ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''
+              }`}
+              progress={progress}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {error && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="text-error text-lg mb-6 text-center"
+        >
+          {error}
+        </motion.p>
+      )}
+
+      {!loading && !error && data && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="space-y-section"
+        >
+          <div className="card">
+            <h2 className="subtitle mb-4">Contract Summary</h2>
+            <div className="grid-responsive text-body">
+              <div>
+                <p>
+                  <strong>Total Minted:</strong> {data.totalMinted?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Live:</strong> {data.totalLive?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Burned:</strong> {data.totalBurned?.toLocaleString() || 'N/A'}
+                </p>
+              </div>
+              <div>
+                <p>
+                  <strong>Multiplier Pool:</strong>{' '}
+                  {data.multiplierPool?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Reward Pool:</strong>{' '}
+                  {data.totalRewardPool?.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }) || 'N/A'}{' '}
+                  {rewardToken}
+                </p>
+                <p>
+                  <strong>Total Holders:</strong>{' '}
+                  {progress.totalOwners?.toLocaleString() || 'N/A'}
+                </p>
+              </div>
+            </div>
+            {isElement280 && (
+              <div className="mt-6">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowChart(!showChart)}
+                  className="btn btn-primary"
+                >
+                  {showChart ? 'Hide Tier Distribution' : 'Show Tier Distribution'}
+                </motion.button>
+                <AnimatePresence>
+                  {showChart && chartData && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className="chart-container mt-6"
+                    >
+                      <Bar data={chartData} options={barChartOptions} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h2 className="subtitle mb-4">Holders</h2>
+            <HolderTable {...holderTableProps[contractId]} />
+          </div>
+        </motion.div>
+      )}
+    </div>
+  );
+}// File: components/NFTPageWrapper.js
+
+'use client';
+
+import { useState, useEffect } from 'react';
+import HolderTable from './HolderTable';
+
+export default function NFTPageWrapper({ chain, contract, data, rewardToken }) {
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  if (!isClient) {
+    return (
+      <div>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (!data || data.error) {
+    return (
+      <div>
+        <p className="text-error">
+          {data?.error || 'Failed to load collection data'}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <HolderTable
+      chain={chain}
+      contract={contract}
+      holders={data.holders}
+      totalTokens={data.totalTokens}
+      totalShares={data.totalShares}
+      rewardToken={rewardToken}
+      totalBurned={data.totalBurned}
+    />
+  );
+}// File: components/NFTSummary.js
+
+'use client';
+
+import { useState, useEffect } from 'react';
+import config from '@/config';
+
+export default function NFTSummary({ collectionsData }) {
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  if (!isClient) {
+    return <div>Loading...</div>;
+  }
+
+  return (
+    <div className="space-y-section w-full max-w-6xl">
+      {collectionsData.map(({ apiKey, data }) => (
+        <div key={apiKey} className="card">
+          <h2 className="subtitle">{config.contractDetails[apiKey]?.name || apiKey}</h2>
+          {data.error ? (
+            <p className="text-error">{data.error}</p>
+          ) : (
+            <div className="grid-responsive text-body">
+              <div>
+                <p>
+                  <strong>Total Tokens:</strong> {data.totalTokens?.toLocaleString() || 'N/A'}
+                </p>
+                <p>
+                  <strong>Total Holders:</strong> {data.holders?.length || 0}
+                </p>
+              </div>
+              {data.totalLockedAscendant > 0 && (
+                <p>
+                  <strong>Total Locked Ascendant:</strong>{' '}
+                  {data.totalLockedAscendant?.toLocaleString() || 'N/A'}
+                </p>
+              )}
+              {data.pendingRewards > 0 && (
+                <p>
+                  <strong>Pending Rewards:</strong>{' '}
+                  {data.pendingRewards?.toLocaleString() || 'N/A'}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}// File: components/SearchResultsModal.js
+'use client';
+import { motion } from 'framer-motion';
+import dynamic from 'next/dynamic';
+import config from '@/config';
+
+// Loading components
+const Element280Loading = () => <div className="text-body">Loading Element280 data...</div>;
+Element280Loading.displayName = 'Element280Loading';
+
+const Element369Loading = () => <div className="text-body">Loading Element369 data...</div>;
+Element369Loading.displayName = 'Element369Loading';
+
+const StaxNFTLoading = () => <div className="text-body">Loading Stax data...</div>;
+StaxNFTLoading.displayName = 'StaxNFTLoading';
+
+const AscendantNFTLoading = () => <div className="text-body">Loading Ascendant data...</div>;
+AscendantNFTLoading.displayName = 'AscendantNFTLoading';
+
+const E280Loading = () => <div className="text-body">Loading E280 data...</div>;
+E280Loading.displayName = 'E280Loading';
+
+// Fallback components
+const Element280Fallback = () => <div className="text-error">Error loading data for Element280</div>;
+Element280Fallback.displayName = 'Element280ErrorFallback';
+
+const Element369Fallback = () => <div className="text-error">Error loading data for Element369</div>;
+Element369Fallback.displayName = 'Element369ErrorFallback';
+
+const StaxNFTFallback = () => <div className="text-error">Error loading data for Stax</div>;
+StaxNFTFallback.displayName = 'StaxNFTErrorFallback';
+
+const AscendantNFTFallback = () => <div className="text-error">Error loading data for Ascendant</div>;
+AscendantNFTFallback.displayName = 'AscendantNFTErrorFallback';
+
+const E280Fallback = () => <div className="text-error">Error loading data for E280</div>;
+E280Fallback.displayName = 'E280ErrorFallback';
+
+const holderTableComponents = {
+  element280: dynamic(
+    () => import('@/components/HolderTable/Element280').catch((err) => {
+      console.error('Failed to load Element280 HolderTable:', err);
+      return { default: Element280Fallback };
+    }),
+    { ssr: false, loading: Element280Loading }
+  ),
+  element369: dynamic(
+    () => import('@/components/HolderTable/Element369').catch((err) => {
+      console.error('Failed to load Element369 HolderTable:', err);
+      return { default: Element369Fallback };
+    }),
+    { ssr: false, loading: Element369Loading }
+  ),
+  stax: dynamic(
+    () => import('@/components/HolderTable/Stax').catch((err) => {
+      console.error('Failed to load Stax HolderTable:', err);
+      return { default: StaxNFTFallback };
+    }),
+    { ssr: false, loading: StaxNFTLoading }
+  ),
+  ascendant: dynamic(
+    () => import('@/components/HolderTable/Ascendant').catch((err) => {
+      console.error('Failed to load Ascendant HolderTable:', err);
+      return { default: AscendantNFTFallback };
+    }),
+    { ssr: false, loading: AscendantNFTLoading }
+  ),
+  e280: dynamic(
+    () => import('@/components/HolderTable/E280').catch((err) => {
+      console.error('Failed to load E280 HolderTable:', err);
+      return { default: E280Fallback };
+    }),
+    { ssr: false, loading: E280Loading }
+  ),
+};
+
+Object.keys(holderTableComponents).forEach((key) => {
+  holderTableComponents[key].displayName = `${key}HolderTable`;
+});
+
+export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick, isOpen, isLoading }) {
+  if (!isOpen) return null;
+
+  console.log('[SearchResultsModal] Props:', { searchResult, searchAddress, isOpen, isLoading });
+
+  const modalVariants = {
+    hidden: { opacity: 0, y: -50 },
+    visible: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -50 },
+  };
+
+  const collections = Object.keys(config.nftContracts)
+  .filter((key) => !config.nftContracts[key].disabled)
+  .map((key) => ({
+    apiKey: key,
+    name: config.nftContracts[key].name,
+  }));
+
+  if (isLoading) {
+    return (
+      <div className="modal-overlay" onClick={handleBackgroundClick}>
+        <motion.div
+          className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700 p-6"
+          variants={modalVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-body">Loading search results...</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!searchResult || Object.keys(searchResult).length === 0) {
+    return (
+      <div className="modal-overlay" onClick={handleBackgroundClick}>
+        <motion.div
+          className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700 p-6"
+          variants={modalVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="subtitle">Search Error</h2>
+            <button onClick={closeModal} className="text-gray-300 hover:text-gray-100 text-2xl">
+              ×
+            </button>
+          </div>
+          <p className="text-error">No search results available. Please try again.</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="modal-overlay" onClick={handleBackgroundClick}>
+      <motion.div
+        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700 p-6"
+        variants={modalVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="subtitle">
+            {searchAddress
+              ? `NFT Ownership for ${searchAddress.slice(0, 6)}...${searchAddress.slice(-4)}`
+              : 'NFT Ownership'}
+          </h2>
+          <button onClick={closeModal} className="text-gray-300 hover:text-gray-100 text-2xl">
+            ×
+          </button>
+        </div>
+
+        <div className="space-y-section">
+          {collections.map(({ apiKey, name }) => {
+            const data = searchResult[apiKey];
+            console.log(`[SearchResultsModal] Collection ${apiKey} data:`, data);
+            const HolderTable = holderTableComponents[apiKey] || (() => <div>Holder table not found for ${apiKey}</div>);
+            return (
+              <div key={apiKey} className="border-b border-gray-700 pb-4">
+                <h3 className="subtitle mb-2">{name}</h3>
+                {data === null || data === undefined ? (
+                  <p className="text-body">No NFTs owned in this collection.</p>
+                ) : data?.error ? (
+                  <p className="text-error">Error: {data.error}</p>
+                ) : data?.message ? (
+                  <p className="text-body">{data.message}</p>
+                ) : (
+                  <HolderTable
+                    holders={data.holders?.map((holder) => ({
+                      ...holder,
+                      wallet: holder.wallet || holder.address || holder.ownerAddress || '',
+                    })) || []}
+                    contract={apiKey}
+                    loading={false}
+                    totalTokens={data.totalTokens || data.totalBurned || 0}
+                    totalShares={data.totalShares || data.totalBurned || 0}
+                    rewardToken={config.contractDetails[apiKey]?.rewardToken || 'Unknown'}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </motion.div>
+    </div>
+  );
+}

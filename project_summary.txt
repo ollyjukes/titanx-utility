@@ -27,12 +27,18 @@ Dependencies from package.json:
   - zustand
 
 Dev Dependencies from package.json:
+  - @babel/plugin-transform-modules-commonjs
+  - @babel/preset-env
   - @eslint/js
+  - @jest/globals
   - @typescript-eslint/eslint-plugin
   - @typescript-eslint/parser
   - autoprefixer
+  - babel-jest
+  - esbuild-jest
   - eslint
   - eslint-config-next
+  - jest
   - postcss
   - tailwindcss
 

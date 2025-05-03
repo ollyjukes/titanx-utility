@@ -1,0 +1,27 @@
+// .babelrc
+{
+  "presets": [
+    "next/babel",
+    [
+      "@babel/preset-env",
+      {
+        "targets": {
+          "node": "current"
+        }
+      }
+    ]
+  ],
+  "plugins": [
+    "@babel/plugin-transform-modules-commonjs",
+    "@babel/plugin-syntax-dynamic-import",
+    [
+      "module-resolver",
+      {
+        "root": ["."],
+        "alias": {
+          "@": "./"
+        }
+      }
+    ]
+  ]
+}

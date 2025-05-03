@@ -21,7 +21,6 @@ function LoadingIndicator({ status, progress }) {
 }
 
 export default memo(LoadingIndicator);// File: components/NFTLayout.js
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -30,6 +29,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import config from '@/config.js';
 import { useNFTStore } from '@/app/store';
+import { useDebounce } from 'use-debounce';
 
 // Dynamically import SearchResultsModal
 const SearchResultsModal = dynamic(() => import('@/components/SearchResultsModal'), { ssr: false });
@@ -38,6 +38,7 @@ export default function NFTLayout({ children }) {
   const [selectedChain, setSelectedChain] = useState(null);
   const [showE280Message, setShowE280Message] = useState(false);
   const [searchAddress, setSearchAddress] = useState('');
+  const [debouncedAddress] = useDebounce(searchAddress, 500);
   const [searchResults, setSearchResults] = useState({});
   const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -75,8 +76,8 @@ export default function NFTLayout({ children }) {
         : `/nft/${key === 'e280' ? 'BASE' : 'ETH'}/${config.contractDetails[key].name.replace(/\s+/g, '')}`,
   }));
 
-  const fetchCollectionData = async (apiKey, apiEndpoint, pageSize) => {
-    console.log(`[NFTLayout] Fetching data for ${apiKey} from ${apiEndpoint}`);
+  const fetchSearchData = async (address, apiKey, apiEndpoint) => {
+    console.log(`[NFTLayout] Fetching search data for ${apiKey} with address: ${address}`);
     try {
       if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
         console.log(`[NFTLayout] ${apiKey} is disabled`);
@@ -90,68 +91,37 @@ export default function NFTLayout({ children }) {
         console.log(`[NFTLayout] Adjusted endpoint: ${endpoint}`);
       }
 
-      let allHolders = [];
-      let totalTokens = 0;
-      let totalShares = 0;
-      let summary = {};
-      let page = 0;
-      let totalPages = Infinity;
+      const url = `${endpoint}?address=${encodeURIComponent(address)}`;
+      console.log(`[NFTLayout] Fetching ${url}`);
+      const res = await fetch(url, {
+        cache: 'no-store', // Ensure fresh data for address-specific queries
+        signal: AbortSignal.timeout(config.alchemy.timeoutMs || 30000),
+      });
 
-      while (page < totalPages) {
-        let attempts = 0;
-        const maxAttempts = config.alchemy.maxRetries || 3;
-        let success = false;
-
-        while (attempts < maxAttempts && !success) {
-          try {
-            const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
-            console.log(`[NFTLayout] Attempt ${attempts + 1} fetching ${url}`);
-            const res = await fetch(url, {
-              cache: 'force-cache',
-              signal: AbortSignal.timeout(config.alchemy.timeoutMs || 30000),
-            });
-            if (!res.ok) {
-              const errorText = await res.text();
-              throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
-            }
-
-            const json = await res.json();
-            if (json.error) {
-              console.log(`[NFTLayout] API error for ${apiKey}: ${json.error}`);
-              return { error: json.error };
-            }
-            if (!json.holders || !Array.isArray(json.holders)) {
-              throw new Error(`Invalid holders data for ${url}`);
-            }
-
-            allHolders = allHolders.concat(json.holders);
-            totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
-            totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
-            summary = json.summary || summary;
-            totalPages = json.totalPages || 1;
-            page++;
-            success = true;
-            console.log(`[NFTLayout] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
-          } catch (err) {
-            attempts++;
-            console.error(`[NFTLayout] Fetch attempt ${attempts} failed for ${apiKey}: ${err.message}`);
-            if (attempts >= maxAttempts) {
-              throw new Error(`Failed to fetch page ${page}: ${err.message}`);
-            }
-            await new Promise((resolve) => setTimeout(resolve, (config.alchemy.batchDelayMs || 1000) * attempts));
-          }
-        }
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to fetch ${url}: ${res.status} ${errorText}`);
       }
 
-      const data = {
-        holders: allHolders,
-        totalTokens,
-        totalShares,
-        summary,
+      const json = await res.json();
+      console.log(`[NFTLayout] Response for ${apiKey}:`, json);
+
+      if (json.error) {
+        console.log(`[NFTLayout] API error for ${apiKey}: ${json.error}`);
+        return { error: json.error };
+      }
+
+      if (!json.holders || !Array.isArray(json.holders)) {
+        throw new Error(`Invalid holders data for ${url}`);
+      }
+
+      return {
+        holders: json.holders,
+        totalTokens: json.totalTokens || json.summary?.totalLive || 0,
+        totalShares: json.totalShares || json.summary?.multiplierPool || 0,
+        totalBurned: json.totalBurned || 0,
+        summary: json.summary || {},
       };
-      console.log(`[NFTLayout] Setting cache for ${apiKey}: ${allHolders.length} holders`);
-      setCache(apiKey, data);
-      return data;
     } catch (error) {
       console.error(`[NFTLayout] Error fetching ${apiKey}: ${error.message}`);
       return { error: error.message };
@@ -163,6 +133,7 @@ export default function NFTLayout({ children }) {
     if (!searchAddress || !/^0x[a-fA-F0-9]{40}$/.test(searchAddress)) {
       setError('Please enter a valid Ethereum address (e.g., 0x...)');
       setSearchResults({});
+      setIsModalOpen(false);
       return;
     }
 
@@ -181,28 +152,20 @@ export default function NFTLayout({ children }) {
           continue;
         }
 
-        let data = getCache(apiKey);
-        console.log(`[NFTLayout] Cache check for ${apiKey}: ${data ? 'hit' : 'miss'}`);
-        if (!data) {
-          console.log(`[NFTLayout] Cache miss for ${apiKey}, fetching data`);
-          const contractConfig = config.contractDetails[apiKey] || {};
-          data = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
-        }
+        const contractConfig = config.contractDetails[apiKey] || {};
+        const data = await fetchSearchData(lowerSearchAddress, apiKey, contractConfig.apiEndpoint);
 
         if (data.error) {
           searchResults[apiKey] = { error: data.error };
         } else {
-          const holder = data.holders.find(
-            (h) => h && h.wallet && h.wallet.toLowerCase() === lowerSearchAddress
-          );
-          searchResults[apiKey] = holder
-            ? {
-                ...holder,
-                totalShares: apiKey === 'ascendant' ? data.totalShares : undefined,
-                totalTokens: data.totalTokens,
-                rewardToken: config.contractDetails[apiKey]?.rewardToken,
-              }
-            : { error: 'No holdings found for this address' };
+          searchResults[apiKey] = {
+            holders: data.holders || [],
+            totalTokens: data.totalTokens,
+            totalShares: apiKey === 'ascendant' ? data.totalShares : undefined,
+            totalBurned: data.totalBurned,
+            rewardToken: config.contractDetails[apiKey]?.rewardToken,
+            summary: data.summary,
+          };
           console.log(`[NFTLayout] ${apiKey} search result:`, searchResults[apiKey]);
         }
       }
@@ -216,6 +179,12 @@ export default function NFTLayout({ children }) {
       setSearchLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (debouncedAddress && /^0x[a-fA-F0-9]{40}$/.test(debouncedAddress)) {
+      handleSearch();
+    }
+  }, [debouncedAddress]);
 
   const handleChainSelect = (chainId) => {
     console.log('[NFTLayout] Chain selected:', chainId);
@@ -253,7 +222,7 @@ export default function NFTLayout({ children }) {
           <input
             type="text"
             value={searchAddress}
-            onChange={(e) => setSearchAddress(e.target.value)}
+            onChange={(e) => setSearchAddress(e.target.value.trim())}
             placeholder="Search by wallet address (e.g., 0x...)"
             className="search-input"
             disabled={searchLoading}
@@ -337,29 +306,18 @@ export default function NFTLayout({ children }) {
         </div>
       )}
 
-      {isModalOpen && (
-        <SearchResultsModal
-          searchResult={searchResults}
-          searchAddress={searchAddress}
-          closeModal={() => setIsModalOpen(false)}
-          handleBackgroundClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}
-        />
-      )}
+      <SearchResultsModal
+        searchResult={searchResults}
+        searchAddress={searchAddress}
+        closeModal={() => setIsModalOpen(false)}
+        handleBackgroundClick={(e) => e.target === e.currentTarget && setIsModalOpen(false)}
+        isOpen={isModalOpen}
+        isLoading={searchLoading}
+      />
 
       <div className="w-full max-w-6xl mt-6">{children}</div>
     </div>
   );
-}// File: components/NFTLayoutWrapper.js
-
-'use client';
-
-import dynamic from 'next/dynamic';
-
-// Dynamically import NFTLayout
-const NFTLayout = dynamic(() => import('@/components/NFTLayout'), { ssr: false });
-
-export default function NFTLayoutWrapper({ children }) {
-  return <NFTLayout>{children}</NFTLayout>;
 }'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -1017,11 +975,11 @@ export default function NFTSummary({ collectionsData }) {
       ))}
     </div>
   );
-}'use client';
-
+}// File: components/SearchResultsModal.js
+'use client';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
-import config from '@/config.js';
+import config from '@/config';
 
 // Loading components
 const Element280Loading = () => <div className="text-body">Loading Element280 data...</div>;
@@ -1057,35 +1015,35 @@ E280Fallback.displayName = 'E280ErrorFallback';
 
 const holderTableComponents = {
   element280: dynamic(
-    () => import('./HolderTable/Element280').catch((err) => {
+    () => import('@/components/HolderTable/Element280').catch((err) => {
       console.error('Failed to load Element280 HolderTable:', err);
       return { default: Element280Fallback };
     }),
     { ssr: false, loading: Element280Loading }
   ),
   element369: dynamic(
-    () => import('./HolderTable/Element369').catch((err) => {
+    () => import('@/components/HolderTable/Element369').catch((err) => {
       console.error('Failed to load Element369 HolderTable:', err);
       return { default: Element369Fallback };
     }),
     { ssr: false, loading: Element369Loading }
   ),
   stax: dynamic(
-    () => import('./HolderTable/Stax').catch((err) => {
+    () => import('@/components/HolderTable/Stax').catch((err) => {
       console.error('Failed to load Stax HolderTable:', err);
       return { default: StaxNFTFallback };
     }),
     { ssr: false, loading: StaxNFTLoading }
   ),
-  ascendantNFT: dynamic(
-    () => import('./HolderTable/Ascendant').catch((err) => {
+  ascendant: dynamic(
+    () => import('@/components/HolderTable/Ascendant').catch((err) => {
       console.error('Failed to load Ascendant HolderTable:', err);
       return { default: AscendantNFTFallback };
     }),
     { ssr: false, loading: AscendantNFTLoading }
   ),
   e280: dynamic(
-    () => import('./HolderTable/E280').catch((err) => {
+    () => import('@/components/HolderTable/E280').catch((err) => {
       console.error('Failed to load E280 HolderTable:', err);
       return { default: E280Fallback };
     }),
@@ -1097,25 +1055,68 @@ Object.keys(holderTableComponents).forEach((key) => {
   holderTableComponents[key].displayName = `${key}HolderTable`;
 });
 
-export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick }) {
+export default function SearchResultsModal({ searchResult, searchAddress, closeModal, handleBackgroundClick, isOpen, isLoading }) {
+  if (!isOpen) return null;
+
+  console.log('[SearchResultsModal] Props:', { searchResult, searchAddress, isOpen, isLoading });
+
   const modalVariants = {
     hidden: { opacity: 0, y: -50 },
     visible: { opacity: 1, y: 0 },
     exit: { opacity: 0, y: -50 },
   };
 
-  const collections = [
-    { apiKey: 'element280', name: 'Element280' },
-    { apiKey: 'element369', name: 'Element369' },
-    { apiKey: 'stax', name: 'Stax' },
-    { apiKey: 'ascendantNFT', name: 'Ascendant' },
-    { apiKey: 'e280', name: 'E280' },
-  ];
+  const collections = Object.keys(config.nftContracts)
+    .filter((key) => !config.nftContracts[key].disabled)
+    .map((key) => ({
+      apiKey: key,
+      name: config.nftContracts[key].name,
+    }));
+
+  if (isLoading) {
+    return (
+      <div className="modal-overlay" onClick={handleBackgroundClick}>
+        <motion.div
+          className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700 p-6"
+          variants={modalVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="text-body">Loading search results...</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!searchResult || Object.keys(searchResult).length === 0) {
+    return (
+      <div className="modal-overlay" onClick={handleBackgroundClick}>
+        <motion.div
+          className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700 p-6"
+          variants={modalVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="subtitle">Search Error</h2>
+            <button onClick={closeModal} className="text-gray-300 hover:text-gray-100 text-2xl">
+              ×
+            </button>
+          </div>
+          <p className="text-error">No search results available. Please try again.</p>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="modal-overlay" onClick={handleBackgroundClick}>
       <motion.div
-        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700"
+        className="card w-full max-w-4xl max-h-[90vh] overflow-y-auto border-gray-700 p-6"
         variants={modalVariants}
         initial="hidden"
         animate="visible"
@@ -1124,7 +1125,9 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
       >
         <div className="flex justify-between items-center mb-4">
           <h2 className="subtitle">
-            NFT Ownership for {searchAddress.slice(0, 6)}...{searchAddress.slice(-4)}
+            {searchAddress
+              ? `NFT Ownership for ${searchAddress.slice(0, 6)}...${searchAddress.slice(-4)}`
+              : 'NFT Ownership'}
           </h2>
           <button onClick={closeModal} className="text-gray-300 hover:text-gray-100 text-2xl">
             ×
@@ -1134,11 +1137,12 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
         <div className="space-y-section">
           {collections.map(({ apiKey, name }) => {
             const data = searchResult[apiKey];
-            const HolderTable = holderTableComponents[apiKey] || (() => <div>Holder table not found for {apiKey}</div>);
+            console.log(`[SearchResultsModal] Collection ${apiKey} data:`, data);
+            const HolderTable = holderTableComponents[apiKey] || (() => <div>Holder table not found for ${apiKey}</div>);
             return (
               <div key={apiKey} className="border-b border-gray-700 pb-4">
                 <h3 className="subtitle mb-2">{name}</h3>
-                {data === null ? (
+                {data === null || data === undefined ? (
                   <p className="text-body">No NFTs owned in this collection.</p>
                 ) : data?.error ? (
                   <p className="text-error">Error: {data.error}</p>
@@ -1146,12 +1150,15 @@ export default function SearchResultsModal({ searchResult, searchAddress, closeM
                   <p className="text-body">{data.message}</p>
                 ) : (
                   <HolderTable
-                    holders={[data]}
+                    holders={data.holders?.map((holder) => ({
+                      ...holder,
+                      wallet: holder.wallet || holder.address || holder.ownerAddress || '',
+                    })) || []}
                     contract={apiKey}
                     loading={false}
-                    totalTokens={data.totalTokens || 0}
-                    totalShares={data.totalShares}
-                    rewardToken={data.rewardToken || config.contractDetails[apiKey]?.rewardToken}
+                    totalTokens={data.totalTokens || data.totalBurned || 0}
+                    totalShares={data.totalShares || data.totalBurned || 0}
+                    rewardToken={config.contractDetails[apiKey]?.rewardToken || 'Unknown'}
                   />
                 )}
               </div>
@@ -2664,56 +2671,353 @@ export default function Home() {
       </main>
     </div>
   );
-}// File: app/layout.js
-
-import Navbar from '@/components/Navbar';
-import '@/app/global.css'; // Target global.css in app directory
+}'use client';
+import '@/app/global.css';
 import { Inter } from 'next/font/google';
+import Navbar from '@/components/Navbar';
 
 const inter = Inter({ subsets: ['latin'] });
-
-export const metadata = {
-  title: 'TitanXUtils',
-  description: 'TitanX ecosystem utilities',
-};
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en" className="bg-gray-900 text-gray-100">
-      <head>
-        <title>TitanXUtils</title>
-      </head>
       <body className={inter.className}>
         <Navbar />
         <main className="flex-grow container page-content">{children}</main>
         <footer className="footer">
-          <p>© {new Date().getFullYear()} TitanXUtils. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} TitanXUtils by KetoNatural and JukesTheGreat.</p>
         </footer>
       </body>
     </html>
   );
-}// File: app/nft/layout.js
-'use client';
-import Navbar from '@/components/Navbar';
-import NFTLayoutWrapper from '@/components/NFTLayoutWrapper';
-import '@/app/global.css'; // Target global.css in app directory
-import { Inter } from 'next/font/google';
-import { Suspense } from 'react';
+}'use client';
+import { useState, useCallback } from 'react';
+import SearchResultsModal from '@/components/SearchResultsModal';
+import config from '@/config';
+import dynamic from 'next/dynamic';
 
-const inter = Inter({ subsets: ['latin'] });
+// Dynamic HolderTable components
+const holderTableComponents = {
+  element280: dynamic(
+    () => import('@/components/HolderTable/Element280').catch((err) => {
+      console.error('Failed to load Element280 HolderTable:', err);
+      return { default: () => <div className="text-error">Error loading data for Element280</div> };
+    }),
+    { ssr: false, loading: () => <div className="text-body">Loading Element280 data...</div> }
+  ),
+  element369: dynamic(
+    () => import('@/components/HolderTable/Element369').catch((err) => {
+      console.error('Failed to load Element369 HolderTable:', err);
+      return { default: () => <div className="text-error">Error loading data for Element369</div> };
+    }),
+    { ssr: false, loading: () => <div className="text-body">Loading Element369 data...</div> }
+  ),
+  stax: dynamic(
+    () => import('@/components/HolderTable/Stax').catch((err) => {
+      console.error('Failed to load Stax HolderTable:', err);
+      return { default: () => <div className="text-error">Error loading data for Stax</div> };
+    }),
+    { ssr: false, loading: () => <div className="text-body">Loading Stax data...</div> }
+  ),
+  ascendant: dynamic(
+    () => import('@/components/HolderTable/Ascendant').catch((err) => {
+      console.error('Failed to load Ascendant HolderTable:', err);
+      return { default: () => <div className="text-error">Error loading data for Ascendant</div> };
+    }),
+    { ssr: false, loading: () => <div className="text-body">Loading Ascendant data...</div> }
+  ),
+};
 
 export default function NFTLayout({ children }) {
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchAddress, setSearchAddress] = useState('');
+  const [searchResult, setSearchResult] = useState({});
+  const [selectedChain, setSelectedChain] = useState(null);
+  const [selectedCollection, setSelectedCollection] = useState(null);
+  const [collectionData, setCollectionData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fetchSearchResults = useCallback(async (address) => {
+    const collections = [
+      { apiKey: 'element280', name: 'Element280' },
+      { apiKey: 'element369', name: 'Element369' },
+      { apiKey: 'stax', name: 'Stax' },
+      { apiKey: 'ascendant', name: 'Ascendant' },
+    ];
+
+    const results = {};
+    for (const { apiKey } of collections) {
+      try {
+        const contractConfig = config.contractDetails[apiKey];
+        if (!contractConfig || contractConfig.disabled) {
+          results[apiKey] = { message: `${apiKey} is disabled` };
+          continue;
+        }
+
+        const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+        const url = `${baseUrl}/api/holders/${apiKey}`;
+        console.log(`Fetching holders for ${apiKey}: ${url}`);
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Fetch failed for ${apiKey}: ${response.status} - ${errorText}`);
+          results[apiKey] = { error: `Failed to fetch data: ${response.status} - ${errorText}` };
+          continue;
+        }
+        const data = await response.json();
+        console.log(`Holders data for ${apiKey}:`, data);
+        if (data.holders && data.holders.length > 0) {
+          console.log(`First holder for ${apiKey}:`, data.holders[0]);
+        }
+
+        // Check if holders is an array
+        if (!Array.isArray(data.holders)) {
+          console.error(`Invalid holders format for ${apiKey}:`, data.holders);
+          results[apiKey] = { error: 'Invalid holders data format' };
+          continue;
+        }
+
+        // Filter holders by address
+        const filteredHolders = data.holders.filter(
+          (holder) => {
+            const holderAddress = holder.address || holder.ownerAddress;
+            if (!holderAddress) {
+              console.warn(`No address field in holder for ${apiKey}:`, holder);
+              return false;
+            }
+            return holderAddress.toLowerCase() === address.toLowerCase();
+          }
+        );
+        results[apiKey] = filteredHolders.length > 0
+          ? {
+              holders: filteredHolders,
+              totalBurned: data.totalBurned || 0,
+              timestamp: data.timestamp || Date.now(),
+            }
+          : { message: 'No NFTs owned in this collection' };
+      } catch (error) {
+        console.error(`Error fetching ${apiKey} data for ${address}:`, error);
+        results[apiKey] = { error: error.message };
+      }
+    }
+    setSearchResult(results);
+  }, []);
+
+  const fetchCollectionData = useCallback(async (apiKey, retries = 2) => {
+    setLoading(true);
+    setError(null);
+    setCollectionData(null);
+
+    const contractConfig = config.contractDetails[apiKey];
+    if (!contractConfig || contractConfig.disabled) {
+      setError(`${apiKey} is disabled`);
+      setLoading(false);
+      return;
+    }
+
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+    const endpoints = [
+      `${baseUrl}/api/holders/${apiKey}`,
+    ];
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      for (const url of endpoints) {
+        try {
+          console.log(`Fetching collection data (attempt ${attempt}) for ${apiKey}: ${url}`);
+          const response = await fetch(url, { cache: 'force-cache' });
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Fetch failed for ${apiKey}: ${response.status} - ${errorText}`);
+            throw new Error(`Failed to fetch data: ${response.status} - ${errorText}`);
+          }
+          const data = await response.json();
+          console.log(`Collection data for ${apiKey}:`, data);
+          if (data.holders && data.holders.length > 0) {
+            console.log(`First holder for ${apiKey}:`, data.holders[0]);
+          }
+
+          if (!data || !Array.isArray(data.holders)) {
+            console.warn(`No valid holders data for ${apiKey}:`, data);
+            setError(`No holder data available for ${config.nftContracts[apiKey].name}`);
+            setCollectionData({
+              holders: [],
+              totalTokens: data.totalTokens || data.totalBurned || 0,
+              totalShares: data.totalBurned || 0,
+              summary: data.summary || {},
+            });
+            setLoading(false);
+            return;
+          }
+
+          setCollectionData({
+            holders: data.holders.map((holder) => ({
+              ...holder,
+              address: holder.address || holder.ownerAddress,
+            })) || [],
+            totalTokens: data.totalTokens || data.totalBurned || 0,
+            totalShares: data.totalBurned || 0,
+            summary: data.summary || {},
+          });
+          setLoading(false);
+          return;
+        } catch (error) {
+          console.error(`Attempt ${attempt} failed for ${apiKey} at ${url}:`, error);
+          if (attempt === retries && url === endpoints[endpoints.length - 1]) {
+            setError(error.message || `Failed to fetch data for ${config.nftContracts[apiKey].name}`);
+            setCollectionData({
+              holders: [],
+              totalTokens: 0,
+              totalShares: 0,
+              summary: {},
+            });
+            setLoading(false);
+          }
+        }
+      }
+    }
+  }, []);
+
+  const openSearchModal = async () => {
+    if (searchAddress && searchAddress.length === 42 && searchAddress.startsWith('0x')) {
+      await fetchSearchResults(searchAddress);
+      setIsSearchOpen(true);
+    }
+  };
+
+  const closeSearchModal = () => {
+    setIsSearchOpen(false);
+    setSearchAddress('');
+    setSearchResult({});
+  };
+
+  const handleBackgroundClick = (e) => {
+    if (e.target.classList.contains('modal-overlay')) {
+      closeSearchModal();
+    }
+  };
+
+  const handleChainSelect = (chain) => {
+    setSelectedChain(chain);
+    setSelectedCollection(null);
+    setCollectionData(null);
+  };
+
+  const handleCollectionSelect = (collection) => {
+    setSelectedCollection(collection);
+    fetchCollectionData(collection);
+  };
+
+  const availableCollections = Object.keys(config.nftContracts)
+    .filter(
+      (key) => !config.nftContracts[key].disabled && config.nftContracts[key].chain === selectedChain
+    )
+    .map((key) => ({
+      apiKey: key,
+      name: config.nftContracts[key].name,
+    }));
+
   return (
-    <NFTLayoutWrapper>
-      <main className={`flex-grow container page-content ${inter.className}`}>
-        <Suspense fallback={<div>Loading...</div>}>
-          {children}
-        </Suspense>
+    <>
+      <div className="container mx-auto py-4">
+        {/* Centered Search Box */}
+        <div className="flex justify-center mb-4">
+          <input
+            type="text"
+            value={searchAddress}
+            onChange={(e) => setSearchAddress(e.target.value)}
+            placeholder="Enter wallet address (0x...)"
+            className="px-4 py-2 bg-gray-800 text-gray-100 rounded-l-md focus:outline-none focus:ring-2 focus:ring-blue-600 w-64"
+          />
+          <button
+            onClick={openSearchModal}
+            disabled={!searchAddress || searchAddress.length !== 42 || !searchAddress.startsWith('0x')}
+            className="px-4 py-2 bg-blue-600 text-white rounded-r-md hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+          >
+            Search
+          </button>
+        </div>
+
+        {/* Chain Buttons */}
+        <div className="flex justify-center gap-4 mb-4">
+          {config.supportedChains.map((chain) => (
+            <button
+              key={chain}
+              onClick={() => handleChainSelect(chain)}
+              className={`px-4 py-2 rounded-md ${
+                selectedChain === chain
+                  ? 'bg-blue-700 text-white'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              } transition`}
+            >
+              {chain}
+            </button>
+          ))}
+        </div>
+
+        {/* NFT Collection Buttons */}
+        {selectedChain && (
+          <div className="flex justify-center flex-wrap gap-4 mb-4">
+            {availableCollections.length > 0 ? (
+              availableCollections.map(({ apiKey, name }) => (
+                <button
+                  key={apiKey}
+                  onClick={() => handleCollectionSelect(apiKey)}
+                  className={`px-4 py-2 rounded-md ${
+                    selectedCollection === apiKey
+                      ? 'bg-blue-700 text-white'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  } transition`}
+                >
+                  {name}
+                </button>
+              ))
+            ) : (
+              <p className="text-gray-100">No collections available for {selectedChain}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Holder Table for Selected Collection */}
+      <main className="flex-grow container page-content">
+        {selectedCollection && (
+          <div className="mb-4">
+            {loading ? (
+              <p className="text-body">Loading {config.nftContracts[selectedCollection].name} data...</p>
+            ) : error ? (
+              <p className="text-error">{error}</p>
+            ) : collectionData ? (
+              (() => {
+                const HolderTable = holderTableComponents[selectedCollection];
+                return (
+                  <HolderTable
+                    holders={collectionData.holders || []}
+                    contract={selectedCollection}
+                    loading={false}
+                    totalTokens={collectionData.totalTokens || 0}
+                    totalShares={collectionData.totalShares || 0}
+                    rewardToken={config.contractDetails[selectedCollection]?.rewardToken}
+                  />
+                );
+              })()
+            ) : (
+              <p className="text-body">No data available for ${config.nftContracts[selectedCollection].name}</p>
+            )}
+          </div>
+        )}
       </main>
-      <footer className="footer">
-        <p>© {new Date().getFullYear()} TitanXUtils. All rights reserved.</p>
-      </footer>
-    </NFTLayoutWrapper>
+
+      {/* Search Modal */}
+      {isSearchOpen && (
+        <SearchResultsModal
+          searchResult={searchResult}
+          searchAddress={searchAddress}
+          closeModal={closeSearchModal}
+          handleBackgroundClick={handleBackgroundClick}
+        />
+      )}
+    </>
   );
 }// app/nft/page.js
 'use client';
@@ -2946,7 +3250,8 @@ export async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     console.error(`[FetchCollectionData] [ERROR] ${apiKey}: ${error.message}, stack: ${error.stack}`);
     return { holders: [], totalTokens: 0, totalBurned: 0, error: error.message };
   }
-}import fs from 'fs/promises';
+}// lib/logger.js
+import fs from 'fs/promises';
 import path from 'path';
 import chalk from 'chalk';
 
@@ -2987,6 +3292,20 @@ export const logger = {
         console.log(chalk.cyan('[Logger] Wrote INFO log to:'), logFile);
       } catch (error) {
         console.error(chalk.red('[Logger] Failed to write INFO log:'), error.message);
+      }
+    }
+  },
+  warn: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [WARN] ${message}`;
+    console.log(chalk.yellow(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote WARN log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write WARN log:'), error.message);
       }
     }
   },
@@ -3135,10 +3454,12 @@ export function useNFTData(apiKey, pageSize) {
 import { useState, useEffect } from 'react';
 import { notFound } from 'next/navigation';
 import nextDynamic from 'next/dynamic';
+import Head from 'next/head'; // Add next/head for client-side metadata
 import config from '@/config';
 import LoadingIndicator from '@/components/LoadingIndicator';
 import { useNFTStore } from '@/app/store';
 import { HoldersResponseSchema } from '@/lib/schemas';
+import { use } from 'react';
 
 const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), { ssr: false });
 export const dynamic = 'force-dynamic';
@@ -3171,7 +3492,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     let page = 0;
     let totalPages = Infinity;
 
-    const maxPollTime = 180000; // 180 seconds
+    const maxPollTime = 180000;
     const startTime = Date.now();
     let progress = await pollProgress();
 
@@ -3205,7 +3526,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       console.log(`[NFTContractPage] [DEBUG] Response body: ${JSON.stringify(json, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
 
       if (json.isCachePopulating) {
-        return { isCachePopulating: true, progress }; // Trigger polling
+        return { isCachePopulating: true, progress };
       }
 
       const validation = HoldersResponseSchema.safeParse(json);
@@ -3261,7 +3582,8 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
 }
 
 export default function NFTContractPage({ params }) {
-  const { chain, contract } = params;
+  const resolvedParams = use(params);
+  const { chain, contract } = resolvedParams;
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -3336,36 +3658,34 @@ export default function NFTContractPage({ params }) {
     notFound();
   }
 
-  if (loading) {
-    return (
-      <div className="container page-content">
-        <h1 className="title mb-6">{contract} Collection</h1>
-        <LoadingIndicator
-          status={`Loading ${contract} data... ${progress ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`}
-          progress={progress}
-        />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="container page-content">
-        <h1 className="title mb-6">{contract} Collection</h1>
-        <p className="text-error">{error}</p>
-      </div>
-    );
-  }
+  // Dynamic metadata
+  const pageTitle = `${contract} Collection | TitanXUtils`;
+  const pageDescription = `NFT tracking for ${contract} on ${chain} in the TitanX ecosystem`;
 
   return (
-    <div className="container page-content">
-      <h1 className="title mb-6">{contract} Collection</h1>
-      <NFTPageWrapper
-        chain={chain}
-        contract={apiKey}
-        data={data}
-        rewardToken={config.contractDetails[apiKey]?.rewardToken}
-      />
-    </div>
+    <>
+      <Head>
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
+      </Head>
+      <div className="container page-content">
+        <h1 className="title mb-6">{contract} Collection</h1>
+        {loading ? (
+          <LoadingIndicator
+            status={`Loading ${contract} data... ${progress ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`}
+            progress={progress}
+          />
+        ) : error ? (
+          <p className="text-error">{error}</p>
+        ) : (
+          <NFTPageWrapper
+            chain={chain}
+            contract={apiKey}
+            data={data}
+            rewardToken={config.contractDetails[apiKey]?.rewardToken}
+          />
+        )}
+      </div>
+    </>
   );
 }

@@ -1,11 +1,11 @@
 // config.js
-import element280MainAbi from './abi/element280.json' assert { type: 'json' };
-import element280VaultAbi from './abi/element280Vault.json' assert { type: 'json' };
-import element369MainAbi from './abi/element369.json' assert { type: 'json' };
-import element369VaultAbi from './abi/element369Vault.json' assert { type: 'json' };
-import staxMainAbi from './abi/staxNFT.json' assert { type: 'json' };
-import staxVaultAbi from './abi/staxVault.json' assert { type: 'json' };
-import ascendantMainAbi from './abi/ascendantNFT.json' assert { type: 'json' };
+import element280MainAbi from './abi/element280.json' with { type: 'json' };
+import element280VaultAbi from './abi/element280Vault.json' with { type: 'json' };
+import element369MainAbi from './abi/element369.json' with { type: 'json' };
+import element369VaultAbi from './abi/element369Vault.json' with { type: 'json' };
+import staxMainAbi from './abi/staxNFT.json' with { type: 'json' };
+import staxVaultAbi from './abi/staxVault.json' with { type: 'json' };
+import ascendantMainAbi from './abi/ascendantNFT.json' with { type: 'json' };
 // E280 ABI placeholder (not deployed)
 const e280MainAbi = [];
 

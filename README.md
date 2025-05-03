@@ -266,81 +266,44 @@ curl "http://localhost:3000/api/holders/Ascendant"
   - Total Holders: 920 wallets ( as of now)
 
 
-cat app/api/holders/Ascendant/route.js app/api/holders/Ascendant/progress/route.js \
-app/api/holders/E280/route.js \
-app/api/holders/E280/progress/route.js \
-app/api/holders/Element369/route.js \
-app/api/holders/Element369/progress/route.js \
-app/store.js config.js app/api/utils.js > ./routes1.txt
 
-cat app/api/holders/Ascendant/route.js app/api/holders/Ascendant/progress/route.js \
-app/api/holders/E280/route.js \
-app/api/holders/E280/progress/route.js \
-app/api/holders/Element369/route.js \
-app/api/holders/Element369/progress/route.js \
-app/store.js config.js app/api/utils.js > ./routes1.txt
+=============
+Better concats
+=============
+cat package.json next.config.mjs jsconfig.json  \
+tailwind.config.js .env.local .env.development.local \
+lib/*  app/store.js config.js app/api/utils.js \
+.babelrc   jest.config.js > ./envs.txt
 
-cat app/api/holders/Element280/route.js \
-app/api/holders/Element280/progress/route.js \
-app/api/holders/Element280/validate-burned/route.js \
-app/api/holders/Stax/route.js \
-app/store.js config.js app/api/utils.js \
-app/api/holders/Stax/progress/route.js  lib/* > ./routes2.txt
+find ./tests .babelrc jest.config.js -type d \( -name node_modules -o -name .next \) -prune -false -o -type f -exec cat {} + > ./testing_code.txt
 
-cat \
-app/api/holders/\[contract\]/route.js \
-app/api/holders/\[contract\]/progress/route.js \
-app/api/holders/Element280/validate-burned/route.js \
-app/api/debug/route.js \
-app/api/init/* \
-app/store.js \
-config.js \
-app/api/utils.js \
-lib/* > ./routes3.txt
+find ./app/api ./lib  ./app/store.js -type d \( -name node_modules -o -name .next \) -prune -false -o -type f -exec cat {} + > ./server_code.txt
 
-cat components/*.js  components/*.jsx components/HolderTable/*.js config.js app/store.js  \
-app/page.js app/layout.js app/nft/layout.js app/nft/page.js  lib/* \
-app/nft/\[chain\]/\[contract\]/page.js   > ./ClientStuff.txt
+find  components lib app/nft app/mining app/auctions app/page.js app/layout.js app/page.js app/layout.js -type d \( -name node_modules -o -name .next -name ./app/api \) -prune -false -o -type f -exec cat {} + > ./client_code.txt
 
-cat package.json next.config.mjs jsconfig.json tailwind.config.js .env.local .env.development.local lib/*  app/store.js config.js app/api/utils.js > ./envs.txt
+find ./abi -type d \( -name node_modules -o -name .next \) -prune -false -o -type f -exec cat {} + > ./abis_code.txt
 
+
+clear; cat abis_code.txt
 clear; cat envs.txt
-clear; cat envs.txt  ./routes1.txt 
-clear; cat envs.txt ./routes2.txt
+clear; cat testing_code.txt
+clear; cat server_code.txt 
+clear; cat ClientStuff.txt
 
-clear;  cat ./routes3.txt 
-clear; cat envs.txt ./routes3.txt 
-clear; cat envs.txt ClientStuff.txt
-
-clear;npm run build
-
+=============
+server testing
+=============
 time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-time curl -X POST http://localhost:3000/api/holders/Stax;
-
 time curl -X POST http://localhost:3000/api/holders/element369;
-time curl -X POST http://localhost:3000/api/holders/element369;
-time curl -X POST http://localhost:3000/api/holders/element369;
-
-time curl -X POST http://localhost:3000/api/holders/element280;
-time curl -X POST http://localhost:3000/api/holders/element280;
-time curl -X POST http://localhost:3000/api/holders/element280;
-
-time curl -X POST http://localhost:3000/api/holders/ascendant;
-time curl -X POST http://localhost:3000/api/holders/ascendant;
-time curl -X POST http://localhost:3000/api/holders/ascendant;
-
 time curl -X POST http://localhost:3000/api/holders/e280;
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl -X POST http://localhost:3000/api/holders/ascendant;
 
+time curl -X POST http://localhost:3000/api/holders/Stax;
+time curl -X POST http://localhost:3000/api/holders/element369;
+time curl -X POST http://localhost:3000/api/holders/e280;
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl -X POST http://localhost:3000/api/holders/ascendant;
 
 time curl -X POST http://localhost:3000/api/holders/Stax;
 time curl -X POST http://localhost:3000/api/holders/element369;
@@ -355,26 +318,6 @@ curl http://localhost:3000/api/holders/element280/progress
 curl http://localhost:3000/api/holders/ascendant/progress
 
 
-route file basic structure
+given the testing and server code below can you help me complete all the testing code please?  ideally I'd end up with one script ( maybe called  backend.test.js) which calls all the other testing scripts to do a comprehensive one call test of all the backend data retieval, caching functionality
 
-import { NextResponse } from 'next/server';
-import { parseAbiItem, formatUnits } from 'viem';
-import pLimit from 'p-limit';
-import config from '@/config.js';
-import { client, retry, logger, getCache, setCache, saveCacheState, loadCacheState, batchMulticall, getOwnersForContract } from '@/app/api/utils';
-import { HoldersResponseSchema } from '@/lib/schemas';
-
-const limit = pLimit(5);
-
-// Helper functions
-async function getCacheState(contractKey) { ... }
-async function saveCacheStateContract(contractKey, cacheState) { ... }
-async function getNewEvents(contractKey, contractAddress, fromBlock, errorLog) { ... }
-async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, vaultAbi, cacheState) { ... }
-async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultAddress, vaultAbi, forceUpdate = false) { ... }
-
-// GET handler
-export async function GET(request, { params }) { ... }
-
-// POST handler
-export async function POST(request, { params }) { ... }
+code below

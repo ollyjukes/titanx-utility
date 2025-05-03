@@ -9,6 +9,8 @@ import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { useNFTStore } from '@/app/store';
 import { barChartOptions } from '@/lib/chartOptions';
+import { retry } from '@/app/api/utils/helpers.js'; // Updated import
+import { clientLogger } from '@/lib/clientLogger.js';
 
 // Dynamically import chart component
 const Bar = dynamic(() => import('react-chartjs-2').then(mod => mod.Bar), { ssr: false });
@@ -16,26 +18,12 @@ const Bar = dynamic(() => import('react-chartjs-2').then(mod => mod.Bar), { ssr:
 // Default timeout for fetches
 const DEFAULT_TIMEOUT_MS = 30000; // 30 seconds
 
-// Retry utility
-async function retry(fn, attempts = config.alchemy.maxRetries, delay = (retryCount) => Math.min(config.alchemy.batchDelayMs * 2 ** retryCount, config.alchemy.retryMaxDelayMs)) {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn();
-    } catch (error) {
-      console.error(`[NFTPage] [ERROR] Retry ${i + 1}/${attempts}: ${error.message}`);
-      if (i === attempts - 1) {
-        throw new Error(`Failed after ${attempts} attempts: ${error.message}`);
-      }
-      await new Promise(resolve => setTimeout(resolve, delay(i)));
-    }
-  }
-}
 
 // Fetch summary data for Element280
 async function fetchContractData() {
   const contractAddress = config.contractAddresses.element280.address;
   const vaultAddress = config.vaultAddresses.element280.address;
-  console.log(`[NFTPage] [INFO] Fetching contract data for Element280: contract=${contractAddress}, vault=${vaultAddress}`);
+  clientLogger.info('NFTPage', `Fetching contract data for Element280: contract=${contractAddress}, vault=${vaultAddress}`);
   if (!contractAddress || !vaultAddress) {
     throw new Error('Element280 contract or vault address not configured');
   }
@@ -59,7 +47,7 @@ async function fetchContractData() {
         ],
       })
     );
-    console.log(`[NFTPage] [DEBUG] multicall results: ${JSON.stringify(results, (k, v) => (typeof v === 'bigint' ? v.toString() : v), 2)}`);
+    clientLogger.info(`[NFTPage] [DEBUG] multicall results: ${JSON.stringify(results, (k, v) => (typeof v === 'bigint' ? v.toString() : v), 2)}`);
     const [totalSupply, tierCounts, multiplierPool, totalRewardPool] = results;
     if (totalSupply.status === 'failure') {
       throw new Error(`totalSupply call failed: ${totalSupply.error}`);
@@ -100,7 +88,7 @@ async function fetchContractData() {
             }
           }
         }
-        console.log(`[NFTPage] [DEBUG] Burned distribution: ${burnedDistribution}, total events: ${events.length}, totalBurned: ${totalBurned}`);
+        clientLogger.info(`[NFTPage] [DEBUG] Burned distribution: ${burnedDistribution}, total events: ${events.length}, totalBurned: ${totalBurned}`);
       } else {
         console.error(`[NFTPage] [ERROR] Failed to fetch burned distribution: ${res.status}`);
       }
@@ -133,7 +121,7 @@ const holderTableComponents = {
 };
 
 export default function NFTPage({ chain, contract }) {
-  console.log(`[NFTPage] [INFO] Received props: chain=${chain}, contract=${contract}`);
+  clientLogger.info(`[NFTPage] [INFO] Received props: chain=${chain}, contract=${contract}`);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -154,7 +142,7 @@ export default function NFTPage({ chain, contract }) {
   }, []);
 
   const contractId = contract ? contract.toLowerCase() : null;
-  console.log(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
+  clientLogger.info(`[NFTPage] [INFO] Derived contractId: ${contractId}`);
 
   const contractConfig = config.contractDetails[contractId] || {};
   const { name, apiEndpoint, rewardToken, pageSize, disabled } = contractConfig;
@@ -175,14 +163,14 @@ export default function NFTPage({ chain, contract }) {
       let progressData = { isPopulating: false, phase: 'Idle', progressPercentage: 0, totalOwners: 0 };
       if (isElement280) {
         try {
-          console.log(`[NFTPage] [INFO] Fetching progress from ${apiEndpoint}/progress`);
+          clientLogger.info(`[NFTPage] [INFO] Fetching progress from ${apiEndpoint}/progress`);
           const res = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
           if (!res.ok) {
             console.error(`[NFTPage] [ERROR] Progress fetch failed: ${res.status}`);
           } else {
             progressData = await res.json();
             if (progressData.totalOwners === 0 && progressData.phase === 'Idle') {
-              console.log(`[NFTPage] [INFO] Stale progress, triggering cache refresh`);
+              clientLogger.info(`[NFTPage] [INFO] Stale progress, triggering cache refresh`);
               await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
               const retryRes = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
               if (retryRes.ok) progressData = await retryRes.json();
@@ -216,7 +204,7 @@ export default function NFTPage({ chain, contract }) {
           totalRewardPool: 0,
           burnedDistribution: [0, 0, 0, 0, 0, 0],
         };
-        console.log(`[NFTPage] [INFO] Using placeholder data for non-Element280 contract: ${contractId}`);
+        clientLogger.info(`[NFTPage] [INFO] Using placeholder data for non-Element280 contract: ${contractId}`);
       }
 
       if (isClient) {
@@ -235,15 +223,15 @@ export default function NFTPage({ chain, contract }) {
     const cacheKey = `holders_${contractId}`;
     const cachedData = isClient ? effectiveGetCache(cacheKey) : null;
     if (cachedData) {
-      console.log(`[NFTPage] [INFO] Cache hit for ${cacheKey}, holders: ${cachedData.holders.length}`);
+      clientLogger.info(`[NFTPage] [INFO] Cache hit for ${cacheKey}, holders: ${cachedData.holders.length}`);
       setData(prev => ({ ...prev, holders: cachedData.holders, summary: cachedData.summary }));
       setLoading(false);
       return;
     }
-    console.log(`[NFTPage] [INFO] Cache miss for ${cacheKey}, fetching holders`);
+    clientLogger.info(`[NFTPage] [INFO] Cache miss for ${cacheKey}, fetching holders`);
 
     try {
-      console.log(`[NFTPage] [INFO] Starting holders fetch for ${contractId} at ${apiEndpoint}`);
+      clientLogger.info(`[NFTPage] [INFO] Starting holders fetch for ${contractId} at ${apiEndpoint}`);
 
       let allHolders = [];
       let totalTokens = 0;
@@ -265,7 +253,7 @@ export default function NFTPage({ chain, contract }) {
 
       let progressData = await fetch(`${apiEndpoint}/progress`, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) }).then(res => res.json()).catch(() => ({}));
       if (progressData.phase === 'Idle' || progressData.totalOwners === 0) {
-        console.log(`[NFTPage] [INFO] Cache is Idle or empty, triggering POST`);
+        clientLogger.info(`[NFTPage] [INFO] Cache is Idle or empty, triggering POST`);
         await fetch(apiEndpoint, { method: 'POST', cache: 'force-cache' });
       }
 
@@ -277,7 +265,7 @@ export default function NFTPage({ chain, contract }) {
         while (attempts < maxAttempts && !success) {
           try {
             const url = `${apiEndpoint}?page=${page}&pageSize=${effectivePageSize}`;
-            console.log(`[NFTPage] [INFO] Fetching ${contractId} page ${page} at ${url}`);
+            clientLogger.info(`[NFTPage] [INFO] Fetching ${contractId} page ${page} at ${url}`);
             const res = await fetch(url, { cache: 'force-cache', signal: AbortSignal.timeout(Number.isFinite(config.alchemy.timeoutMs) ? config.alchemy.timeoutMs : DEFAULT_TIMEOUT_MS) });
             if (!res.ok) {
               const errorText = await res.text();
@@ -286,7 +274,7 @@ export default function NFTPage({ chain, contract }) {
             }
 
             const json = await res.json();
-            console.log(`[NFTPage] [DEBUG] API response for ${url}: holders=${json.holders?.length}, totalTokens=${json.totalTokens}`);
+            clientLogger.info(`[NFTPage] [DEBUG] API response for ${url}: holders=${json.holders?.length}, totalTokens=${json.totalTokens}`);
             if (json.error) {
               console.error(`[NFTPage] [ERROR] API error for ${url}: ${json.error}`);
               throw new Error(json.error);
@@ -315,7 +303,7 @@ export default function NFTPage({ chain, contract }) {
             page++;
             success = true;
             if (!newHolders.length && json.totalPages === 0) {
-              console.log(`[NFTPage] [INFO] Empty holders with zero pages, accepting as valid`);
+              clientLogger.info(`[NFTPage] [INFO] Empty holders with zero pages, accepting as valid`);
               break;
             }
           } catch (err) {
@@ -346,7 +334,7 @@ export default function NFTPage({ chain, contract }) {
         burnedNfts,
       };
 
-      console.log(`[NFTPage] [INFO] Fetched ${allHolders.length} holders for ${contractId}`);
+      clientLogger.info(`[NFTPage] [INFO] Fetched ${allHolders.length} holders for ${contractId}`);
       if (isClient) {
         effectiveSetCache(cacheKey, holdersData);
       }
@@ -365,7 +353,7 @@ export default function NFTPage({ chain, contract }) {
       setIsInvalidContract(true);
       setLoading(false);
     } else if (disabled) {
-      console.log(`[NFTPage] [INFO] Contract ${name} is disabled`);
+      clientLogger.info(`[NFTPage] [INFO] Contract ${name} is disabled`);
       setError(`${name} is not yet supported (contract not deployed).`);
       setLoading(false);
     } else {

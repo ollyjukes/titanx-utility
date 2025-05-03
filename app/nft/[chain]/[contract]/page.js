@@ -2,10 +2,12 @@
 import { useState, useEffect } from 'react';
 import { notFound } from 'next/navigation';
 import nextDynamic from 'next/dynamic';
+import Head from 'next/head'; // Add next/head for client-side metadata
 import config from '@/config';
 import LoadingIndicator from '@/components/LoadingIndicator';
 import { useNFTStore } from '@/app/store';
 import { HoldersResponseSchema } from '@/lib/schemas';
+import { use } from 'react';
 
 const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), { ssr: false });
 export const dynamic = 'force-dynamic';
@@ -38,7 +40,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
     let page = 0;
     let totalPages = Infinity;
 
-    const maxPollTime = 180000; // 180 seconds
+    const maxPollTime = 180000;
     const startTime = Date.now();
     let progress = await pollProgress();
 
@@ -72,7 +74,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       console.log(`[NFTContractPage] [DEBUG] Response body: ${JSON.stringify(json, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
 
       if (json.isCachePopulating) {
-        return { isCachePopulating: true, progress }; // Trigger polling
+        return { isCachePopulating: true, progress };
       }
 
       const validation = HoldersResponseSchema.safeParse(json);
@@ -128,7 +130,8 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
 }
 
 export default function NFTContractPage({ params }) {
-  const { chain, contract } = params;
+  const resolvedParams = use(params);
+  const { chain, contract } = resolvedParams;
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -203,36 +206,34 @@ export default function NFTContractPage({ params }) {
     notFound();
   }
 
-  if (loading) {
-    return (
-      <div className="container page-content">
-        <h1 className="title mb-6">{contract} Collection</h1>
-        <LoadingIndicator
-          status={`Loading ${contract} data... ${progress ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`}
-          progress={progress}
-        />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="container page-content">
-        <h1 className="title mb-6">{contract} Collection</h1>
-        <p className="text-error">{error}</p>
-      </div>
-    );
-  }
+  // Dynamic metadata
+  const pageTitle = `${contract} Collection | TitanXUtils`;
+  const pageDescription = `NFT tracking for ${contract} on ${chain} in the TitanX ecosystem`;
 
   return (
-    <div className="container page-content">
-      <h1 className="title mb-6">{contract} Collection</h1>
-      <NFTPageWrapper
-        chain={chain}
-        contract={apiKey}
-        data={data}
-        rewardToken={config.contractDetails[apiKey]?.rewardToken}
-      />
-    </div>
+    <>
+      <Head>
+        <title>{pageTitle}</title>
+        <meta name="description" content={pageDescription} />
+      </Head>
+      <div className="container page-content">
+        <h1 className="title mb-6">{contract} Collection</h1>
+        {loading ? (
+          <LoadingIndicator
+            status={`Loading ${contract} data... ${progress ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`}
+            progress={progress}
+          />
+        ) : error ? (
+          <p className="text-error">{error}</p>
+        ) : (
+          <NFTPageWrapper
+            chain={chain}
+            contract={apiKey}
+            data={data}
+            rewardToken={config.contractDetails[apiKey]?.rewardToken}
+          />
+        )}
+      </div>
+    </>
   );
 }
