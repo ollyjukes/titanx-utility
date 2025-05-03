@@ -10,6 +10,7 @@ export default function Mining() {
     { name: 'Hyper', url: 'https://app.hyper.win/mine' },
     { name: 'Hydra', url: 'https://app.hydra.win/mine' },
     { name: 'Helios', url: 'https://app.helios.win/mine' },
+    { name: 'Bonfire', url: 'https://www.bonfire.win/dapp' },
     { name: 'Eden', url: 'https://www.eden.win/mine' },
     { name: 'Lotus', url: 'https://lotus.win/mine' },
   ];
