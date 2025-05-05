@@ -32,20 +32,24 @@ yarn-error.log*
 .pnpm-debug.log*
 *.log
 
+# local development files
+/log/               # Ignore all files in the log/ directory
+/cache/             # Ignore all files in the cache/ directory
+*.txt               # Ignore all .txt files in the root directory
+
 # env files
 .env*               # Ignore .env files in root
-env/.env*           # Ignore .env files in env/
-env/*.local         # Ignore .local files in env/
 
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts*.sqlite
+next-env.d.ts
+*.sqlite
 *.db
-output.txt
 scripts/backups/
 
+# cache files (redundant with /cache/ but kept for specificity)
 cache_*.json
 burned_events_*.json
