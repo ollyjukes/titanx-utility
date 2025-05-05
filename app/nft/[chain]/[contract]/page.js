@@ -6,7 +6,7 @@ import nextDynamic from 'next/dynamic';
 import config from '@/contracts/config';
 import LoadingIndicator from '@/client/components/LoadingIndicator';
 import { useNFTStore } from '@/app/store';
-import { HoldersResponseSchema } from '@/client/lib/schemas';
+import { HoldersResponseSchema } from '@/app/lib/schemas';
 import * as React from 'react';
 import { z } from 'zod'; // Import Zod for schema validation
 

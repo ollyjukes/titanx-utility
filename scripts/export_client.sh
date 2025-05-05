@@ -19,8 +19,8 @@ included_files=$(find ./client -type f | sort)
 
   echo -e "\n\n================= Includes the following files under ./app ================="
   echo "$included_files"
-} > client_dir_output.txt
+} > scripts/out/client_dir_output.txt
 
 clear
-cat client_dir_output.txt
+cat scripts/out/client_dir_output.txt
 

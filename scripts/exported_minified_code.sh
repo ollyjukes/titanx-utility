@@ -43,7 +43,7 @@ output="minified_output.txt"
   else
     echo -e "\n[Missing .env.local]"
   fi
-} > "$output"
+} > scripts/out/$output
 
 clear
-cat "$output"
+cat scripts/out/$output

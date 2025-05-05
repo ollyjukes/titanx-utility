@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { createPublicClient, http } from 'viem';
 import { mainnet } from 'viem/chains';
 import { useNFTStore } from '@/app/store';
-import { barChartOptions } from '@/client/lib/chartOptions';
+import { barChartOptions } from '@/app/lib/chartOptions';
 
 // Dynamically import chart component
 const Bar = dynamic(() => import('react-chartjs-2').then(mod => mod.Bar), { ssr: false });

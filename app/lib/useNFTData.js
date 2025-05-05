@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNFTStore } from '@/app/store';
 import config from '@/contracts/config';
-import { HoldersResponseSchema } from '@/client/lib/schemas';
+import { HoldersResponseSchema } from '@/app/lib/schemas';
 
 async function fetchNFTData(apiKey, apiEndpoint, pageSize, page = 0) {
   if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {

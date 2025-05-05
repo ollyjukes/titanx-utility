@@ -33,7 +33,7 @@ EOF
 
   echo -e "\n\n================= Includes the following files under ./abi ================="
   echo "$included_files"
-} > export_nft_abi_api.txt
+} > scripts/out/export_nft_abi_api.txt
 
 clear
-cat export_nft_abi_api.txt
+cat scripts/out/export_nft_abi_api.txt

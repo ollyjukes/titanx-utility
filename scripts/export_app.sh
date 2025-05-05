@@ -4,7 +4,8 @@
 cd "$(dirname "$0")/.." || exit 1
 
 # Collect all files (not just .js) from ./app
-included_files=$(find ./app -not -path "./app/api/*" -not -path "./app/lib/*" -type f | sort)
+included_files=$(find ./app   -type f | sort)
+#included_files=$(find ./app -not -path "./app/api/*"  -type f | sort)
 
 {
   echo "================= Includes the following files under ./app ================="
@@ -19,8 +20,8 @@ included_files=$(find ./app -not -path "./app/api/*" -not -path "./app/lib/*" -t
 
   echo -e "\n\n================= Includes the following files under ./app ================="
   echo "$included_files"
-} > app_output.txt
+} > scripts/out/app_output.txt
 
 clear
-cat app_output.txt
+cat scripts/out/app_output.txt
 

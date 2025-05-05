@@ -1,5 +1,5 @@
 import config from '@/contracts/config';
-import { HoldersResponseSchema, ProgressResponseSchema } from '@/client/lib/schemas';
+import { HoldersResponseSchema, ProgressResponseSchema } from '@/app/lib/schemas';
 
 // Debounce utility to prevent concurrent POST requests
 const debounce = (func, wait) => {

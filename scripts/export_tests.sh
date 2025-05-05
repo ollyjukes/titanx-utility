@@ -19,8 +19,8 @@ included_files=$(find ./tests -type f | sort)
 
   echo -e "\n\n================= Includes the following files under ./app ================="
   echo "$included_files"
-} > tests_output.txt
+} > scripts/out/tests_output.txt
 
 clear
-cat tests_output.txt
+cat scripts/out/tests_output.txt
 

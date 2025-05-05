@@ -4,7 +4,7 @@ import { parseAbiItem, formatUnits, getAddress } from 'viem';
 import pLimit from 'p-limit';
 import config from '@/contracts/config.js';
 import { client, retry, logger, getCache, setCache, saveCacheState, loadCacheState, batchMulticall, getOwnersForContract, validateContract } from '@/app/api/utils';
-import { HoldersResponseSchema } from '@/client/lib/schemas';
+import { HoldersResponseSchema } from '@/app/lib/schemas';
 
 const limit = pLimit(5);
 

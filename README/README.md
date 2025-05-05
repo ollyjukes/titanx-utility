@@ -323,6 +323,20 @@ given the testing and server code below can you help me complete all the testing
 code below
 
 ==========================
+GIT
+==========================
+git branch
+git checkout dev
+git add .
+git commit -m "comment"
+git push origin dev
+
+Remove from git
+ git rm -r --cached cache/
+ git status
+
+
+==========================
 New structure concats
 ==========================
 

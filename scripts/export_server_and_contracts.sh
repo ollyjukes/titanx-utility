@@ -19,8 +19,8 @@ included_files=$(find app/api app/lib ./contracts -type f -name "*.js" | sort)
 
   echo -e "\n\n================= Includes the following JS files under ./server and ./contracts ================="
   echo "$included_files"
-} > server_and_contracts_output.txt
+} > scripts/out/server_and_contracts_output.txt
 
 clear
-cat server_and_contracts_output.txt
+cat scripts/out/server_and_contracts_output.txt
 

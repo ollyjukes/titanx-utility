@@ -46,7 +46,7 @@ cd "$(dirname "$0")/.." || exit 1
     -not -name "package-lock.json" \
     -not -name "config.js" \
     -print
-} > config_env_output.txt
+} > scripts/out/config_env_output.txt
 
 clear
-cat config_env_output.txt
+cat scripts/out/config_env_output.txt
