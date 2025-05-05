@@ -302,7 +302,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_burned', error: error.message });
       }
       totalBurned = burnedCountContract;
-      totalTokens = totalSupply;
+      totalTokens = totalSupply - totalBurned; // Initialize with live tokens
     }
 
     cacheState.progressState.step = 'fetching_holders';
@@ -321,6 +321,11 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         logger.debug('utils', `Filtered owners: ${filteredOwners.length}`, 'eth', contractKey);
       }
 
+      // Reset tokenOwnerMap and totalTokens to avoid stale data
+      tokenOwnerMap.clear();
+      totalTokens = 0;
+      const seenTokenIds = new Set();
+
       filteredOwners.forEach((owner) => {
         if (!owner.ownerAddress) return;
         let wallet;
@@ -334,12 +339,18 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         owner.tokenBalances.forEach((tb) => {
           if (!tb.tokenId) return;
           const tokenId = Number(tb.tokenId);
+          if (seenTokenIds.has(tokenId)) {
+            logger.warn('utils', `Duplicate tokenId ${tokenId} for wallet ${wallet}`, 'eth', contractKey);
+            errorLog.push({ timestamp: new Date().toISOString(), phase: 'process_token', tokenId, wallet, error: 'Duplicate tokenId' });
+            return;
+          }
+          seenTokenIds.add(tokenId);
           tokenOwnerMap.set(tokenId, wallet);
           totalTokens++;
         });
       });
       if (!config.debug.suppressDebug) {
-        logger.debug('utils', `Total tokens (Alchemy): ${totalTokens}`, 'eth', contractKey);
+        logger.debug('utils', `Total tokens (Alchemy): ${totalTokens}, unique tokenIds: ${seenTokenIds.size}`, 'eth', contractKey);
       }
     } catch (error) {
       logger.warn('utils', `Failed to fetch owners via getOwnersForContract: ${error.message}, falling back to Transfer events`, 'eth', contractKey);
@@ -347,6 +358,10 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
 
       const fromBlock = BigInt(config.getDeploymentBlocks()[contractKey]?.block || 0);
       const toBlock = currentBlock;
+      tokenOwnerMap.clear();
+      totalTokens = 0;
+      const seenTokenIds = new Set();
+
       const transferLogs = await retry(
         async () => {
           const logs = await client.getLogs({
@@ -368,18 +383,23 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         if (to === burnAddress.toLowerCase()) {
           totalBurned += 1;
           tokenOwnerMap.delete(tokenId);
+          seenTokenIds.delete(tokenId);
           continue;
         }
 
         if (from === '0x0000000000000000000000000000000000000000') {
-          tokenOwnerMap.set(tokenId, to);
-          totalTokens++;
+          if (!seenTokenIds.has(tokenId)) {
+            tokenOwnerMap.set(tokenId, to);
+            seenTokenIds.add(tokenId);
+            totalTokens++;
+          }
         } else {
           tokenOwnerMap.set(tokenId, to);
+          seenTokenIds.add(tokenId);
         }
       }
       if (!config.debug.suppressDebug) {
-        logger.debug('utils', `Total tokens (Transfer events): ${totalTokens}`, 'eth', contractKey);
+        logger.debug('utils', `Total tokens (Transfer events): ${totalTokens}, unique tokenIds: ${seenTokenIds.size}`, 'eth', contractKey);
       }
     }
   } else {
@@ -403,6 +423,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
       );
 
+      const seenTokenIds = new Set();
       for (const log of transferLogs) {
         const from = log.args.from.toLowerCase();
         const to = log.args.to.toLowerCase();
@@ -411,6 +432,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         if (to === burnAddress.toLowerCase()) {
           totalBurned += 1;
           tokenOwnerMap.delete(tokenId);
+          seenTokenIds.delete(tokenId);
           const wallet = tokenOwnerMap.get(tokenId);
           if (wallet) {
             const holder = holdersMap.get(wallet);
@@ -424,10 +446,14 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         }
 
         if (from === '0x0000000000000000000000000000000000000000') {
-          tokenOwnerMap.set(tokenId, to);
-          totalTokens++;
+          if (!seenTokenIds.has(tokenId)) {
+            tokenOwnerMap.set(tokenId, to);
+            seenTokenIds.add(tokenId);
+            totalTokens++;
+          }
         } else {
           tokenOwnerMap.set(tokenId, to);
+          seenTokenIds.add(tokenId);
         }
 
         const toHolder = holdersMap.get(to) || {
@@ -631,7 +657,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       totalLockedAscendant += lockedAscendant;
     }
 
-    let tier = 0;
+    let tier = 1;
     const tierResult = tierResults[i];
     if (!config.debug.suppressDebug) {
       logger.debug('utils', `Raw tierResult for token ${tokenId}: status=${tierResult.status}, result=${safeStringify(tierResult.result)}`, 'eth', contractKey);
@@ -640,7 +666,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     if (tierResult.status === 'success') {
       if (contractKey === 'ascendant') {
         const result = tierResult.result;
-        tier = Array.isArray(result) && result[1] ? Number(result[1]) : 0; // Extract tier from attributes[1]
+        tier = Array.isArray(result) && result[1] ? Number(result[1]) : 1;
         if (!config.debug.suppressDebug) {
           logger.debug('utils', `Parsed tier for token ${tokenId} (ascendant): tier=${tier}, resultType=${typeof result}, resultLength=${Array.isArray(result) ? result.length : 'N/A'}`, 'eth', contractKey);
         }
@@ -691,19 +717,23 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       ...(contractKey === 'ascendant' ? { shares: 0, lockedAscendant: 0, pendingDay8: 0, pendingDay28: 0, pendingDay90: 0, claimableRewards: 0 } : {})
     };
 
-    if (!holder.tokenIds.includes(tokenId)) {
-      holder.tokenIds.push(tokenId);
-      holder.total += 1;
-      holder.tiers[tier - 1] += 1;
-      holder.multiplierSum += config.nftContracts[contractKey]?.tiers?.[tier]?.multiplier || tier;
-      if (contractKey === 'ascendant') {
-        holder.shares += shares;
-        holder.lockedAscendant += lockedAscendant;
-      }
-      holdersMap.set(wallet, holder);
-      if (!config.debug.suppressDebug) {
-        logger.debug('utils', `Assigned tier ${tier} to token ${tokenId}, wallet ${wallet}, multiplier=${config.nftContracts[contractKey]?.tiers?.[tier]?.multiplier || tier}`, 'eth', contractKey);
-      }
+    if (holder.tokenIds.includes(tokenId)) {
+      logger.warn('utils', `Duplicate tokenId ${tokenId} for wallet ${wallet} in holdersMap`, 'eth', contractKey);
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'build_holders', tokenId, wallet, error: 'Duplicate tokenId in holdersMap' });
+      return;
+    }
+
+    holder.tokenIds.push(tokenId);
+    holder.total += 1;
+    holder.tiers[tier - 1] += 1;
+    holder.multiplierSum += config.nftContracts[contractKey]?.tiers?.[tier]?.multiplier || tier;
+    if (contractKey === 'ascendant') {
+      holder.shares += shares;
+      holder.lockedAscendant += lockedAscendant;
+    }
+    holdersMap.set(wallet, holder);
+    if (!config.debug.suppressDebug) {
+      logger.debug('utils', `Assigned tier ${tier} to token ${tokenId}, wallet ${wallet}, multiplier=${config.nftContracts[contractKey]?.tiers?.[tier]?.multiplier || tier}`, 'eth', contractKey);
     }
   });
 
