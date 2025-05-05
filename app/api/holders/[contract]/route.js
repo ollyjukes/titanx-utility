@@ -152,6 +152,13 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   let holdersMap = new Map();
   let totalBurned = cacheState.totalBurned || 0;
   let errorLog = cacheState.progressState.errorLog || [];
+  let totalLockedAscendant = 0;
+  let totalShares = 0;
+  let toDistributeDay8 = 0;
+  let toDistributeDay28 = 0;
+  let toDistributeDay90 = 0;
+  let totalTokens = 0;
+  let tokenOwnerMap = new Map();
 
   cacheState.progressState.step = 'checking_cache';
   await saveCacheStateContract(contractKey, cacheState);
@@ -178,20 +185,15 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     errorLog.push({ timestamp: new Date().toISOString(), phase: 'config', error: `Invalid maxTier=0`, details: { contractTiers: safeStringify(contractTiers) } });
   }
 
+  // Initialize rarityDistribution for ascendant (3 types: Common, Rare, Legendary)
+  let rarityDistribution = contractKey === 'ascendant' ? Array(3).fill(0) : [];
+
   // Check cache validity
   const cacheValid = !forceUpdate &&
     cacheState.lastProcessedBlock &&
     cacheState.progressState.step === 'completed' &&
     !cacheState.isPopulating &&
     (Number(currentBlock) - cacheState.lastProcessedBlock < config.cache.blockThreshold);
-
-  let tokenOwnerMap = new Map();
-  let totalTokens = 0;
-  let totalLockedAscendant = 0;
-  let totalShares = 0;
-  let toDistributeDay8 = 0;
-  let toDistributeDay28 = 0;
-  let toDistributeDay90 = 0;
 
   if (cacheValid) {
     logger.info('utils', `Using existing cache for ${contractKey}, lastProcessedBlock: ${cacheState.lastProcessedBlock}`, 'eth', contractKey);
@@ -210,6 +212,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
           toDistributeDay8 = cacheState.globalMetrics.toDistributeDay8 || 0;
           toDistributeDay28 = cacheState.globalMetrics.toDistributeDay28 || 0;
           toDistributeDay90 = cacheState.globalMetrics.toDistributeDay90 || 0;
+          rarityDistribution = cacheState.globalMetrics.rarityDistribution || Array(3).fill(0);
         }
         if (!config.debug.suppressDebug) {
           logger.debug('utils', `Loaded ${holdersMap.size} holders from cache, totalTokens: ${totalTokens}`, 'eth', contractKey);
@@ -302,7 +305,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_burned', error: error.message });
       }
       totalBurned = burnedCountContract;
-      totalTokens = totalSupply - totalBurned; // Initialize with live tokens
+      totalTokens = totalSupply - totalBurned;
     }
 
     cacheState.progressState.step = 'fetching_holders';
@@ -321,7 +324,6 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         logger.debug('utils', `Filtered owners: ${filteredOwners.length}`, 'eth', contractKey);
       }
 
-      // Reset tokenOwnerMap and totalTokens to avoid stale data
       tokenOwnerMap.clear();
       totalTokens = 0;
       const seenTokenIds = new Set();
@@ -403,7 +405,6 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       }
     }
   } else {
-    // Incremental update: Fetch new Transfer events since lastProcessedBlock
     const fromBlock = BigInt(cacheState.lastProcessedBlock || config.getDeploymentBlocks()[contractKey]?.block || 0);
     const toBlock = currentBlock;
     if (fromBlock < toBlock) {
@@ -514,14 +515,15 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         toDistributeDay8: 0,
         toDistributeDay28: 0,
         toDistributeDay90: 0,
-        pendingRewards: 0
+        pendingRewards: 0,
+        rarityDistribution: Array(3).fill(0)
       } : {})
     };
     await saveCacheStateContract(contractKey, cacheState);
     if (!config.debug.suppressDebug) {
       logger.debug('utils', `No tokens found, returning empty holdersMap`, 'eth', contractKey);
     }
-    return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+    return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog, rarityDistribution };
   }
 
   cacheState.progressState.step = contractKey === 'ascendant' ? 'fetching_records' : 'fetching_tiers';
@@ -677,9 +679,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       if (contractKey === 'ascendant') {
         const result = tierResult.result;
         if (Array.isArray(result) && result.length >= 3) {
-          rarityNumber = Number(result[0]) || 0; // rarityNumber from attributes[0]
-          tier = Number(result[1]) || 1; // tier from attributes[1]
-          rarity = Number(result[2]) || 0; // rarity from attributes[2]
+          rarityNumber = Number(result[0]) || 0;
+          tier = Number(result[1]) || 1;
+          rarity = Number(result[2]) || 0;
           if (!config.debug.suppressDebug) {
             logger.debug('utils', `Parsed attributes for token ${tokenId} (ascendant): tier=${tier}, rarityNumber=${rarityNumber}, rarity=${rarity}, result=${safeStringify(result)}`, 'eth', contractKey);
           }
@@ -718,6 +720,20 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
           rarityNumber = 0;
           rarity = 0;
         }
+      }
+
+      // Increment rarityDistribution for ascendant
+      if (contractKey === 'ascendant' && rarity >= 0 && rarity < rarityDistribution.length) {
+        rarityDistribution[rarity] += 1;
+      } else if (contractKey === 'ascendant') {
+        logger.warn('utils', `Invalid rarity for token ${tokenId}: rarity=${rarity}, maxRarity=${rarityDistribution.length - 1}`, 'eth', contractKey);
+        errorLog.push({
+          timestamp: new Date().toISOString(),
+          phase: 'fetch_rarity',
+          tokenId,
+          wallet,
+          error: `Invalid rarity ${rarity}`
+        });
       }
     } else {
       logger.error('utils', `Failed to fetch tier for token ${tokenId}: ${tierResult.error || 'unknown error'}`, 'eth', contractKey);
@@ -824,6 +840,9 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   });
   if (!config.debug.suppressDebug) {
     logger.debug('utils', `Tier distribution for ${contractKey}: ${safeStringify(tierDistribution)}`, 'eth', contractKey);
+    if (contractKey === 'ascendant') {
+      logger.debug('utils', `Rarity distribution for ${contractKey}: ${safeStringify(rarityDistribution)}`, 'eth', contractKey);
+    }
   }
 
   holderList.sort((a, b) => (contractKey === 'ascendant' ? b.shares - a.shares : b.multiplierSum - a.multiplierSum) || b.total - a.total);
@@ -838,7 +857,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   cacheState.progressState.processedNfts = cacheState.progressState.totalNfts;
   cacheState.progressState.processedTiers = cacheState.progressState.totalTiers;
   cacheState.progressState.error = null;
-  cacheState.progressState.errorLog = []; // Clear errorLog on success
+  cacheState.progressState.errorLog = [];
   cacheState.globalMetrics = {
     ...(contractKey === 'element280' || contractKey === 'stax' || contractKey === 'ascendant' ? { totalMinted: totalTokens + totalBurned } : {}),
     totalLive: totalTokens,
@@ -850,14 +869,15 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       toDistributeDay8,
       toDistributeDay28,
       toDistributeDay90,
-      pendingRewards: toDistributeDay8 + toDistributeDay28 + toDistributeDay90
+      pendingRewards: toDistributeDay8 + toDistributeDay28 + toDistributeDay90,
+      rarityDistribution
     } : {})
   };
   await saveCacheStateContract(contractKey, cacheState);
   await setCache(`${contractKey}_holders`, { holders: holderList, totalBurned, timestamp: Date.now() }, 0, contractKey);
   logger.info('utils', `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}`, 'eth', contractKey);
 
-  return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog };
+  return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog, rarityDistribution };
 }
 
 // Populate holders map cache
@@ -985,8 +1005,11 @@ export async function GET(request, { params }) {
         tierDistribution: cachedData.holders.reduce((acc, h) => {
           h.tiers.forEach((count, i) => acc[i] = (acc[i] || 0) + count);
           return acc;
-        }, []),
+        }, Array(config.nftContracts[contractKey]?.tiers ? Object.keys(config.nftContracts[contractKey].tiers).length : 1).fill(0)),
         multiplierPool: cachedData.holders.reduce((sum, h) => sum + h.multiplierSum, 0),
+        ...(contractKey === 'ascendant' ? {
+          rarityDistribution: cacheState.globalMetrics.rarityDistribution || Array(3).fill(0)
+        } : {})
       },
       globalMetrics: cacheState.globalMetrics || {},
     };
@@ -1019,8 +1042,11 @@ export async function GET(request, { params }) {
       tierDistribution: holders.reduce((acc, h) => {
         h.tiers.forEach((count, i) => acc[i] = (acc[i] || 0) + count);
         return acc;
-      }, []),
+      }, Array(config.nftContracts[contractKey]?.tiers ? Object.keys(config.nftContracts[contractKey].tiers).length : 1).fill(0)),
       multiplierPool: holders.reduce((sum, h) => sum + h.multiplierSum, 0),
+      ...(contractKey === 'ascendant' ? {
+        rarityDistribution: cacheState.globalMetrics.rarityDistribution || Array(3).fill(0)
+      } : {})
     },
     globalMetrics: cacheState.globalMetrics || {},
   };
