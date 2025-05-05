@@ -9,14 +9,17 @@ contracts_files=$(find ./contracts -type f | sort)
 # Explicit list of ABI files
 abi_files=$(cat <<EOF
 ./abi/ascendantNFT.json
-./abi/element280.json
-./abi/element280Vault.json
-./abi/element369.json
-./abi/element369Vault.json
-./abi/staxVault.json
-./abi/staxNFT.json
+
 EOF
 )
+
+#./abi/element280.json
+#./abi/element280Vault.json
+#./abi/element369.json
+#./abi/element369Vault.json
+#./abi/staxVault.json
+#./abi/staxNFT.json
+
 
 {
   echo "================= Includes the following files under ./contracts ================="

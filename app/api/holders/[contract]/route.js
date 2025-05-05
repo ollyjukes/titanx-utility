@@ -464,7 +464,15 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
           multiplierSum: 0,
           ...(contractKey === 'element369' ? { infernoRewards: 0, fluxRewards: 0, e280Rewards: 0 } : {}),
           ...(contractKey === 'element280' || contractKey === 'stax' ? { claimableRewards: 0 } : {}),
-          ...(contractKey === 'ascendant' ? { shares: 0, lockedAscendant: 0, pendingDay8: 0, pendingDay28: 0, pendingDay90: 0, claimableRewards: 0 } : {})
+          ...(contractKey === 'ascendant' ? {
+            shares: 0,
+            lockedAscendant: 0,
+            pendingDay8: 0,
+            pendingDay28: 0,
+            pendingDay90: 0,
+            claimableRewards: 0,
+            tokens: []
+          } : {})
         };
         if (!toHolder.tokenIds.includes(tokenId)) {
           toHolder.tokenIds.push(tokenId);
@@ -658,6 +666,8 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     }
 
     let tier = 1;
+    let rarityNumber = 0;
+    let rarity = 0;
     const tierResult = tierResults[i];
     if (!config.debug.suppressDebug) {
       logger.debug('utils', `Raw tierResult for token ${tokenId}: status=${tierResult.status}, result=${safeStringify(tierResult.result)}`, 'eth', contractKey);
@@ -666,9 +676,25 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     if (tierResult.status === 'success') {
       if (contractKey === 'ascendant') {
         const result = tierResult.result;
-        tier = Array.isArray(result) && result[1] ? Number(result[1]) : 1;
-        if (!config.debug.suppressDebug) {
-          logger.debug('utils', `Parsed tier for token ${tokenId} (ascendant): tier=${tier}, resultType=${typeof result}, resultLength=${Array.isArray(result) ? result.length : 'N/A'}`, 'eth', contractKey);
+        if (Array.isArray(result) && result.length >= 3) {
+          rarityNumber = Number(result[0]) || 0; // rarityNumber from attributes[0]
+          tier = Number(result[1]) || 1; // tier from attributes[1]
+          rarity = Number(result[2]) || 0; // rarity from attributes[2]
+          if (!config.debug.suppressDebug) {
+            logger.debug('utils', `Parsed attributes for token ${tokenId} (ascendant): tier=${tier}, rarityNumber=${rarityNumber}, rarity=${rarity}, result=${safeStringify(result)}`, 'eth', contractKey);
+          }
+        } else {
+          logger.warn('utils', `Invalid getNFTAttribute result for token ${tokenId}: result=${safeStringify(result)}`, 'eth', contractKey);
+          errorLog.push({
+            timestamp: new Date().toISOString(),
+            phase: 'fetch_tier',
+            tokenId,
+            wallet,
+            error: `Invalid getNFTAttribute result: ${safeStringify(result)}`
+          });
+          tier = 1;
+          rarityNumber = 0;
+          rarity = 0;
         }
       } else {
         tier = typeof tierResult.result === 'bigint' ? Number(tierResult.result) : Number(tierResult.result);
@@ -688,6 +714,10 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
           details: { rawResult: safeStringify(tierResult.result), maxTier, parsedTier: tier }
         });
         tier = 1;
+        if (contractKey === 'ascendant') {
+          rarityNumber = 0;
+          rarity = 0;
+        }
       }
     } else {
       logger.error('utils', `Failed to fetch tier for token ${tokenId}: ${tierResult.error || 'unknown error'}`, 'eth', contractKey);
@@ -700,6 +730,10 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
         details: { rawResult: safeStringify(tierResult.result) }
       });
       tier = 1;
+      if (contractKey === 'ascendant') {
+        rarityNumber = 0;
+        rarity = 0;
+      }
     }
 
     if (!config.debug.suppressDebug) {
@@ -714,7 +748,15 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       multiplierSum: 0,
       ...(contractKey === 'element369' ? { infernoRewards: 0, fluxRewards: 0, e280Rewards: 0 } : {}),
       ...(contractKey === 'element280' || contractKey === 'stax' ? { claimableRewards: 0 } : {}),
-      ...(contractKey === 'ascendant' ? { shares: 0, lockedAscendant: 0, pendingDay8: 0, pendingDay28: 0, pendingDay90: 0, claimableRewards: 0 } : {})
+      ...(contractKey === 'ascendant' ? {
+        shares: 0,
+        lockedAscendant: 0,
+        pendingDay8: 0,
+        pendingDay28: 0,
+        pendingDay90: 0,
+        claimableRewards: 0,
+        tokens: []
+      } : {})
     };
 
     if (holder.tokenIds.includes(tokenId)) {
@@ -730,6 +772,12 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     if (contractKey === 'ascendant') {
       holder.shares += shares;
       holder.lockedAscendant += lockedAscendant;
+      holder.tokens.push({
+        tokenId: Number(tokenId),
+        tier,
+        rarityNumber,
+        rarity
+      });
     }
     holdersMap.set(wallet, holder);
     if (!config.debug.suppressDebug) {
@@ -854,11 +902,12 @@ async function populateHoldersMapCache(contractKey, contractAddress, abi, vaultA
         percentage: data.percentage || 0,
         displayMultiplierSum: data.displayMultiplierSum || data.multiplierSum,
         rank: 0, // Will be set later
+        ...(contractKey === 'ascendant' ? { tokens: data.tokens || [] } : {}) // Include tokens for ascendant
       });
     }
 
     // Sort and set ranks
-    holderList.sort((a, b) => b.multiplierSum - a.multiplierSum);
+    holderList.sort((a, b) => (contractKey === 'ascendant' ? b.shares - a.shares : b.multiplierSum - a.multiplierSum) || b.total - a.total);
     holderList.forEach((holder, index) => {
       holder.rank = index + 1;
     });
