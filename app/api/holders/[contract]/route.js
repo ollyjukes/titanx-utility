@@ -139,7 +139,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
 
   contractKey = contractKey.toLowerCase();
   if (!config.debug.suppressDebug) {
-    logger.debug('utils', `Normalized contractKey: ${contractKey}, forceUpdate: ${forceUpdate}`, 'eth', contractKey);
+    logger.debug('utils', `Starting getHoldersMap: contractKey=${contractKey}, forceUpdate=${forceUpdate}`, 'eth', contractKey);
   }
 
   const requiredFunctions = contractKey === 'ascendant'
@@ -172,8 +172,11 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   let currentBlock;
   try {
     currentBlock = await client.getBlockNumber();
+    cacheState.progressState.lastProcessedBlock = Number(currentBlock); // Save immediately
+    cacheState.progressState.lastUpdated = Date.now();
+    await saveCacheStateContract(contractKey, cacheState);
     if (!config.debug.suppressDebug) {
-      logger.debug('utils', `Fetched current block: ${currentBlock}`, 'eth', contractKey);
+      logger.debug('utils', `Fetched current block: ${currentBlock}, saved to cacheState`, 'eth', contractKey);
     }
   } catch (error) {
     errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_block_number', error: error.message });
@@ -182,13 +185,197 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   }
 
   // Check cache validity
+  const blockThreshold = contractKey === 'element280' ? (config.cache.blockThreshold || 7200) : (config.cache.blockThreshold || 100); // ~24 hours for element280
   const cacheValid = !forceUpdate &&
     cacheState.lastProcessedBlock &&
     cacheState.progressState.step === 'completed' &&
     !cacheState.isPopulating &&
-    (Number(currentBlock) - cacheState.lastProcessedBlock < config.cache.blockThreshold);
+    (Number(currentBlock) - cacheState.lastProcessedBlock < blockThreshold);
 
-  if (cacheValid) {
+  if (!config.debug.suppressDebug) {
+    logger.debug('utils', `Cache validity check: cacheValid=${cacheValid}, forceUpdate=${forceUpdate}, lastProcessedBlock=${cacheState.lastProcessedBlock}, step=${cacheState.progressState.step}, isPopulating=${cacheState.isPopulating}, blockDiff=${Number(currentBlock) - cacheState.lastProcessedBlock}, blockThreshold=${blockThreshold}`, 'eth', contractKey);
+  }
+
+  let cachedTokenTiers = new Map();
+  if (cacheValid && contractKey === 'element280') {
+    try {
+      const cachedHolders = await getCache(`${contractKey}_holders`, contractKey);
+      if (cachedHolders?.holders && Array.isArray(cachedHolders.holders)) {
+        holdersMap = new Map(cachedHolders.holders.map(h => [h.wallet, h]));
+        totalBurned = cachedHolders.totalBurned || totalBurned;
+        totalTokens = cacheState.progressState.totalNfts || 0;
+        holdersMap.forEach(holder => {
+          holder.tokenIds.forEach(tokenId => tokenOwnerMap.set(Number(tokenId), holder.wallet));
+        });
+        // Load cached tiers for element280
+        const cachedTiers = await getCache(`${contractKey}_tiers`, contractKey) || {};
+        Object.entries(cachedTiers).forEach(([tokenId, tierData]) => {
+          if (tierData && typeof tierData.tier === 'number') {
+            cachedTokenTiers.set(Number(tokenId), tierData);
+          }
+        });
+        if (!config.debug.suppressDebug) {
+          logger.debug('utils', `Cache hit: holders=${holdersMap.size}, tiers=${cachedTokenTiers.size}, lastBlock=${cacheState.lastProcessedBlock}`, 'eth', contractKey);
+        }
+        // Fetch new Transfer events
+        const fromBlock = BigInt(cacheState.lastProcessedBlock);
+        const { burnedTokenIds, transferTokenIds, lastBlock } = await getNewEvents(contractKey, contractAddress, fromBlock, errorLog);
+        if (!config.debug.suppressDebug) {
+          logger.debug('utils', `New events: burns=${burnedTokenIds.length}, transfers=${transferTokenIds.length}, fromBlock=${fromBlock}, toBlock=${lastBlock}`, 'eth', contractKey);
+        }
+        // Process burns
+        const updatedTokenIds = new Set();
+        burnedTokenIds.forEach(tokenId => {
+          const wallet = tokenOwnerMap.get(tokenId);
+          if (wallet) {
+            const holder = holdersMap.get(wallet);
+            if (holder) {
+              holder.tokenIds = holder.tokenIds.filter(id => id !== tokenId);
+              holder.total -= 1;
+              const tier = cachedTokenTiers.get(tokenId)?.tier || 0;
+              holder.tiers[tier] -= 1;
+              holder.multiplierSum -= contractTiers[tier + 1]?.multiplier || (tier + 1);
+              if (holder.total === 0) holdersMap.delete(wallet);
+              tokenOwnerMap.delete(tokenId);
+              cachedTokenTiers.delete(tokenId);
+              totalTokens -= 1;
+              totalBurned += 1;
+              tierDistribution[tier] -= 1;
+            }
+          }
+        });
+        // Process transfers
+        transferTokenIds.forEach(({ tokenId, from, to }) => {
+          updatedTokenIds.add(tokenId);
+          const oldHolder = holdersMap.get(from);
+          if (oldHolder) {
+            oldHolder.tokenIds = oldHolder.tokenIds.filter(id => id !== tokenId);
+            oldHolder.total -= 1;
+            const tier = cachedTokenTiers.get(tokenId)?.tier || 0;
+            oldHolder.tiers[tier] -= 1;
+            oldHolder.multiplierSum -= contractTiers[tier + 1]?.multiplier || (tier + 1);
+            if (oldHolder.total === 0) holdersMap.delete(from);
+          }
+          let newHolder = holdersMap.get(to) || {
+            wallet: to,
+            tokenIds: [],
+            tiers: Array(maxTier + 1).fill(0),
+            total: 0,
+            multiplierSum: 0,
+            claimableRewards: 0,
+          };
+          newHolder.tokenIds.push(tokenId);
+          newHolder.total += 1;
+          const tier = cachedTokenTiers.get(tokenId)?.tier || 0;
+          newHolder.tiers[tier] += 1;
+          newHolder.multiplierSum += contractTiers[tier + 1]?.multiplier || (tier + 1);
+          holdersMap.set(to, newHolder);
+          tokenOwnerMap.set(tokenId, to);
+        });
+        // Fetch tiers for tokens without cached tiers
+        const missingTierTokenIds = Array.from(updatedTokenIds).filter(tokenId => !cachedTokenTiers.has(tokenId));
+        if (missingTierTokenIds.length > 0) {
+          cacheState.progressState.step = 'fetching_updated_tiers';
+          cacheState.progressState.processedTiers = 0;
+          cacheState.progressState.totalTiers = missingTierTokenIds.length;
+          cacheState.progressState.progressPercentage = '50%';
+          await saveCacheStateContract(contractKey, cacheState);
+          const tierCalls = missingTierTokenIds.map(tokenId => ({
+            address: contractAddress,
+            abi,
+            functionName: 'getNftTier',
+            args: [BigInt(tokenId)]
+          }));
+          const tierResults = [];
+          const chunkSize = config.nftContracts[contractKey]?.maxTokensPerOwnerQuery || 1000;
+          for (let i = 0; i < tierCalls.length; i += chunkSize) {
+            const chunk = tierCalls.slice(i, i + chunkSize);
+            const results = await retry(
+              () => batchMulticall(chunk, config.alchemy.batchSize),
+              { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+            );
+            tierResults.push(...results);
+            cacheState.progressState.processedTiers = Math.min(i + chunkSize, tierCalls.length);
+            cacheState.progressState.progressPercentage = `${Math.round(50 + (i / tierCalls.length) * 20)}%`;
+            await saveCacheStateContract(contractKey, cacheState);
+            if (!config.debug.suppressDebug) {
+              logger.debug('utils', `Processed updated tiers for ${cacheState.progressState.processedTiers}/${tierCalls.length} tokens`, 'eth', contractKey);
+            }
+          }
+          tierResults.forEach((result, i) => {
+            const tokenId = missingTierTokenIds[i];
+            if (result.status === 'success') {
+              const tier = Number(result.result) || 0;
+              cachedTokenTiers.set(tokenId, { tier, timestamp: Date.now() });
+            } else {
+              errorLog.push({
+                timestamp: new Date().toISOString(),
+                phase: 'fetch_updated_tier',
+                tokenId,
+                error: result.error || 'unknown error'
+              });
+            }
+          });
+          // Update holders with new tiers
+          missingTierTokenIds.forEach(tokenId => {
+            const wallet = tokenOwnerMap.get(tokenId);
+            if (wallet) {
+              const holder = holdersMap.get(wallet);
+              if (holder) {
+                const oldTierIndex = holder.tokenIds.indexOf(tokenId);
+                if (oldTierIndex >= 0) {
+                  const oldTier = holder.tiers.findIndex((count, i) => count > 0 && i !== oldTierIndex);
+                  if (oldTier >= 0) {
+                    holder.tiers[oldTier] -= 1;
+                    holder.multiplierSum -= contractTiers[oldTier + 1]?.multiplier || (oldTier + 1);
+                    tierDistribution[oldTier] -= 1;
+                  }
+                }
+                const newTier = cachedTokenTiers.get(tokenId)?.tier || 0;
+                holder.tiers[newTier] += 1;
+                holder.multiplierSum += contractTiers[newTier + 1]?.multiplier || (newTier + 1);
+                tierDistribution[newTier] += 1;
+              }
+            }
+          });
+          await setCache(`${contractKey}_tiers`, Object.fromEntries(cachedTokenTiers), config.cache.nodeCache.stdTTL || 86400, contractKey); // 24 hours TTL
+        }
+        cacheState.progressState.totalNfts = totalTokens;
+        cacheState.progressState.totalTiers = totalTokens;
+        cacheState.progressState.totalLiveHolders = totalTokens;
+        cacheState.globalMetrics = {
+          totalMinted: totalTokens + totalBurned,
+          totalLive: totalTokens,
+          totalBurned,
+          tierDistribution,
+        };
+        cacheState.progressState.isPopulating = false;
+        cacheState.progressState.step = 'completed';
+        cacheState.progressState.processedNfts = totalTokens;
+        cacheState.progressState.processedTiers = missingTierTokenIds.length;
+        cacheState.progressState.progressPercentage = '100%';
+        cacheState.progressState.lastProcessedBlock = Number(currentBlock);
+        cacheState.progressState.lastUpdated = Date.now();
+        await saveCacheStateContract(contractKey, cacheState);
+        const holderList = Array.from(holdersMap.values());
+        holderList.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+        holderList.forEach((holder, index) => {
+          holder.rank = index + 1;
+          holder.percentage = (holder.total / totalTokens * 100) || 0;
+          holder.displayMultiplierSum = holder.multiplierSum;
+        });
+        await setCache(`${contractKey}_holders`, { holders: holderList, totalBurned, timestamp: Date.now() }, 0, contractKey);
+        logger.info('utils', `Updated cached holders for ${contractKey}, lastBlock=${cacheState.lastProcessedBlock}, updatedTokens=${missingTierTokenIds.length}`, 'eth', contractKey);
+        return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog, rarityDistribution };
+      } else {
+        logger.warn('utils', `Invalid holders cache data for ${contractKey}`, 'eth', contractKey);
+      }
+    } catch (error) {
+      logger.error('utils', `Failed to load cache for ${contractKey}: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+      errorLog.push({ timestamp: new Date().toISOString(), phase: 'load_cache', error: error.message });
+    }
+  } else if (cacheValid) {
+    // Original cache logic for non-element280 contracts
     try {
       const cachedHolders = await getCache(`${contractKey}_holders`, contractKey);
       if (cachedHolders?.holders) {
@@ -391,6 +578,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       } : {})
     };
     await saveCacheStateContract(contractKey, cacheState);
+    await setCache(`${contractKey}_tiers`, {}, config.cache.nodeCache.stdTTL || 86400, contractKey);
     logger.info('utils', `No tokens found, returning empty holdersMap`, 'eth', contractKey);
     return { holdersMap, totalBurned, lastBlock: Number(currentBlock), errorLog, rarityDistribution };
   }
@@ -426,7 +614,21 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   cacheState.progressState.progressPercentage = '50%';
   await saveCacheStateContract(contractKey, cacheState);
 
-  const tierCalls = tokenIds.map(tokenId => ({
+  // Load cached tiers for element280
+  if (contractKey === 'element280') {
+    const cachedTiers = await getCache(`${contractKey}_tiers`, contractKey) || {};
+    Object.entries(cachedTiers).forEach(([tokenId, tierData]) => {
+      if (tierData && typeof tierData.tier === 'number') {
+        cachedTokenTiers.set(Number(tokenId), tierData);
+      }
+    });
+    if (!config.debug.suppressDebug) {
+      logger.debug('utils', `Cached tiers loaded: ${cachedTokenTiers.size}, missing tiers for ${tokenIds.length - cachedTokenTiers.size} tokens`, 'eth', contractKey);
+    }
+  }
+
+  const missingTierTokenIds = contractKey === 'element280' ? tokenIds.filter(tokenId => !cachedTokenTiers.has(tokenId)) : tokenIds;
+  const tierCalls = missingTierTokenIds.map(tokenId => ({
     address: contractAddress,
     abi,
     functionName: contractKey === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
@@ -442,13 +644,42 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
     );
     tierResults.push(...results);
-    cacheState.progressState.processedTiers = Math.min(i + chunkSize, tokenIds.length);
+    cacheState.progressState.processedTiers = Math.min(i + chunkSize, missingTierTokenIds.length);
     cacheState.progressState.progressPercentage = `${Math.round(50 + (i / tierCalls.length) * 20)}%`;
     await saveCacheStateContract(contractKey, cacheState);
     if (!config.debug.suppressDebug) {
-      logger.debug('utils', `Processed tiers for ${cacheState.progressState.processedTiers}/${tokenIds.length} tokens`, 'eth', contractKey);
+      logger.debug('utils', `Processed tiers for ${cacheState.progressState.processedTiers}/${missingTierTokenIds.length} tokens`, 'eth', contractKey);
     }
   }
+
+  // Cache new tier results for element280
+  if (contractKey === 'element280') {
+    tierResults.forEach((result, i) => {
+      const tokenId = missingTierTokenIds[i];
+      if (result.status === 'success') {
+        const tier = Number(result.result) || 0;
+        cachedTokenTiers.set(tokenId, { tier, timestamp: Date.now() });
+      } else {
+        errorLog.push({
+          timestamp: new Date().toISOString(),
+          phase: 'fetch_tier',
+          tokenId,
+          error: result.error || 'unknown error'
+        });
+      }
+    });
+    await setCache(`${contractKey}_tiers`, Object.fromEntries(cachedTokenTiers), config.cache.nodeCache.stdTTL || 86400, contractKey);
+  }
+
+  // Combine cached and new tier results for element280
+  const allTierResults = contractKey === 'element280' ? tokenIds.map(tokenId => {
+    if (cachedTokenTiers.has(tokenId)) {
+      const tierData = cachedTokenTiers.get(tokenId);
+      return { status: 'success', result: tierData.tier };
+    }
+    const index = missingTierTokenIds.indexOf(tokenId);
+    return index >= 0 ? tierResults[index] : { status: 'failure', error: 'Missing tier data' };
+  }) : tierResults;
 
   cacheState.progressState.step = 'fetching_rewards';
   cacheState.progressState.progressPercentage = '70%';
@@ -526,10 +757,10 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       }
     }
 
-    let tier = 0; // Allow tier 0
+    let tier = 0;
     let rarityNumber = 0;
     let rarity = 0;
-    const tierResult = tierResults[i];
+    const tierResult = allTierResults[i];
     if (!config.debug.suppressDebug) {
       logger.debug('utils', `Raw tierResult for token ${tokenId}: status=${tierResult.status}, result=${safeStringify(tierResult.result)}`, 'eth', contractKey);
     }
@@ -538,14 +769,13 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       if (contractKey === 'ascendant') {
         const result = tierResult.result;
         let parsedResult;
-        // Handle both array and object formats
         if (Array.isArray(result) && result.length >= 3) {
           parsedResult = {
             rarityNumber: Number(result[0]) || 0,
             tier: Number(result[1]) || 0,
             rarity: Number(result[2]) || 0
           };
-        } else if (typeof result === 'object' && result !== null && 'rarityNumber' in result && 'tier' in result && 'rarity' in result) {
+        } else if (typeof result === 'object' && result !== null && 'rarityNumber' in result) {
           parsedResult = {
             rarityNumber: Number(result.rarityNumber) || 0,
             tier: Number(result.tier) || 0,
@@ -613,7 +843,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     const holder = holdersMap.get(wallet) || {
       wallet,
       tokenIds: [],
-      tiers: Array(maxTier + 1).fill(0), // 0 to maxTier inclusive
+      tiers: Array(maxTier + 1).fill(0),
       total: 0,
       multiplierSum: 0,
       ...(contractKey === 'element369' ? { infernoRewards: 0, fluxRewards: 0, e280Rewards: 0 } : {}),
@@ -644,7 +874,7 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
       holder.lockedAscendant += lockedAscendant;
       holder.tokens.push({
         tokenId: Number(tokenId),
-        tier: tier + 1, // Display as 1-based for UI
+        tier: tier + 1,
         rawTier: tier,
         rarityNumber,
         rarity
@@ -695,14 +925,17 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
   cacheState.progressState.isPopulating = false;
   cacheState.progressState.step = 'completed';
   cacheState.progressState.processedNfts = totalTokens;
-  cacheState.progressState.processedTiers = totalTokens;
+  cacheState.progressState.processedTiers = missingTierTokenIds.length;
   cacheState.progressState.progressPercentage = '100%';
   cacheState.progressState.lastProcessedBlock = Number(currentBlock);
   cacheState.progressState.lastUpdated = Date.now();
   await saveCacheStateContract(contractKey, cacheState);
 
   await setCache(`${contractKey}_holders`, { holders: holderList, totalBurned, timestamp: Date.now(), rarityDistribution }, 0, contractKey);
-  logger.info('utils', `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}`, 'eth', contractKey);
+  if (contractKey === 'element280') {
+    await setCache(`${contractKey}_tiers`, Object.fromEntries(cachedTokenTiers), config.cache.nodeCache.stdTTL || 86400, contractKey);
+  }
+  logger.info('utils', `Completed holders map with ${holderList.length} holders, totalBurned=${totalBurned}, cachedTiers=${cachedTokenTiers.size}`, 'eth', contractKey);
   if (!config.debug.suppressDebug) {
     logger.debug('utils', `Tier distribution for ${contractKey}: ${tierDistribution}`, 'eth', contractKey);
     if (contractKey === 'ascendant') {

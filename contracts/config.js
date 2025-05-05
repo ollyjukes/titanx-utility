@@ -220,7 +220,7 @@ const config = {
   // Tier order configurations
   contractTiers,
 
-  // API endpoint details
+  // Contract details for API endpoints
   contractDetails,
 
   // Utility to get contract details by name
@@ -231,9 +231,9 @@ const config = {
     apiKey: process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
     network: process.env.ALCHEMY_NETWORK || 'eth-mainnet',
     batchSize: 50,
-    batchDelayMs: 500,
+    batchDelayMs: 1000, // Increased to avoid rate limits
     retryMaxDelayMs: 10000,
-    maxRetries: 1, // Reduced to minimize retry logs
+    maxRetries: 3, // Increased for reliability
     timeoutMs: 30000,
   },
 
@@ -247,17 +247,17 @@ const config = {
       disableE280: process.env.DISABLE_E280_REDIS === 'true' || true,
     },
     nodeCache: {
-      stdTTL: 3600,
+      stdTTL: 86400, // 24 hours for tier cache persistence
       checkperiod: 120,
     },
-    blockThreshold: 100, // Max blocks before cache invalidation
+    blockThreshold: 7200, // ~24 hours (7200 blocks * ~12s/block) for cache validity
   },
 
-  // Debug settings (minimized logging)
+  // Debug settings
   debug: {
     enabled: process.env.DEBUG === 'true',
-    logLevel: 'info', // Suppress verbose debug logs
-    suppressDebug: true, // Disable logger.debug in route.js
+    logLevel: 'info',
+    suppressDebug: false, // Enable debug logs for troubleshooting
   },
 
   // Fallback data settings
