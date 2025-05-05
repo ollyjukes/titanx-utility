@@ -1,10 +1,10 @@
 // app/nft/page.js
 'use client';
 import { motion } from 'framer-motion';
-import { fetchCollectionData } from '@/lib/fetchCollectionData';
-import config from '@/config';
-import LoadingIndicator from '@/components/LoadingIndicator';
-import NFTSummary from '@/components/NFTSummary';
+import { fetchCollectionData } from '@/client/lib/fetchCollectionData';
+import config from '@/contracts/config';
+import LoadingIndicator from '@/client/components/LoadingIndicator';
+import NFTSummary from '@/client/components/NFTSummary';
 import React from 'react';
 
 

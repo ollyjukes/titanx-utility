@@ -1,0 +1,3849 @@
+# Minified Code Export (JS + ABI + .env)
+
+// --- ./contracts/abi.js ---
+import staxNFT from '@/abi/staxNFT.json';
+import staxVault from '@/abi/staxVault.json';
+import element280NFT from '@/abi/element280.json';
+import element280Vault from '@/abi/element280Vault.json';
+import element369NFT from '@/abi/element369.json';
+import element369Vault from '@/abi/element369Vault.json';
+import ascendantNFT from '@/abi/ascendantNFT.json';
+const abiFunctions = {
+  stax: {
+    nft: staxNFT,
+    vault: staxVault,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account'],
+      outputs: ['availability', 'totalPayout'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'batchGetTokenData',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
+    },
+  },
+  element280: {
+    nft: element280NFT,
+    vault: element280Vault,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account'],
+      outputs: ['availability', 'totalReward'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'getBatchedTokensData',
+      contract: 'nft',
+      inputs: ['tokenIds', 'nftOwner'],
+      outputs: ['timestamps', 'multipliers'],
+    },
+  },
+  element369: {
+    nft: element369NFT,
+    vault: element369Vault,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account', 'isBacking'],
+      outputs: ['availability', 'burned', 'infernoPool', 'fluxPool', 'e280Pool'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'batchGetTokenData',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
+    },
+  },
+  ascendant: {
+    nft: ascendantNFT,
+    vault: null,
+    rewardFunction: {
+      name: 'batchClaimableAmount',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['toClaim'],
+    },
+    tierFunction: {
+      name: 'getNFTAttribute',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['attributes'], // Extract tier from attributes[1]
+    },
+    batchTokenData: null, // Ascendant doesn't support batch token data
+  },
+  e280: {
+    nft: null,
+    vault: null,
+    rewardFunction: null,
+    tierFunction: null,
+    batchTokenData: null,
+  },
+};
+export const commonFunctions = {
+  totalSupply: {
+    name: 'totalSupply',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+  totalBurned: {
+    name: 'totalBurned',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+  ownerOf: {
+    name: 'ownerOf',
+    contract: 'nft',
+    inputs: ['tokenId'],
+    outputs: ['owner'],
+  },
+  tokenId: {
+    name: 'tokenId',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+};
+Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFunction }]) => {
+  if (key === 'e280') return; // Skip disabled
+  if (!nft) throw new Error(`Missing NFT ABI for ${key}`);
+  if (key !== 'ascendant' && !vault) throw new Error(`Missing vault ABI for ${key}`);
+  if (!rewardFunction) throw new Error(`Missing reward function for ${key}`);
+  if (!tierFunction) throw new Error(`Missing tier function for ${key}`);
+  if (key !== 'ascendant' && !nft.find(f => f.name === commonFunctions.totalSupply.name)) {
+    throw new Error(`Missing totalSupply for ${key}`);
+  }
+  if (key === 'ascendant' && !nft.find(f => f.name === commonFunctions.tokenId.name)) {
+    throw new Error(`Missing tokenId for ${key}`);
+  }
+  if (!nft.find(f => f.name === commonFunctions.ownerOf.name)) {
+    throw new Error(`Missing ownerOf for ${key}`);
+  }
+});
+export function getContractAbi(contractKey, contractType = 'nft') {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection[contractType] || null;
+}
+export function getRewardFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.rewardFunction || null;
+}
+export function getTierFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.tierFunction || null;
+}
+export function getBatchTokenDataFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.batchTokenData || null;
+}
+export const abis = {
+  stax: { nft: staxNFT, vault: staxVault },
+  element280: { nft: element280NFT, vault: element280Vault },
+  element369: { nft: element369NFT, vault: element369Vault },
+  ascendant: { nft: ascendantNFT, vault: null },
+  e280: { nft: null, vault: null },
+};
+// --- ./contracts/config.js ---
+import { abis } from './abi.js';
+const e280MainAbi = null;
+const config = {
+  supportedChains: ['ETH', 'BASE'],
+  abis: {
+    element280: abis.element280,
+    element369: abis.element369,
+    stax: abis.stax,
+    ascendant: abis.ascendant,
+    e280: { main: e280MainAbi, vault: null },
+  },
+  nftContracts: {
+    element280: {
+      name: 'Element 280',
+      symbol: 'ELMNT',
+      chain: 'ETH',
+      address: '0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9',
+      vaultAddress: '0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97',
+      deploymentBlock: '20945304',
+      totalMinted: 16883, // Hardcoded: Total NFTs ever minted
+      tiers: {
+        1: { name: 'Common', multiplier: 10, allocation: '100000000000000000000000000' },
+        2: { name: 'Common Amped', multiplier: 12, allocation: '100000000000000000000000000' },
+        3: { name: 'Rare', multiplier: 100, allocation: '1000000000000000000000000000' },
+        4: { name: 'Rare Amped', multiplier: 120, allocation: '1000000000000000000000000000' },
+        5: { name: 'Legendary', multiplier: 1000, allocation: '10000000000000000000000000000' },
+        6: { name: 'Legendary Amped', multiplier: 1200, allocation: '10000000000000000000000000000' },
+      },
+      description:
+        'Element 280 NFTs can be minted with TitanX or ETH during a presale and redeemed for Element 280 tokens after a cooldown period. Multipliers contribute to a pool used for reward calculations.',
+      maxTokensPerOwnerQuery: 100,
+    },
+    element369: {
+      name: 'Element 369',
+      symbol: 'E369',
+      chain: 'ETH',
+      address: '0x024D64E2F65747d8bB02dFb852702D588A062575',
+      vaultAddress: '0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5',
+      deploymentBlock: '21224418',
+      tiers: {
+        1: { name: 'Common', multiplier: 1, price: '100000000000000000000000000' },
+        2: { name: 'Rare', multiplier: 10, price: '1000000000000000000000000000' },
+        3: { name: 'Legendary', multiplier: 100, price: '10000000000000000000000000000' },
+      },
+      description:
+        'Element 369 NFTs are minted with TitanX or ETH during specific sale cycles. Burning NFTs updates a multiplier pool and tracks burn cycles for reward distribution in the Holder Vault.',
+    },
+    stax: {
+      name: 'Stax',
+      symbol: 'STAX',
+      chain: 'ETH',
+      address: '0x74270Ca3a274B4dbf26be319A55188690CACE6E1',
+      vaultAddress: '0x5D27813C32dD705404d1A78c9444dAb523331717',
+      deploymentBlock: '21452667',
+      totalMinted: 503, // Hardcoded: Total NFTs ever minted
+      tiers: {
+        1: { name: 'Common', multiplier: 1, price: '100000000000000000000000000' },
+        2: { name: 'Common Amped', multiplier: 1.2, price: '100000000000000000000000000', amplifier: '10000000000000000000000000' },
+        3: { name: 'Common Super', multiplier: 1.4, price: '100000000000000000000000000', amplifier: '20000000000000000000000000' },
+        4: { name: 'Common LFG', multiplier: 2, price: '100000000000000000000000000', amplifier: '50000000000000000000000000' },
+        5: { name: 'Rare', multiplier: 10, price: '1000000000000000000000000000' },
+        6: { name: 'Rare Amped', multiplier: 12, price: '1000000000000000000000000000', amplifier: '100000000000000000000000000' },
+        7: { name: 'Rare Super', multiplier: 14, price: '1000000000000000000000000000', amplifier: '200000000000000000000000000' },
+        8: { name: 'Rare LFG', multiplier: 20, price: '1000000000000000000000000000', amplifier: '500000000000000000000000000' },
+        9: { name: 'Legendary', multiplier: 100, price: '10000000000000000000000000000' },
+        10: { name: 'Legendary Amped', multiplier: 120, price: '10000000000000000000000000000', amplifier: '1000000000000000000000000000' },
+        11: { name: 'Legendary Super', multiplier: 140, price: '10000000000000000000000000000', amplifier: '2000000000000000000000000000' },
+        12: { name: 'Legendary LFG', multiplier: 200, price: '10000000000000000000000000000', amplifier: '5000000000000000000000000000' },
+      },
+      description:
+        'Stax NFTs are minted with TitanX or ETH during a presale. Burning NFTs after a cooldown period claims backing rewards, with multipliers contributing to a pool for cycle-based reward calculations.',
+    },
+    ascendant: {
+      name: 'Ascendant',
+      symbol: 'ASCNFT',
+      chain: 'ETH',
+      address: '0x9da95c32c5869c84ba2c020b5e87329ec0adc97f',
+      vaultAddress: null, // No vault
+      deploymentBlock: '21112535',
+      tiers: {
+        1: { name: 'Tier 1', price: '7812500000000000000000', multiplier: 1.01 },
+        2: { name: 'Tier 2', price: '15625000000000000000000', multiplier: 1.02 },
+        3: { name: 'Tier 3', price: '31250000000000000000000', multiplier: 1.03 },
+        4: { name: 'Tier 4', price: '62500000000000000000000', multiplier: 1.04 },
+        5: { name: 'Tier 5', price: '125000000000000000000000', multiplier: 1.05 },
+        6: { name: 'Tier 6', price: '250000000000000000000000', multiplier: 1.06 },
+        7: { name: 'Tier 7', price: '500000000000000000000000', multiplier: 1.07 },
+        8: { name: 'Tier 8', price: '1000000000000000000000000', multiplier: 1.08 },
+      },
+      description:
+        'Ascendant NFTs are minted with ASCENDANT tokens and offer staking rewards from DragonX pools over 8, 28, and 90-day periods. Features fusion mechanics to combine same-tier NFTs into higher tiers.',
+    },
+    e280: {
+      name: 'E280',
+      symbol: 'E280',
+      chain: 'BASE',
+      address: null,
+      vaultAddress: null,
+      deploymentBlock: null,
+      tiers: {},
+      description: 'E280 NFTs on BASE chain. Contract not yet deployed.',
+      disabled: true,
+    },
+  },
+  contractAddresses: {
+    element280: { chain: 'ETH', address: '0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9' },
+    element369: { chain: 'ETH', address: '0x024D64E2F65747d8bB02dFb852702D588A062575' },
+    stax: { chain: 'ETH', address: '0x74270Ca3a274B4dbf26be319A55188690CACE6E1' },
+    ascendant: { chain: 'ETH', address: '0x9da95c32c5869c84ba2c020b5e87329ec0adc97f' },
+    e280: { chain: 'BASE', address: null },
+  },
+  vaultAddresses: {
+    element280: { chain: 'ETH', address: '0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97' },
+    element369: { chain: 'ETH', address: '0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5' },
+    stax: { chain: 'ETH', address: '0x5D27813C32dD705404d1A78c9444dAb523331717' },
+    ascendant: { chain: 'ETH', address: null },
+    e280: { chain: 'BASE', address: null },
+  },
+  deploymentBlocks: {
+    element280: { chain: 'ETH', block: '20945304' },
+    element369: { chain: 'ETH', block: '21224418' },
+    stax: { chain: 'ETH', block: '21452667' },
+    ascendant: { chain: 'ETH', block: '21112535' },
+    e280: { chain: 'BASE', block: null },
+  },
+  contractTiers: {
+    element280: {
+      tierOrder: [
+        { tierId: '6', name: 'Legendary Amped' },
+        { tierId: '5', name: 'Legendary' },
+        { tierId: '4', name: 'Rare Amped' },
+        { tierId: '3', name: 'Rare' },
+        { tierId: '2', name: 'Common Amped' },
+        { tierId: '1', name: 'Common' },
+      ],
+    },
+    element369: {
+      tierOrder: [
+        { tierId: '3', name: 'Legendary' },
+        { tierId: '2', name: 'Rare' },
+        { tierId: '1', name: 'Common' },
+      ],
+    },
+    stax: {
+      tierOrder: [
+        { tierId: '12', name: 'Legendary LFG' },
+        { tierId: '11', name: 'Legendary Super' },
+        { tierId: '10', name: 'Legendary Amped' },
+        { tierId: '9', name: 'Legendary' },
+        { tierId: '8', name: 'Rare LFG' },
+        { tierId: '7', name: 'Rare Super' },
+        { tierId: '6', name: 'Rare Amped' },
+        { tierId: '5', name: 'Rare' },
+        { tierId: '4', name: 'Common LFG' },
+        { tierId: '3', name: 'Common Super' },
+        { tierId: '2', name: 'Common Amped' },
+        { tierId: '1', name: 'Common' },
+      ],
+    },
+    ascendant: {
+      tierOrder: [
+        { tierId: '8', name: 'Tier 8' },
+        { tierId: '7', name: 'Tier 7' },
+        { tierId: '6', name: 'Tier 6' },
+        { tierId: '5', name: 'Tier 5' },
+        { tierId: '4', name: 'Tier 4' },
+        { tierId: '3', name: 'Tier 3' },
+        { tierId: '2', name: 'Tier 2' },
+        { tierId: '1', name: 'Tier 1' },
+      ],
+    },
+    e280: {
+      tierOrder: [],
+    },
+  },
+  contractDetails: {
+    element280: {
+      name: 'Element 280',
+      chain: 'ETH',
+      pageSize: 100,
+      apiEndpoint: '/api/holders/Element280',
+      rewardToken: 'ELMNT',
+    },
+    element369: {
+      name: 'Element 369',
+      chain: 'ETH',
+      pageSize: 1000,
+      apiEndpoint: '/api/holders/Element369',
+      rewardToken: 'INFERNO/FLUX/E280',
+    },
+    stax: {
+      name: 'Stax',
+      chain: 'ETH',
+      pageSize: 1000,
+      apiEndpoint: '/api/holders/Stax',
+      rewardToken: 'X28',
+    },
+    ascendant: {
+      name: 'Ascendant',
+      chain: 'ETH',
+      pageSize: 1000,
+      apiEndpoint: '/api/holders/Ascendant',
+      rewardToken: 'DRAGONX',
+    },
+    e280: {
+      name: 'E280',
+      chain: 'BASE',
+      pageSize: 1000,
+      apiEndpoint: '/api/holders/E280',
+      rewardToken: 'E280',
+      disabled: true,
+    },
+  },
+  getContractDetails: (contractName) => {
+    return config.nftContracts[contractName] || null;
+  },
+  alchemy: {
+    apiKey: process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
+    network: 'eth-mainnet',
+    batchSize: 50,
+    batchDelayMs: 500,
+    retryMaxDelayMs: 10000,
+    maxRetries: 2,
+    timeoutMs: 30000,
+  },
+  cache: {
+    redis: {
+      disableElement280: process.env.DISABLE_ELEMENT280_REDIS === 'true',
+      disableElement369: process.env.DISABLE_ELEMENT369_REDIS === 'true',
+      disableStax: process.env.DISABLE_STAX_REDIS === 'true',
+      disableAscendant: process.env.DISABLE_ASCENDANT_REDIS === 'true',
+      disableE280: process.env.DISABLE_E280_REDIS === 'true' || true,
+    },
+    nodeCache: {
+      stdTTL: 3600,
+      checkperiod: 120,
+    },
+  },
+  debug: {
+    enabled: process.env.DEBUG === 'true',
+    logLevel: 'debug',
+  },
+  fallbackData: {
+    element280: process.env.USE_FALLBACK_DATA === 'true' ? null : null,
+  },
+  burnAddress: '0x0000000000000000000000000000000000000000', // Standard zero address for burns
+};
+export default config;
+// --- ./contracts/contracts.js ---
+import { getAddress } from 'viem';
+import ascendantAuctionABI from '../abi/ascendantAuction.json' with { type: 'json' };
+import blazeAuctionABI from '../abi/blazeAuction.json' with { type: 'json' };
+import flareAuctionABI from '../abi/flareAuction.json' with { type: 'json' };;
+import flareMintingABI from '../abi/flareMinting.json' with { type: 'json' };;
+import fluxAuctionABI from '../abi/fluxAuction.json' with { type: 'json' };;
+import goatXAuctionABI from '../abi/goatXAuction.json' with { type: 'json' };;
+import matrixAuctionABI from '../abi/matrixAuction.json' with { type: 'json' };;
+import phoenixAuctionABI from '../abi/phoenixAuction.json' with { type: 'json' };;
+import shogunAuctionABI from '../abi/shogunAuction.json' with { type: 'json' };;
+import voltAuctionABI from '../abi/voltAuction.json' with { type: 'json' };;
+import vyperBoostAuctionABI from '../abi/vyperBoostAuction.json' with { type: 'json' };;
+import vyperClassicAuctionABI from '../abi/vyperClassicAuction.json' with { type: 'json' };;
+const rawContracts = {
+  // Ascendant
+  ASCENDANT: {
+    name: 'Ascendant Token',
+    address: getAddress('0x0943D06A5Ff3B25ddC51642717680c105AD63c01'),
+    chainId: 1,
+    type: 'token',
+  },
+  ASCENDANT_AUCTION: {
+    name: 'Ascendant Auction',
+    address: getAddress('0x592daEb53eB1cef8aa96305588310E997ec58c0c'),
+    chainId: 1,
+    type: 'auction',
+    abi: ascendantAuctionABI,
+  },
+  ASCENDANT_BUY_AND_BURN: {
+    name: 'Ascendant Buy and Burn',
+    address: getAddress('0x27D21C4Fa62F063B5f005c5BD87cffEa62e348D1'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  ASCENDANT_DRAGONX: {
+    name: 'ASCENDANT/DRAGONX Pool',
+    address: getAddress('0xe8cC60F526bec8C663C6eEc5A65eFAe9d89Ee6aD'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  ASCENDANT_NFT_MARKETPLACE: {
+    name: 'Ascendant NFT Marketplace',
+    address: getAddress('0x2a7156295E85991A3861e2FAB09Eef6AcAC94717'),
+    chainId: 1,
+    type: 'marketplace',
+  },
+  ASCENDANT_NFT_MINTING: {
+    name: 'Ascendant NFT Minting',
+    address: getAddress('0x9dA95C32C5869c84Ba2C020B5e87329eC0aDC97f'),
+    chainId: 1,
+    type: 'minting',
+  },
+  ASCENDANT_PRIDE: {
+    name: 'Ascendant Pride',
+    address: getAddress('0x1B7C257ee2D1f30E1be2F90968258F13eD961c82'),
+    chainId: 1,
+    type: 'special',
+  },
+  // Blaze
+  BLAZE: {
+    name: 'Blaze Token',
+    address: getAddress('0xfcd7cceE4071aA4ecFAC1683b7CC0aFeCAF42A36'),
+    chainId: 1,
+    type: 'token',
+  },
+  BLAZE_AUCTION: {
+    name: 'Blaze Auction',
+    address: getAddress('0x200ed69de20Fe522d08dF5d7CE3d69aba4e02e74'),
+    chainId: 1,
+    type: 'auction',
+    abi: blazeAuctionABI,
+  },
+  BLAZE_BONFIRE: {
+    name: 'Blaze Bonfire',
+    address: getAddress('0x72AB9dcAc1BE635e83D0E458D2aA1FbF439B44f7'),
+    chainId: 1,
+    type: 'bonfire',
+  },
+  BLAZE_BUY_AND_BURN: {
+    name: 'Blaze Buy and Burn',
+    address: getAddress('0x27D80441831252950C528343a4F5CcC6b1E0EA95'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  BLAZE_STAKING: {
+    name: 'Blaze Staking',
+    address: getAddress('0xBc0043bc5b0c394D9d05d49768f9548F8CF9587b'),
+    chainId: 1,
+    type: 'staking',
+  },
+  BLAZE_TITANX: {
+    name: 'BLAZE/TITANX Pool',
+    address: getAddress('0x4D3A10d4792Dd12ececc5F3034C8e264B28485d1'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+  // Bonfire
+  BONFIRE: {
+    name: 'Bonfire Token',
+    address: getAddress('0x7d51174B02b6242D7b4510Cd988d24bC39d026c3'),
+    chainId: 1,
+    type: 'token',
+  },
+  BONFIRE_BUY_AND_BURN: {
+    name: 'Bonfire Buy and Burn',
+    address: getAddress('0xe871fEB86093809F1c9555a83B292419BB23F699'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  BONFIRE_X28: {
+    name: 'BONFIRE/X28 Pool',
+    address: getAddress('0x2DF1230D9Bd024A9d4EdB53336165Eb27AaBc7Fd'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // DragonX
+  DRAGONX: {
+    name: 'DragonX Token',
+    address: getAddress('0x96a5399D07896f757Bd4c6eF56461F58DB951862'),
+    chainId: 1,
+    type: 'token',
+  },
+  DRAGONX_BURN_PROXY: {
+    name: 'DragonX Burn Proxy',
+    address: getAddress('0x1d59429571d8Fde785F45bf593E94F2Da6072Edb'),
+    chainId: 1,
+    type: 'proxy',
+  },
+  DRAGONX_BUY_AND_BURN: {
+    name: 'DragonX Buy and Burn',
+    address: getAddress('0x1A4330EAf13869D15014abcA69516FC6AB36E54D'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  DRAGONX_BUY_TITANS: {
+    name: 'DragonX Buy Titans',
+    address: getAddress('0x1A4330EAf13869D15014abcA69516FC6AB36E54D'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  DRAGONX_HYBRID: {
+    name: 'DragonX Hybrid',
+    address: getAddress('0x619321771d67d9D8e69A3503683FcBa0678D2eF3'),
+    chainId: 1,
+    type: 'hybrid',
+  },
+  DRAGONX_TITANX: {
+    name: 'DRAGONX/TITANX Pool',
+    address: getAddress('0x25215d9ba4403b3DA77ce50606b54577a71b7895'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // E280
+  E280_BASE: {
+    name: 'E280 Token (Base)',
+    address: getAddress('0x058E7b30200d001130232e8fBfDF900590E0bAA9'),
+    chainId: 8453,
+    type: 'token',
+  },
+  E280_ETH: {
+    name: 'E280 Token (Ethereum)',
+    address: getAddress('0x058E7b30200d001130232e8fBfDF900590E0bAA9'),
+    chainId: 1,
+    type: 'token',
+  },
+  E280_BUY_AND_BURN: {
+    name: 'E280 Buy and Burn',
+    address: getAddress('0x6E83D86841C70CCA0f16bf653A22899d06935Ee2'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  E280_LP_DEPOSITOR: {
+    name: 'E280 LP Depositor',
+    address: getAddress('0xB302fbF6c9836557371a79012b540303Cc758BB3'),
+    chainId: 1,
+    type: 'depositor',
+  },
+  E280_REWARD_DEPOSITOR: {
+    name: 'E280 Reward Depositor',
+    address: getAddress('0xD8f842150511e8F501050E8a4c6878104312d82C'),
+    chainId: 1,
+    type: 'depositor',
+  },
+  E280_TAX_DEPOSITOR: {
+    name: 'E280 Tax Depositor',
+    address: getAddress('0x55F643B0B7b8d8B824c2b33eC392023AbefF0a52'),
+    chainId: 1,
+    type: 'depositor',
+  },
+  E280_TAX_DISTRIBUTOR: {
+    name: 'E280 Tax Distributor',
+    address: getAddress('0x1b25cc7461a9EE4a4c8f9dA82c828D8a39ea73e4'),
+    chainId: 1,
+    type: 'distributor',
+  },
+  STAX_ELEMENT280: {
+    name: 'STAX/ELEMENT280 Pool',
+    address: getAddress('0x190BD81780e46124245d39774776be939bB8595B'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+  // Eden
+  EDEN: {
+    name: 'Eden Token',
+    address: getAddress('0x31b2c59d760058cfe57e59472E7542f776d987FB'),
+    chainId: 1,
+    type: 'token',
+  },
+  EDEN_BLOOM_POOL: {
+    name: 'Eden Bloom Pool',
+    address: getAddress('0xe5Da018596D0e60d704b09d0E43734266e280e05'),
+    chainId: 1,
+    type: 'pool',
+  },
+  EDEN_BUY_AND_BURN: {
+    name: 'Eden Buy and Burn',
+    address: getAddress('0x1681EB21026104Fa63121fD517e065cEc21A4b4C'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  EDEN_MINING: {
+    name: 'Eden Mining',
+    address: getAddress('0x890B015ECA83a6CA03b436a748969976502B7c0c'),
+    chainId: 1,
+    type: 'mining',
+  },
+  EDEN_STAKING: {
+    name: 'Eden Staking',
+    address: getAddress('0x32C611b0a96789BaA3d6bF9F0867b7E1b9d049Be'),
+    chainId: 1,
+    type: 'staking',
+  },
+  // Element
+  ELEMENT: {
+    name: 'Element Token',
+    address: getAddress('0xe9A53C43a0B58706e67341C4055de861e29Ee943'),
+    chainId: 1,
+    type: 'token',
+  },
+  ELEMENT_BUY_AND_BURN: {
+    name: 'Element Buy and Burn',
+    address: getAddress('0x3F2b113d180ecb1457e450b9EfcAC3df1Dd29AD3'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  ELEMENT_BUY_AND_BURN_V2: {
+    name: 'Element Buy and Burn V2',
+    address: getAddress('0x88BB363b333a6291Cf7CF5931eFe7a1E2D978325'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  ELEMENT_HOLDER_VAULT: {
+    name: 'Element Holder Vault',
+    address: getAddress('0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97'),
+    chainId: 1,
+    type: 'vault',
+  },
+  ELEMENT_NFT: {
+    name: 'Element NFT',
+    address: getAddress('0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9'),
+    chainId: 1,
+    type: 'nft',
+  },
+  // Element369
+  ELEMENT369_FLUX_HUB: {
+    name: 'Element369 Flux Hub',
+    address: getAddress('0x6067487ee98B6A830cc3E5E7F57Dc194044D1F1D'),
+    chainId: 1,
+    type: 'hub',
+  },
+  ELEMENT369_HOLDER_VAULT: {
+    name: 'Element369 Holder Vault',
+    address: getAddress('0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5'),
+    chainId: 1,
+    type: 'vault',
+  },
+  ELEMENT369_NFT: {
+    name: 'Element369 NFT',
+    address: getAddress('0x024D64E2F65747d8bB02dFB852702D588A062575'),
+    chainId: 1,
+    type: 'nft',
+  },
+  // Flare
+  FLARE: {
+    name: 'Flare Token',
+    address: getAddress('0x34a4FE5397bf2768189EDe14FE4adAD374B993B8'),
+    chainId: 1,
+    type: 'token',
+  },
+  FLARE_AUCTION: {
+    name: 'Flare Auction',
+    address: getAddress('0x58ad6EF28bFB092635454d02303aBBd4D87b503c'),
+    chainId: 1,
+    type: 'auction',
+    abi: flareAuctionABI,
+  },
+  FLARE_AUCTION_BUY_AND_BURN: {
+    name: 'Flare Auction Buy and Burn',
+    address: getAddress('0x17d8258eC7fA1EfC9CA4c6C15f3417bF30564048'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  FLARE_AUCTION_TREASURY: {
+    name: 'Flare Auction Treasury',
+    address: getAddress('0x744D402674006f2711a3D6E4a80cc749C7915545'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  FLARE_BUY_AND_BURN: {
+    name: 'Flare Buy and Burn',
+    address: getAddress('0x6A12392C7dc5ddAA7d59007B329BFED35af092E6'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  FLARE_MINTING: {
+    name: 'Flare Minting',
+    address: getAddress('0x9983eF6Af4DE8fE58C45f6DC54Cf5Ad349431A82'),
+    chainId: 1,
+    type: 'minting',
+    abi: flareMintingABI,
+  },
+  FLARE_X28: {
+    name: 'FLARE/X28 Pool',
+    address: getAddress('0x05b7Cc21A11354778Cf0D7faf159f1a99724ccFd'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+  // Flux
+  FLUX: {
+    name: 'Flux Token',
+    address: getAddress('0xBFDE5ac4f5Adb419A931a5bF64B0f3BB5a623d06'),
+    chainId: 1,
+    type: 'token',
+  },
+  FLUX_777: {
+    name: 'Flux 777',
+    address: getAddress('0x52ca28e311f200d1CD47C06996063e14eC2d6aB1'),
+    chainId: 1,
+    type: 'special',
+  },
+  FLUX_AUCTION: {
+    name: 'Flux Auction',
+    address: getAddress('0x36e5a8105f000029d4B3B99d0C3D0e24aaA52adF'),
+    chainId: 1,
+    type: 'auction',
+    abi: fluxAuctionABI,
+  },
+  FLUX_BUY_AND_BURN: {
+    name: 'Flux Buy and Burn',
+    address: getAddress('0xaE14148F726E7C3AA5C0c992D044bE113b32292C'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  FLUX_STAKING: {
+    name: 'Flux Staking',
+    address: getAddress('0xd605a87187563C94c577a6E57e4a36eC8433B9aE'),
+    chainId: 1,
+    type: 'staking',
+  },
+  FLUX_TITANX: {
+    name: 'FLUX/TITANX Pool',
+    address: getAddress('0x2278012E61c0fB38DaE1579bD41a87A59A5954c2'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // GoatX
+  GOATX: {
+    name: 'GoatX Token',
+    address: getAddress('0x4Eca7761a516F8300711cbF920C0b85555261993'),
+    chainId: 1,
+    type: 'token',
+  },
+  GOATX_AUCTION: {
+    name: 'GoatX Auction',
+    address: getAddress('0x059511B0BED706276Fa98877bd00ee0dD7303D32'),
+    chainId: 1,
+    type: 'auction',
+    abi: goatXAuctionABI,
+  },
+  GOATX_BUY_AND_BURN: {
+    name: 'GoatX Buy and Burn',
+    address: getAddress('0xE6Cf4Cb42A6c37729c4546b4B9E83b97a05cE950'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  GOATX_MINING: {
+    name: 'GoatX Mining',
+    address: getAddress('0x4E83d6911bc1E191Bd207920737149B8FC060c8D'),
+    chainId: 1,
+    type: 'mining',
+  },
+  // Helios
+  HELIOS: {
+    name: 'Helios Token',
+    address: getAddress('0x2614f29C39dE46468A921Fd0b41fdd99A01f2EDf'),
+    chainId: 1,
+    type: 'token',
+  },
+  HELIOS_BUY_AND_BURN: {
+    name: 'Helios Buy and Burn',
+    address: getAddress('0x9bff9f810d19cdb4bf7701c9d5ad101e91cda08d'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  HELIOS_TITANX: {
+    name: 'HELIOS/TITANX Pool',
+    address: getAddress('0x2C83C54C5612BfD62a78124D4A0eA001278a689c'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // Hyper
+  HYPER: {
+    name: 'Hyper Token',
+    address: getAddress('0xE2cfD7a01ec63875cd9Da6C7c1B7025166c2fA2F'),
+    chainId: 1,
+    type: 'token',
+  },
+  HYPER_BUY_AND_BURN: {
+    name: 'Hyper Buy and Burn',
+    address: getAddress('0x15Bec83b642217814dDAeB6F8A74ba7E0D6D157E'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  HYPER_TITANX: {
+    name: 'HYPER/TITANX Pool',
+    address: getAddress('0x14d725edB1299fF560d96f42462f0234B65B00AF'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // Hydra
+  HYDRA: {
+    name: 'Hydra Token',
+    address: getAddress('0xCC7ed2ab6c3396DdBc4316D2d7C1b59ff9d2091F'),
+    chainId: 1,
+    type: 'token',
+  },
+  HYDRA_BUY_AND_BURN: {
+    name: 'Hydra Buy and Burn',
+    address: getAddress('0xfEF10De0823F58DF4f5F24856aB4274EdeDa6A5c'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  HYDRA_DRAGONX: {
+    name: 'HYDRA/DRAGONX Pool',
+    address: getAddress('0xF8F0Ef9f6A12336A1e035adDDbD634F3B0962F54'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // Matrix
+  MATRIX: {
+    name: 'Matrix Token',
+    address: getAddress('0xF2Fc894381792Ded27a7f08D9F0F246363cBe1ea'),
+    chainId: 1,
+    type: 'token',
+  },
+  MATRIX_AUCTION: {
+    name: 'Matrix Auction',
+    address: getAddress('0x9f29E5b2d67C4a7315c5D6AbD448C45f9dD51CAF'),
+    chainId: 1,
+    type: 'auction',
+    abi: matrixAuctionABI,
+  },
+  MATRIX_BUY_AND_BURN: {
+    name: 'Matrix Buy and Burn',
+    address: getAddress('0x50371D550e1eaB5aeC08d2D79B77B14b79dCC57E'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  MATRIX_HYPER: {
+    name: 'MATRIX/HYPER Pool',
+    address: getAddress('0x9dA4aCd7d87e7396901d92671173296bf9845c53'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // ORX
+  ORX: {
+    name: 'ORX Token',
+    address: getAddress('0xd536e7a9543cf9867a580b45cec7f748a1fe11ec'),
+    chainId: 1,
+    type: 'token',
+  },
+  ORX_MINTER: {
+    name: 'ORX Minter',
+    address: getAddress('0x4C93D6380D22C44850Bdfa569Df5dD96e278622B'),
+    chainId: 1,
+    type: 'minter',
+  },
+  ORX_MULTISIG: {
+    name: 'ORX Multisig',
+    address: getAddress('0x54FDAcea0af4026306A665E9dAB635Ef5fF2963f'),
+    chainId: 1,
+    type: 'multisig',
+  },
+  ORX_STAKING: {
+    name: 'ORX Staking',
+    address: getAddress('0xE293DFD4720308c048B63AfE885F5971E135Eb1e'),
+    chainId: 1,
+    type: 'staking',
+  },
+  ORX_TITANX: {
+    name: 'ORX/TITANX Pool',
+    address: getAddress('0x2A216495584E406C39582d3ee583aEDA937beba6'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  USDX: {
+    name: 'USDx Stable',
+    address: getAddress('0xDDF73eAcB2218377FC38679aD14dfce51B651Dd1'),
+    chainId: 1,
+    type: 'stablecoin',
+  },
+  // Phoenix
+  PHOENIX: {
+    name: 'Phoenix Token',
+    address: getAddress('0xfe3F988a90dEa3eE537BB43eC1aCa7337A15D002'),
+    chainId: 1,
+    type: 'token',
+  },
+  PHOENIX_AUCTION: {
+    name: 'Phoenix Auction',
+    address: getAddress('0xF41b5c99b8B6b88cF1Bd0320cB57e562EaF17DE1'),
+    chainId: 1,
+    type: 'auction',
+    abi: phoenixAuctionABI,
+  },
+  PHOENIX_BLAZE_STAKING_VAULT: {
+    name: 'Phoenix Blaze Staking Vault',
+    address: getAddress('0xBbe51Ee30422cb9a92D93363d2921A330813b598'),
+    chainId: 1,
+    type: 'stakingVault',
+  },
+  PHOENIX_BUY_AND_BURN: {
+    name: 'Phoenix Buy and Burn',
+    address: getAddress('0x97eBd4f9FfCFE0cBC8F63A4e0B296FbB54f0a185'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  PHOENIX_FLUX_STAKING_VAULT: {
+    name: 'Phoenix Flux Staking Vault',
+    address: getAddress('0x3F1BFcd2a04a829ff4106217F8EB8eFa1C31e89b'),
+    chainId: 1,
+    type: 'stakingVault',
+  },
+  PHOENIX_MINTING: {
+    name: 'Phoenix Minting',
+    address: getAddress('0xAaE97688F2c28c3E391dFddC7B26276D8445B199'),
+    chainId: 1,
+    type: 'minting',
+  },
+  PHOENIX_TITANX_STAKING_VAULT: {
+    name: 'Phoenix TitanX Staking Vault',
+    address: getAddress('0x6B59b8E9635909B7f0FF2C577BB15c936f32619A'),
+    chainId: 1,
+    type: 'stakingVault',
+  },
+  // Shogun
+  SHOGUN: {
+    name: 'Shogun Token',
+    address: getAddress('0xfD4cB1294dF23920e683e046963117cAe6C807D9'),
+    chainId: 1,
+    type: 'token',
+  },
+  SHOGUN_AUCTION: {
+    name: 'Shogun Auction',
+    address: getAddress('0x79bd712f876c364Aa5e775A1eD40dE1fDfdB2a50'),
+    chainId: 1,
+    type: 'auction',
+    abi: shogunAuctionABI,
+  },
+  SHOGUN_BUY_AND_BURN: {
+    name: 'Shogun Buy and Burn',
+    address: getAddress('0xF53D4f2E79d66605aE7c2CAdc0A40A1e7CbE973A'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  SHOGUN_TITANX: {
+    name: 'SHOGUN/TITANX Pool',
+    address: getAddress('0x79bd712f876c364Aa5e775A1eD40dE1fDfdB2a50'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+  // Stax
+  STAX: {
+    name: 'Stax Token',
+    address: getAddress('0x4bd0F1886010253a18BBb401a788d8972c155b9d'),
+    chainId: 1,
+    type: 'token',
+  },
+  STAX_BANK: {
+    name: 'Stax Bank',
+    address: getAddress('0x1b15e269D07986F0b8751872C16D9F47e1582402'),
+    chainId: 1,
+    type: 'bank',
+  },
+  STAX_BLAZE: {
+    name: 'Stax Blaze',
+    address: getAddress('0x03a48BaadAe6A0474aDc6F39111428BaDbfb54D1'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_BUY_AND_BURN: {
+    name: 'Stax Buy and Burn',
+    address: getAddress('0x1698a3e248FF7F0f1f91FE82Eedaa3F1212D1F7F'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  STAX_EDEN: {
+    name: 'Stax Eden',
+    address: getAddress('0x5d91C1180f063c66DC0a08CE136AeC92B97f8F87'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_FLUX: {
+    name: 'Stax Flux',
+    address: getAddress('0xC3379750B254977f195BA60D096BBcCfe6b81ce8'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_HELIOS: {
+    name: 'Stax Helios',
+    address: getAddress('0xCd5fd72664f5A4dB62E44e9c778E9dAeB01F2bB2'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_HELIOS_V2: {
+    name: 'Stax Helios V2',
+    address: getAddress('0x3A50Cc9740DE6143c8d53Df44ece96Eeb07318E8'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_HOLDER_VAULT: {
+    name: 'Stax Holder Vault',
+    address: getAddress('0x5D27813C32dD705404d1A78c9444dAb523331717'),
+    chainId: 1,
+    type: 'vault',
+  },
+  STAX_HYPER: {
+    name: 'Stax Hyper',
+    address: getAddress('0xa23f149f10f415c56b1629Fe07bf94278c808271'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_NFT: {
+    name: 'Stax NFT',
+    address: getAddress('0x74270Ca3a274B4dbf26be319A55188690CACE6E1'),
+    chainId: 1,
+    type: 'nft',
+  },
+  STAX_ORX: {
+    name: 'Stax ORX',
+    address: getAddress('0xF1b7081Cab015ADB3c1B8D3A8732763dBc87B744'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_TITANX: {
+    name: 'Stax TitanX',
+    address: getAddress('0x802974Ea9362b46a6eeAb4431E030D17dF6613E8'),
+    chainId: 1,
+    type: 'staking',
+  },
+  // TitanX
+  TITANX: {
+    name: 'TitanX Token',
+    address: getAddress('0xF19308F923582A6f7c465e5CE7a9Dc1BEC6665B1'),
+    chainId: 1,
+    type: 'token',
+  },
+  TITANX_BUY_AND_BURN_V1: {
+    name: 'TitanX Buy and Burn V1',
+    address: getAddress('0x1393ad734EA3c52865b4B541cf049dafd25c23a5'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  TITANX_BUY_AND_BURN_V2: {
+    name: 'TitanX Buy and Burn V2',
+    address: getAddress('0x410e10C33a49279f78CB99c8d816F18D5e7D5404'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  TITANX_TREASURY: {
+    name: 'TitanX Treasury',
+    address: getAddress('0xA2d21205Aa7273BadDFC8E9551e05E23bB49ce46'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  TITANX_WETH: {
+    name: 'TITANX/WETH Pool',
+    address: getAddress('0xc45A81BC23A64eA556ab4CdF08A86B61cdcEEA8b'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // USDC
+  USDC: {
+    name: 'USDC Token',
+    address: getAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'),
+    chainId: 1,
+    type: 'stablecoin',
+  },
+  // Volt
+  VOLT: {
+    name: 'Volt Token',
+    address: getAddress('0x66b5228CfD34d9f4d9F03188d67816286C7c0b74'),
+    chainId: 1,
+    type: 'token',
+  },
+  VOLT_AUCTION: {
+    name: 'Volt Auction',
+    address: getAddress('0xb3f2bE29BA969588E07bF7512e07008D6fdeB17B'),
+    chainId: 1,
+    type: 'auction',
+    abi: voltAuctionABI,
+  },
+  VOLT_BUY_AND_BURN: {
+    name: 'Volt Buy and Burn',
+    address: getAddress('0x2801592e5Cdd85aC4e462DB2abC80951705cf601'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  VOLT_TITANX: {
+    name: 'VOLT/TITANX Pool',
+    address: getAddress('0x3F1A36B6C946E406f4295A89fF06a5c7d62F2fe2'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  VOLT_TREASURY: {
+    name: 'Volt Treasury',
+    address: getAddress('0xb638BFB7BC3B8398bee48569CFDAA6B3Bb004224'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  // Vyper
+  VYPER: {
+    name: 'Vyper Token',
+    address: getAddress('0xd7fa4cFC22eA07DfCeD53033fbE59d8b62B8Ee9E'),
+    chainId: 1,
+    type: 'token',
+  },
+  VYPER_BOOST_AUCTION: {
+    name: 'Vyper Boost Auction',
+    address: getAddress('0x4D994F53FE2d8BdBbF64dC2e53C58Df00b84e713'),
+    chainId: 1,
+    type: 'auction',
+    abi: vyperBoostAuctionABI,
+  },
+  VYPER_BOOST_TREASURY: {
+    name: 'Vyper Boost Treasury',
+    address: getAddress('0x637dfBB5db0cf7B4062cb577E24cfB43c67d72BA'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  VYPER_CLASSIC_AUCTION: {
+    name: 'Vyper Classic Auction',
+    address: getAddress('0xC1da113c983b26aa2c3f4fFD5f10b47457FC3397'),
+    chainId: 1,
+    type: 'auction',
+    abi: vyperClassicAuctionABI,
+  },
+  VYPER_CLASSIC_TREASURY: {
+    name: 'Vyper Classic Treasury',
+    address: getAddress('0xeb103eb39375077c5Afaa04150B4D334df69128A'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  VYPER_DRAGONX: {
+    name: 'VYPER/DRAGONX Pool',
+    address: getAddress('0x214CAD3f7FbBe66919968Fa3a1b16E84cFcd457F'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // WETH
+  WETH: {
+    name: 'Wrapped Ether',
+    address: getAddress('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+    chainId: 1,
+    type: 'token',
+  },
+  // WETH/USDC Pool
+  WETH_USDC: {
+    name: 'WETH/USDC Pool',
+    address: getAddress('0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  // X28
+  X28: {
+    name: 'X28 Omnichain Token',
+    address: getAddress('0x5c47902c8C80779CB99235E42C354E53F38C3B0d'),
+    chainId: 1,
+    type: 'token',
+  },
+  X28_BUY_AND_BURN: {
+    name: 'X28 Buy and Burn',
+    address: getAddress('0xa3144E7FCceD79Ce6ff6E14AE9d8DF229417A7a2'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  X28_TITANX: {
+    name: 'X28/TITANX Pool',
+    address: getAddress('0x99f60479da6A49D55eBA34893958cdAACc710eE9'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+};
+export const tokenContracts = rawContracts;
+export const flareTokenABI = [
+  {
+    type: 'function',
+    name: 'x28FlarePool',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+export const uniswapPoolABI = [
+  {
+    type: 'function',
+    name: 'slot0',
+    inputs: [],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'tick', type: 'int24' },
+      { name: 'observationIndex', type: 'uint16' },
+      { name: 'observationCardinality', type: 'uint16' },
+      { name: 'observationCardinalityNext', type: 'uint16' },
+      { name: 'feeProtocol', type: 'uint8' },
+      { name: 'unlocked', type: 'bool' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token0',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token1',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+export const uniswapV2PoolABI = [
+  {
+    type: 'function',
+    name: 'getReserves',
+    inputs: [],
+    outputs: [
+      { name: '_reserve0', type: 'uint112' },
+      { name: '_reserve1', type: 'uint112' },
+      { name: '_blockTimestampLast', type: 'uint32' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token0',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token1',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+// --- ./client/lib/chartOptions.js ---
+export const barChartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top', labels: { color: '#e5e7eb' } }, // Gray-200
+      title: {
+        display: true,
+        text: 'NFT Tier Distribution',
+        color: '#e5e7eb',
+        font: { size: 16, weight: 'bold' },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: { display: true, text: 'Number of NFTs', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' }, // Gray-300
+      },
+      x: {
+        title: { display: true, text: 'Tiers', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' },
+      },
+    },
+  };
+// --- ./client/lib/fetchCollectionData.js ---
+import config from '@/contracts/config';
+import { HoldersResponseSchema, ProgressResponseSchema } from '@/client/lib/schemas';
+const debounce = (func, wait) => {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    return new Promise(resolve => {
+      timeout = setTimeout(() => resolve(func(...args)), wait);
+    });
+  };
+};
+export async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[FetchCollectionData] [INFO] Fetching ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+      console.log(`[FetchCollectionData] [INFO] ${apiKey} is disabled`);
+      return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' };
+    }
+    const endpoint = apiEndpoint.startsWith('http')
+      ? apiEndpoint
+      : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${apiEndpoint}`;
+    const pollProgress = async () => {
+      const res = await fetch(`${endpoint}/progress`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(config.alchemy.timeoutMs),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Progress fetch failed: ${res.status} ${errorText}`);
+      }
+      const progress = await res.json();
+      console.log(`[FetchCollectionData] [DEBUG] Progress: ${JSON.stringify(progress)}`);
+      const validation = ProgressResponseSchema.safeParse(progress);
+      if (!validation.success) {
+        console.error(`[FetchCollectionData] [ERROR] Invalid progress data: ${JSON.stringify(validation.error.errors)}`);
+        throw new Error('Invalid progress data');
+      }
+      return validation.data;
+    };
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalShares = 0;
+    let totalBurned = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+    let postAttempts = 0;
+    const maxPostAttempts = 5;
+    let pollAttempts = 0;
+    const maxPollAttempts = 360; // 180 seconds / 500ms = 360 attempts
+    const maxPollTime = 180000; // 180 seconds
+    const startTime = Date.now();
+    // Debounced POST request with increased delay
+    const triggerPost = debounce(async () => {
+      console.log(`[FetchCollectionData] [INFO] Triggering POST for ${apiKey}, attempt ${postAttempts + 1}/${maxPostAttempts}`);
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceUpdate: false }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FetchCollectionData] [ERROR] POST failed: ${res.status} ${errorText}`);
+        throw new Error(`POST request failed: ${res.status} ${errorText}`);
+      }
+      return res.json();
+    }, 2000); // Increased from 1000ms to 2000ms
+    let progress = await pollProgress();
+    while (progress.phase !== 'Completed' && progress.phase !== 'Error') {
+      if (Date.now() - startTime > maxPollTime) {
+        console.error(`[FetchCollectionData] [ERROR] Cache population timeout for ${apiKey}`);
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Cache population timed out' };
+      }
+      if (pollAttempts >= maxPollAttempts) {
+        console.error(`[FetchCollectionData] [ERROR] Max poll attempts (${maxPollAttempts}) reached for ${apiKey}`);
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Max poll attempts reached' };
+      }
+      if (progress.phase === 'Idle' || progress.totalOwners === 0) {
+        if (postAttempts >= maxPostAttempts) {
+          console.error(`[FetchCollectionData] [ERROR] Max POST attempts (${maxPostAttempts}) reached for ${apiKey}`);
+          return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Max POST attempts reached for cache population' };
+        }
+        try {
+          console.log(`[FetchCollectionData] [DEBUG] Sending POST request, attempt ${postAttempts + 1}/${maxPostAttempts}`);
+          const postResponse = await triggerPost();
+          if (postResponse.error) {
+            console.error(`[FetchCollectionData] [ERROR] POST response error: ${postResponse.error}`);
+            return { holders: [], totalTokens: 0, totalBurned: 0, error: postResponse.error };
+          }
+          postAttempts++;
+        } catch (error) {
+          console.error(`[FetchCollectionData] [ERROR] POST attempt failed: ${error.message}`);
+          if (error.message.includes('Invalid or disabled contract')) {
+            return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Invalid or disabled contract' };
+          }
+          postAttempts++;
+          if (postAttempts >= maxPostAttempts) {
+            console.error(`[FetchCollectionData] [ERROR] Max POST attempts (${maxPostAttempts}) reached after error`);
+            return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Max POST attempts reached after error' };
+          }
+        }
+      }
+      console.log(`[FetchCollectionData] [INFO] Waiting for ${apiKey} cache: ${progress.phase} (${progress.progressPercentage}%), poll attempt ${pollAttempts + 1}/${maxPollAttempts}`);
+      await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+      try {
+        progress = await pollProgress();
+      } catch (error) {
+        console.error(`[FetchCollectionData] [ERROR] Poll attempt failed: ${error.message}`);
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: `Polling failed: ${error.message}` };
+      }
+      pollAttempts++;
+    }
+    if (progress.phase === 'Error') {
+      console.error(`[FetchCollectionData] [ERROR] Cache population failed for ${apiKey}: ${progress.error || 'Unknown error'}`);
+      return { holders: [], totalTokens: 0, totalBurned: 0, error: `Cache population failed: ${progress.error || 'Unknown error'}` };
+    }
+    while (page < totalPages) {
+      const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[FetchCollectionData] [DEBUG] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'force-cache' });
+      console.log(`[FetchCollectionData] [DEBUG] Status: ${res.status}, headers: ${JSON.stringify([...res.headers])}`);
+      if (res.status === 202) {
+        console.log(`[FetchCollectionData] [INFO] Cache still populating for ${apiKey}, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+        continue;
+      }
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FetchCollectionData] [ERROR] Failed: ${res.status} ${errorText}`);
+        throw new Error(`API request failed: ${res.status} ${errorText}`);
+      }
+      const json = await res.json();
+      console.log(`[FetchCollectionData] [DEBUG] Response: ${JSON.stringify(json, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+      if (json.error) {
+        console.error(`[FetchCollectionData] [ERROR] API error for ${apiKey}: ${json.error}`);
+        throw new Error(json.error);
+      }
+      const validation = HoldersResponseSchema.safeParse(json);
+      if (!validation.success) {
+        console.error(`[FetchCollectionData] [ERROR] Invalid holders data: ${JSON.stringify(validation.error.errors)}`);
+        if (apiKey === 'ascendant') {
+          console.log(`[FetchCollectionData] [INFO] Triggering POST for ${apiKey}`);
+          if (postAttempts >= maxPostAttempts) {
+            console.error(`[FetchCollectionData] [ERROR] Max POST attempts (${maxPostAttempts}) reached for ${apiKey} retry`);
+            throw new Error('Max POST attempts reached for retry');
+          }
+          await triggerPost();
+          postAttempts++;
+          const retryRes = await fetch(url, { cache: 'no-store' });
+          if (!retryRes.ok) {
+            const retryError = await retryRes.text();
+            console.error(`[FetchCollectionData] [ERROR] Retry failed: ${retryRes.status} ${retryError}`);
+            throw new Error(`Retry failed: ${res.status} ${retryError}`);
+          }
+          const retryJson = await retryRes.json();
+          console.log(`[FetchCollectionData] [DEBUG] Retry response: ${JSON.stringify(retryJson, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+          const retryValidation = HoldersResponseSchema.safeParse(retryJson);
+          if (!retryValidation.success) {
+            console.error(`[FetchCollectionData] [ERROR] Retry invalid holders data: ${JSON.stringify(retryValidation.error.errors)}`);
+            throw new Error('Invalid holders data after retry');
+          }
+          json.holders = retryJson.holders;
+          json.totalTokens = retryJson.totalTokens || 0;
+          json.totalShares = retryJson.totalShares || 0;
+          json.totalBurned = retryJson.totalBurned || null; // Ascendant does not track burns
+          json.summary = retryJson.summary || {};
+          json.totalPages = retryJson.totalPages || 1;
+        } else {
+          throw new Error('Invalid holders data');
+        }
+      }
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalTokens;
+      totalBurned = json.totalBurned || totalBurned;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[FetchCollectionData] [INFO] Fetched page ${page}: ${json.holders.length} holders`);
+    }
+    return { holders: allHolders, totalTokens, totalShares, totalBurned, summary };
+  } catch (error) {
+    console.error(`[FetchCollectionData] [ERROR] ${apiKey}: ${error.message}, stack: ${error.stack}`);
+    return { holders: [], totalTokens: 0, totalBurned: 0, error: error.message };
+  }
+}
+// --- ./client/lib/schemas.js ---
+import { z } from 'zod';
+export const HoldersResponseSchema = z.object({
+  holders: z.array(z.any()),
+  totalPages: z.number(),
+  totalTokens: z.number(),
+  totalBurned: z.number().nullable(), // Allow null for Ascendant
+  summary: z.object({
+    totalLive: z.number(),
+    totalBurned: z.number().nullable(), // Allow null for Ascendant
+    totalMinted: z.number(),
+    tierDistribution: z.array(z.number()),
+    multiplierPool: z.number(),
+  }),
+  globalMetrics: z.object({}).optional(),
+});
+export const ProgressResponseSchema = z.object({
+  isPopulating: z.boolean(),
+  totalLiveHolders: z.number(),
+  totalOwners: z.number(),
+  phase: z.string(),
+  progressPercentage: z.string(),
+  lastProcessedBlock: z.number().nullable(),
+  lastUpdated: z.number().nullable(),
+  error: z.string().nullable(),
+  errorLog: z.array(z.any()), // Flexible to handle various error log formats
+  globalMetrics: z.object({}).optional(),
+});
+// --- ./client/lib/useNFTData.js ---
+'use client';
+import { useQuery } from '@tanstack/react-query';
+import { useNFTStore } from '@/app/store';
+import config from '@/contracts/config';
+import { HoldersResponseSchema } from '@/client/lib/schemas';
+async function fetchNFTData(apiKey, apiEndpoint, pageSize, page = 0) {
+  if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+    return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' };
+  }
+  const endpoint = apiEndpoint.startsWith('http') ? apiEndpoint : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${apiEndpoint}`;
+  const progressUrl = `${endpoint}/progress`;
+  const progressRes = await fetch(progressUrl, { cache: 'no-store' });
+  if (!progressRes.ok) throw new Error(`Progress fetch failed: ${progressRes.status}`);
+  const progress = await progressRes.json();
+  if (progress.isPopulating || progress.phase !== 'Completed') {
+    throw new Error('Cache is populating');
+  }
+  let allHolders = [];
+  let totalTokens = 0;
+  let totalShares = 0;
+  let totalBurned = 0;
+  let summary = {};
+  let totalPages = Infinity;
+  while (page < totalPages) {
+    const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+    const res = await fetch(url, { cache: 'force-cache' });
+    if (!res.ok) throw new Error(`API request failed: ${res.status}`);
+    const json = await res.json();
+    if (json.message === 'Cache is populating' || json.isCachePopulating) {
+      throw new Error('Cache is populating');
+    }
+    const validation = HoldersResponseSchema.safeParse(json);
+    if (!validation.success) {
+      throw new Error(`Invalid holders schema: ${JSON.stringify(validation.error.errors)}`);
+    }
+    allHolders = allHolders.concat(json.holders);
+    totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+    totalShares = json.totalShares || json.summary?.multiplierPool || totalShares;
+    totalBurned = json.totalBurned || totalBurned;
+    summary = json.summary || summary;
+    totalPages = json.totalPages || 1;
+    page++;
+  }
+  return { holders: allHolders, totalTokens, totalShares, totalBurned, summary };
+}
+export function useNFTData(apiKey, pageSize) {
+  const { getCache, setCache } = useNFTStore();
+  return useQuery({
+    queryKey: ['nft', apiKey],
+    queryFn: async () => {
+      const cachedData = getCache(apiKey);
+      if (cachedData) return cachedData;
+      const data = await fetchNFTData(apiKey, config.contractDetails[apiKey].apiEndpoint, pageSize);
+      setCache(apiKey, data);
+      return data;
+    },
+    retry: config.alchemy.maxRetries,
+    retryDelay: attempt => config.alchemy.batchDelayMs * (attempt + 1),
+    staleTime: 30 * 60 * 1000, // 30 minutes
+    refetchInterval: progress => (progress?.isPopulating ? 2000 : false),
+    onError: error => console.error(`[useNFTData] [ERROR] ${apiKey}: ${error.message}`),
+  });
+}
+// --- ./app/api/holders/Element280/validate-burned/route.js ---
+import { NextResponse } from 'next/server';
+import config from '@/contracts/config';
+import { getTransactionReceipt, log, client, getCache, setCache } from '@/app/api/utils.js';
+import { parseAbiItem } from 'viem';
+export async function POST(request) {
+  if (process.env.DEBUG === 'true') {
+    log(`[Element280-Validate-Burned] [DEBUG] Processing POST request for validate-burned`);
+  }
+  try {
+    const { transactionHash } = await request.json();
+    if (!transactionHash || typeof transactionHash !== 'string' || !transactionHash.match(/^0x[a-fA-F0-9]{64}$/)) {
+      log(`[Element280-Validate-Burned] [VALIDATION] Invalid transaction hash: ${transactionHash || 'undefined'}`);
+      return NextResponse.json({ error: 'Invalid transaction hash' }, { status: 400 });
+    }
+    const contractAddress = config.contractAddresses?.element280?.address;
+    if (!contractAddress) {
+      log(`[Element280-Validate-Burned] [VALIDATION] Element280 contract address not configured in config.js`);
+      return NextResponse.json({ error: 'Contract address not configured' }, { status: 500 });
+    }
+    const cacheKey = `element280_burn_validation_${transactionHash}`;
+    const cachedResult = await getCache(cacheKey, 'element280');
+    if (cachedResult) {
+      if (process.env.DEBUG === 'true') {
+        log(`[Element280-Validate-Burned] [DEBUG] Cache hit for burn validation: ${transactionHash}`);
+      }
+      return NextResponse.json(cachedResult);
+    }
+    if (process.env.DEBUG === 'true') {
+      log(`[Element280-Validate-Burned] [DEBUG] Fetching transaction receipt for hash: ${transactionHash}`);
+    }
+    const receipt = await getTransactionReceipt(transactionHash);
+    if (!receipt) {
+      log(`[Element280-Validate-Burned] [VALIDATION] Transaction receipt not found for hash: ${transactionHash}`);
+      return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
+    }
+    const burnAddress = '0x0000000000000000000000000000000000000000';
+    const transferEvent = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)');
+    const burnedTokenIds = [];
+    for (const logEntry of receipt.logs) {
+      if (
+        logEntry.address.toLowerCase() === contractAddress.toLowerCase() &&
+        logEntry.topics[0] === transferEvent.topics[0]
+      ) {
+        try {
+          const decodedLog = client.decodeEventLog({
+            abi: [transferEvent],
+            data: logEntry.data,
+            topics: logEntry.topics,
+          });
+          if (decodedLog.args.to.toLowerCase() === burnAddress) {
+            burnedTokenIds.push(decodedLog.args.tokenId.toString());
+          }
+        } catch (_decodeError) {
+          log(`[Element280-Validate-Burned] [ERROR] Failed to decode log entry for transaction ${transactionHash}: ${_decodeError.message}`);
+        }
+      }
+    }
+    if (burnedTokenIds.length === 0) {
+      log(`[Element280-Validate-Burned] [VALIDATION] No burn events found in transaction: ${transactionHash}`);
+      return NextResponse.json({ error: 'No burn events found in transaction' }, { status: 400 });
+    }
+    const result = {
+      transactionHash,
+      burnedTokenIds,
+      blockNumber: receipt.blockNumber.toString(),
+    };
+    await setCache(cacheKey, result, config.cache.nodeCache.stdTTL, 'element280');
+    if (process.env.DEBUG === 'true') {
+      log(`[Element280-Validate-Burned] [DEBUG] Found ${burnedTokenIds.length} burned tokens in transaction: ${transactionHash}`);
+    }
+    return NextResponse.json(result);
+  } catch (error) {
+    log(`[Element280-Validate-Burned] [ERROR] Error processing transaction: ${error.message}, stack: ${error.stack}`);
+    return NextResponse.json({ error: 'Failed to validate transaction', details: error.message }, { status: 500 });
+  }
+}
+// --- ./app/api/holders/[contract]/progress/route.js ---
+import { NextResponse } from 'next/server';
+import { logger, validateContract } from '@/app/api/utils';
+import { getCacheState } from '@/app/api/holders/utils/cache';
+export async function GET(request, { params }) {
+  const { contract } = await params; // Await params
+  const contractKey = contract.toLowerCase();
+  try {
+    await validateContract(contractKey);
+    const cacheState = await getCacheState(contractKey);
+    return NextResponse.json({
+      isPopulating: cacheState.isPopulating,
+      totalLiveHolders: cacheState.totalLiveHolders,
+      totalOwners: cacheState.totalOwners,
+      phase: cacheState.phase,
+      progressPercentage: cacheState.progressPercentage,
+      lastProcessedBlock: cacheState.lastProcessedBlock,
+      lastUpdated: cacheState.lastUpdated,
+      error: cacheState.error,
+      errorLog: cacheState.errorLog,
+      globalMetrics: cacheState.globalMetrics,
+    });
+  } catch (error) {
+    logger.error('progress', `Failed to fetch progress for ${contractKey}: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    return NextResponse.json(
+      { error: `Failed to fetch progress for ${contractKey}`, details: error.message },
+      { status: 500 }
+    );
+  }
+}
+// --- ./app/api/holders/[contract]/route.js ---
+import { NextResponse } from 'next/server';
+import Redis from 'ioredis';
+import config from '@/contracts/config';
+import { logger } from '@/app/utils/logger';
+import { populateHoldersMapCache } from './utils/population';
+import { getCacheState, cache } from './utils/cache';
+const redis = process.env.KV_URL ? new Redis(process.env.KV_URL, { tls: { rejectUnauthorized: false } }) : null;
+const CACHE_TTL = 3600;
+export async function GET(request, { params }) {
+  const contractKey = params.contract.toLowerCase();
+  const { searchParams } = new URL(request.url);
+  const page = parseInt(searchParams.get('page') || '0');
+  const pageSize = parseInt(searchParams.get('pageSize') || config.contractDetails[contractKey]?.pageSize || 1000);
+  const wallet = searchParams.get('wallet')?.toLowerCase();
+  logger.info('holders', `GET request: contract=${contractKey}, page=${page}, pageSize=${pageSize}, wallet=${wallet}`, {}, 'eth', contractKey);
+  try {
+    const contractConfig = config.nftContracts[contractKey];
+    if (!contractConfig || config.contractDetails[contractKey]?.disabled) {
+      throw new Error(`${contractKey} configuration missing or disabled`);
+    }
+    const cacheKey = `holders_${contractKey}_${page}_${pageSize}_${wallet || 'all'}`;
+    let cachedData;
+    if (redis) {
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        logger.info('holders', `Redis cache hit: ${cacheKey}`, {}, 'eth', contractKey);
+        return NextResponse.json(JSON.parse(cached));
+      }
+    } else {
+      cachedData = cache.get(`holders_${contractKey}`);
+      if (cachedData) {
+        logger.info('holders', `Node cache hit: ${cacheKey}`, {}, 'eth', contractKey);
+      }
+    }
+    if (!cachedData) {
+      logger.info('holders', `Cache miss: ${cacheKey}, triggering population`, {}, 'eth', contractKey);
+      const result = await populateHoldersMapCache(contractKey, false);
+      if (result.status === 'error') {
+        throw new Error(result.error || 'Cache population failed');
+      }
+      cachedData = result;
+    }
+    let holders = cachedData.holders || [];
+    if (wallet) {
+      holders = holders.filter(h => h.owner.toLowerCase() === wallet);
+    }
+    const start = page * pageSize;
+    const end = Math.min(start + pageSize, holders.length);
+    const paginatedHolders = holders.slice(start, end);
+    const response = {
+      holders: paginatedHolders,
+      totalMinted: cachedData.totalMinted,
+      totalLive: cachedData.totalLive,
+      totalBurned: cachedData.totalBurned, // Null for Element369 and Ascendant
+      totalHolders: cachedData.totalHolders,
+      page,
+      pageSize,
+      totalPages: Math.ceil(holders.length / pageSize),
+    };
+    if (redis) {
+      await redis.setex(cacheKey, CACHE_TTL, JSON.stringify(response));
+    } else {
+      cache.set(`holders_${contractKey}`, cachedData);
+    }
+    return NextResponse.json(response);
+  } catch (error) {
+    logger.error('holders', `GET error: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    return NextResponse.json({ error: error.message }, { status: error.message.includes('Rate limit') ? 429 : 500 });
+  }
+}
+export async function POST(request, { params }) {
+  const contractKey = params.contract.toLowerCase();
+  try {
+    logger.info('holders', `POST request received: contract=${contractKey}`, {}, 'eth', contractKey);
+    if (!config.contractDetails[contractKey] || config.contractDetails[contractKey].disabled) {
+      logger.error('holders', `Invalid or disabled contract: ${contractKey}`, {}, 'eth', contractKey);
+      throw new Error(`Invalid or disabled contract: ${contractKey}`);
+    }
+    const body = await request.json().catch(() => ({}));
+    const forceUpdate = body.forceUpdate === true;
+    logger.info('holders', `Triggering populateHoldersMapCache for ${contractKey}, forceUpdate=${forceUpdate}`, {}, 'eth', contractKey);
+    const { status, error, holders } = await populateHoldersMapCache(contractKey, forceUpdate);
+    logger.info('holders', `populateHoldersMapCache result: status=${status}, error=${error || 'none'}, holders=${holders ? holders.length : 'none'}`, {}, 'eth', contractKey);
+    if (status === 'error') {
+      logger.error('holders', `Cache population failed: ${error || 'Unknown error'}`, {}, 'eth', contractKey);
+      throw new Error(error || 'Cache population failed');
+    }
+    return NextResponse.json({
+      message: status === 'up_to_date' ? 'Cache is up to date' : `${contractKey} cache population triggered`,
+      status,
+    }, { status: status === 'in_progress' ? 202 : 200 });
+  } catch (error) {
+    logger.error('holders', `POST error: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+}
+// --- ./app/api/holders/utils/cache.js ---
+import { logger, loadCacheState, saveCacheState } from '@/app/api/utils';
+export async function getCacheState(contractKey) {
+  const cacheState = {
+    isPopulating: false,
+    totalOwners: 0,
+    totalLiveHolders: 0,
+    phase: 'Idle',
+    progressPercentage: '0.0',
+    lastProcessedBlock: null,
+    lastUpdated: null,
+    error: null,
+    errorLog: [],
+    globalMetrics: {},
+    progressState: {
+      step: 'idle',
+      processedNfts: 0,
+      totalNfts: 0,
+      processedTiers: 0,
+      totalTiers: 0,
+      error: null,
+      errorLog: [],
+    },
+  };
+  try {
+    const savedState = await loadCacheState(contractKey, contractKey.toLowerCase());
+    if (savedState && typeof savedState === 'object') {
+      Object.assign(cacheState, {
+        isPopulating: savedState.isPopulating ?? false,
+        totalOwners: savedState.totalOwners ?? 0,
+        totalLiveHolders: savedState.totalLiveHolders ?? 0,
+        phase: savedState.progressState?.step.charAt(0).toUpperCase() + savedState.progressState?.step.slice(1) ?? 'Idle',
+        progressPercentage: savedState.progressState?.processedNfts && savedState.progressState?.totalNfts
+          ? ((savedState.progressState.processedNfts / savedState.progressState.totalNfts) * 100).toFixed(1)
+          : '0.0',
+        lastProcessedBlock: savedState.lastProcessedBlock ?? null,
+        lastUpdated: savedState.lastUpdated ?? null,
+        error: savedState.progressState?.error ?? null,
+        errorLog: savedState.progressState?.errorLog ?? [],
+        globalMetrics: savedState.globalMetrics ?? {},
+        progressState: {
+          step: savedState.progressState?.step ?? 'idle',
+          processedNfts: savedState.progressState?.processedNfts ?? 0,
+          totalNfts: savedState.progressState?.totalNfts ?? 0,
+          processedTiers: savedState.progressState?.processedTiers ?? 0,
+          totalTiers: savedState.progressState?.totalTiers ?? 0,
+          error: savedState.progressState?.error ?? null,
+          errorLog: savedState.progressState?.errorLog ?? [],
+        },
+      });
+      logger.debug('utils', `Loaded cache state: totalOwners=${cacheState.totalOwners}, phase=${cacheState.phase}`, 'eth', contractKey);
+    }
+  } catch (error) {
+    logger.error('utils', `Failed to load cache state: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+  }
+  return cacheState;
+}
+export async function saveCacheStateContract(contractKey, cacheState) {
+  try {
+    const savedState = {
+      isPopulating: cacheState.isPopulating,
+      totalOwners: cacheState.totalOwners,
+      totalLiveHolders: cacheState.totalLiveHolders,
+      progressState: {
+        step: cacheState.progressState.step,
+        processedNfts: cacheState.progressState.processedNfts,
+        totalNfts: cacheState.progressState.totalNfts,
+        processedTiers: cacheState.progressState.processedTiers,
+        totalTiers: cacheState.progressState.totalTiers,
+        error: cacheState.progressState.error,
+        errorLog: cacheState.progressState.errorLog,
+      },
+      lastUpdated: cacheState.lastUpdated || Date.now(),
+      lastProcessedBlock: cacheState.lastProcessedBlock,
+      globalMetrics: cacheState.globalMetrics,
+    };
+    await saveCacheState(contractKey, savedState, contractKey.toLowerCase());
+    logger.debug('utils', `Saved cache state: totalOwners=${cacheState.totalOwners}, phase=${cacheState.progressState.step}`, 'eth', contractKey);
+  } catch (error) {
+    logger.error('utils', `Failed to save cache state: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+  }
+}
+// --- ./app/api/holders/utils/events.js ---
+import { parseAbiItem } from 'viem';
+import config from '@/contracts/config';
+import { client, retry, logger, getCache, setCache } from '@/app/api/utils';
+import NodeCache from 'node-cache';
+import fs from 'fs/promises';
+import path from 'path';
+const localCache = new NodeCache({ stdTTL: 86400 }); // 24-hour TTL for node-cache
+const useRedis = process.env.USE_REDIS === 'true'; // Set USE_REDIS=true to enable Redis
+async function getLocalFileCache(key, contractKey) {
+  if (useRedis) return getCache(key, contractKey);
+  const cachePath = path.join(__dirname, '..', '..', '..', 'cache', `${key}.json`);
+  try {
+    const data = await fs.readFile(cachePath, 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    return null;
+  }
+}
+async function setLocalFileCache(key, value, ttl, contractKey) {
+  if (useRedis) return setCache(key, value, ttl, contractKey);
+  const cachePath = path.join(__dirname, '..', '..', '..', 'cache', `${key}.json`);
+  await fs.writeFile(cachePath, JSON.stringify(value, null, 2));
+  localCache.set(key, value, ttl);
+}
+export async function getNewEvents(contractKey, contractAddress, fromBlock, errorLog) {
+  const burnAddress = config.burnAddress || '0x0000000000000000000000000000000000000000';
+  const cacheKey = `${contractKey.toLowerCase()}_events_${contractAddress}_${fromBlock}`;
+  let cachedEvents = await getLocalFileCache(cacheKey, contractKey.toLowerCase());
+  if (cachedEvents) {
+    logger.info('utils', `Events cache hit: ${cacheKey}, burns: ${cachedEvents.burnedTokenIds.length}, transfers: ${cachedEvents.transferTokenIds?.length || 0}`, 'eth', contractKey);
+    return cachedEvents;
+  }
+  let burnedTokenIds = [];
+  let transferTokenIds = [];
+  let endBlock;
+  try {
+    endBlock = await client.getBlockNumber();
+  } catch (error) {
+    logger.error('utils', `Failed to fetch block number: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_block_number', error: error.message });
+    throw error;
+  }
+  const effectiveFromBlock = contractKey.toLowerCase() === 'element280' ? Math.max(fromBlock, 20945304) : fromBlock;
+  if (BigInt(effectiveFromBlock) >= endBlock) {
+    logger.info('utils', `No new blocks: fromBlock ${effectiveFromBlock} >= endBlock ${endBlock}`, 'eth', contractKey);
+    return { burnedTokenIds, transferTokenIds, lastBlock: Number(endBlock) };
+  }
+  const maxBlockRange = 500; // Strict 500-block limit for free tier
+  const maxBlocksToScan = 50000; // Limit to 50,000 blocks per run
+  const concurrencyLimit = 5; // Process 5 ranges concurrently
+  let currentFromBlock = BigInt(effectiveFromBlock);
+  const toBlock = BigInt(Math.min(Number(currentFromBlock) + maxBlocksToScan, Number(endBlock)));
+  const totalBlocks = Number(toBlock) - Number(currentFromBlock);
+  let processedBlocks = 0;
+  let startTime = Date.now();
+  let rangeCount = 0;
+  let apiCallCount = 0;
+  logger.info('utils', `Starting event fetch for ${contractKey}: fromBlock ${currentFromBlock} to ${toBlock} (endBlock: ${endBlock}, total blocks: ${totalBlocks})`, 'eth', contractKey);
+  // Check recent blocks to skip empty ranges
+  const recentBlockCheck = BigInt(Math.max(Number(toBlock) - 50000, Number(currentFromBlock)));
+  let hasRecentEvents = false;
+  try {
+    const recentLogs = await retry(
+      async () => {
+        apiCallCount++;
+        return await client.getLogs({
+          address: contractAddress,
+          event: parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'),
+          fromBlock: recentBlockCheck,
+          toBlock: toBlock,
+        });
+      },
+      { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+    );
+    hasRecentEvents = recentLogs.length > 0;
+    logger.info('utils', `Checked recent blocks ${recentBlockCheck}-${toBlock}: ${recentLogs.length} events found, API calls: ${apiCallCount}`, 'eth', contractKey);
+  } catch (error) {
+    logger.warn('utils', `Failed to check recent blocks: ${error.message}`, 'eth', contractKey);
+  }
+  if (!hasRecentEvents && Number(toBlock) - Number(currentFromBlock) > 50000) {
+    logger.info('utils', `No recent events found, fast-forwarding to ${recentBlockCheck}`, 'eth', contractKey);
+    currentFromBlock = recentBlockCheck;
+    processedBlocks = Number(recentBlockCheck) - Number(effectiveFromBlock);
+  }
+  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  while (currentFromBlock <= toBlock) {
+    const ranges = [];
+    for (let i = 0; i < concurrencyLimit && currentFromBlock <= toBlock; i++) {
+      const currentToBlock = BigInt(Math.min(Number(currentFromBlock) + maxBlockRange - 1, Number(toBlock)));
+      ranges.push({ fromBlock: currentFromBlock, toBlock: currentToBlock });
+      currentFromBlock = currentToBlock + BigInt(1);
+    }
+    const rangeResults = await Promise.all(
+      ranges.map(async ({ fromBlock, toBlock }) => {
+        const rangeCacheKey = `${cacheKey}_range_${fromBlock}_${toBlock}`;
+        let rangeCachedEvents = await getLocalFileCache(rangeCacheKey, contractKey.toLowerCase());
+        if (rangeCachedEvents) {
+          logger.info('utils', `Range cache hit: ${rangeCacheKey}, burns: ${rangeCachedEvents.burnedTokenIds.length}, transfers: ${rangeCachedEvents.transferTokenIds.length}`, 'eth', contractKey);
+          return rangeCachedEvents;
+        }
+        try {
+          logger.info('utils', `Fetching events from block ${fromBlock} to ${toBlock}`, 'eth', contractKey);
+          const logs = await retry(
+            async () => {
+              apiCallCount++;
+              return await client.getLogs({
+                address: contractAddress,
+                event: parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'),
+                fromBlock,
+                toBlock,
+              });
+            },
+            {
+              retries: config.alchemy.maxRetries,
+              delay: config.alchemy.batchDelayMs,
+              onError: (error, attempt) => {
+                if (error.message.includes('Log response size exceeded')) {
+                  const match = error.message.match(/this block range should work: \[0x([0-9a-f]+), 0x([0-9a-f]+)\]/i);
+                  if (match) {
+                    const suggestedFromBlock = parseInt(match[1], 16);
+                    const suggestedToBlock = parseInt(match[2], 16);
+                    logger.warn('utils', `Log response size exceeded, retrying with suggested range: ${suggestedFromBlock}-${suggestedToBlock}`, 'eth', contractKey);
+                    return new Error(`Retry with suggested range: ${suggestedFromBlock}-${suggestedToBlock}`);
+                  }
+                }
+                return true; // Continue retrying
+              },
+            }
+          );
+          const rangeBurnedTokenIds = logs
+            .filter(log => log.args.to.toLowerCase() === burnAddress.toLowerCase())
+            .map(log => Number(log.args.tokenId));
+          const rangeTransferTokenIds = logs
+            .filter(log => log.args.to.toLowerCase() !== burnAddress.toLowerCase())
+            .map(log => ({
+              tokenId: Number(log.args.tokenId),
+              from: log.args.from.toLowerCase(),
+              to: log.args.to.toLowerCase(),
+            }));
+          logger.info('utils', `Fetched ${logs.length} events for block range ${fromBlock}-${toBlock}, API calls: ${apiCallCount}`, 'eth', contractKey);
+          const rangeCacheData = {
+            burnedTokenIds: rangeBurnedTokenIds,
+            transferTokenIds: rangeTransferTokenIds,
+            lastBlock: Number(toBlock),
+            timestamp: Date.now(),
+          };
+          await setLocalFileCache(rangeCacheKey, rangeCacheData, 86400, contractKey.toLowerCase());
+          logger.info('utils', `Cached range events: ${rangeCacheKey}, burns: ${rangeBurnedTokenIds.length}, transfers: ${rangeTransferTokenIds.length}`, 'eth', contractKey);
+          return rangeCacheData;
+        } catch (error) {
+          logger.error('utils', `Failed to fetch events for block range ${fromBlock}-${toBlock}: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+          errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_events', fromBlock: Number(fromBlock), toBlock: Number(toBlock), error: error.message });
+          throw error;
+        }
+      })
+    );
+    for (const result of rangeResults) {
+      burnedTokenIds.push(...result.burnedTokenIds);
+      transferTokenIds.push(...result.transferTokenIds);
+      processedBlocks += maxBlockRange;
+      rangeCount++;
+    }
+    const progressPercentage = Math.min(((processedBlocks / totalBlocks) * 100).toFixed(2), 100);
+    const elapsedTime = (Date.now() - startTime) / 1000; // seconds
+    const avgTimePerRange = rangeCount > 0 ? elapsedTime / rangeCount : 0;
+    const remainingRanges = Math.ceil((Number(toBlock) - Number(currentFromBlock)) / maxBlockRange);
+    const estimatedTimeRemaining = (avgTimePerRange * remainingRanges).toFixed(2);
+    logger.info('utils', `Progress for ${contractKey}: ${progressPercentage}% (${processedBlocks}/${totalBlocks} blocks), ETA: ${estimatedTimeRemaining}s, API calls: ${apiCallCount}`, 'eth', contractKey);
+    // Throttle to avoid Alchemy rate limits
+    await delay(100);
+  }
+  const cacheData = { burnedTokenIds, transferTokenIds, lastBlock: Number(toBlock), timestamp: Date.now() };
+  await setLocalFileCache(cacheKey, cacheData, 86400, contractKey.toLowerCase());
+  logger.info('utils', `Cached events: ${cacheKey}, burns: ${burnedTokenIds.length}, transfers: ${transferTokenIds.length}, API calls: ${apiCallCount}`, 'eth', contractKey);
+  return cacheData;
+}
+// --- ./app/api/holders/utils/holders.js ---
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import config from '@/contracts/config';
+import { getContractAbi, getRewardFunction, getTierFunction, getBatchTokenDataFunction, commonFunctions } from '@/contracts/abi';
+import { logger } from '@/app/utils/logger';
+import { cache, saveCacheState } from '../utils/cache';
+import { alchemy } from '../../utils';
+const populationLocks = new Map();
+const client = createPublicClient({
+  chain: mainnet,
+  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${config.alchemy.apiKey}`),
+});
+async function getBurnedCount(contractAddress, deploymentBlock, contractKey) {
+  logger.debug('holders', `Fetching burn events for ${contractAddress}`, {}, 'eth', contractKey);
+  try {
+    const filter = {
+      address: contractAddress,
+      topics: [
+        '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', // Transfer event
+        null, // from
+        '0x0000000000000000000000000000000000000000', // to (zero address)
+      ],
+      fromBlock: deploymentBlock,
+      toBlock: 'latest',
+    };
+    const logs = await client.getLogs({ ...filter });
+    logger.info('holders', `Fetched ${logs.length} burn events for ${contractAddress}`, {}, 'eth', contractKey);
+    return logs.length;
+  } catch (error) {
+    logger.error('holders', `Failed to fetch burn events for ${contractAddress}: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    return 0;
+  }
+}
+export async function getHoldersMap(contractKey, cacheState) {
+  const cacheKey = `holders_${contractKey}`;
+  logger.info('holders', `Starting getHoldersMap for ${contractKey}`, {}, 'eth', contractKey);
+  try {
+    // Check for existing lock
+    if (populationLocks.get(contractKey)) {
+      logger.warn('holders', `Cache population already in progress for ${contractKey}`, {}, 'eth', contractKey);
+      return { status: 'error', error: 'Cache population in progress', holders: null };
+    }
+    populationLocks.set(contractKey, true);
+    logger.debug('holders', `Acquired population lock for ${contractKey}`, {}, 'eth', contractKey);
+    // Check cache
+    const cachedData = cache.get(cacheKey);
+    if (cachedData && !cacheState.error) {
+      logger.info('holders', `Cache hit for ${contractKey}`, {}, 'eth', contractKey);
+      populationLocks.delete(contractKey);
+      return { status: 'success', ...cachedData };
+    }
+    logger.info('holders', `Cache miss for ${contractKey}, proceeding with population`, {}, 'eth', contractKey);
+    // Validate contract configuration
+    const contractConfig = config.nftContracts[contractKey];
+    const contractAddress = config.contractAddresses[contractKey]?.address;
+    const vaultAddress = config.vaultAddresses[contractKey]?.address;
+    const deploymentBlock = config.deploymentBlocks[contractKey]?.block;
+    if (!contractConfig || !contractAddress || (contractKey !== 'ascendant' && !vaultAddress)) {
+      const errorMsg = `${contractKey} configuration missing: ${JSON.stringify({ contractConfig: !!contractConfig, contractAddress, vaultAddress })}`;
+      logger.error('holders', errorMsg, {}, 'eth', contractKey);
+      throw new Error(errorMsg);
+    }
+    logger.debug('holders', `Contract configuration: address=${contractAddress}, vault=${vaultAddress || 'none'}`, {}, 'eth', contractKey);
+    // Update cache state
+    cacheState.phase = 'Fetching Supply';
+    cacheState.progressPercentage = '5.0';
+    await saveCacheState(contractKey, cacheState);
+    logger.debug('holders', `Updated cache state to Fetching Supply`, {}, 'eth', contractKey);
+    // Get total live supply
+    let totalSupply;
+    if (contractKey === 'ascendant') {
+      try {
+        logger.debug('holders', `Fetching tokenId for ${contractKey}`, {}, 'eth', contractKey);
+        totalSupply = await client.readContract({
+          address: contractAddress,
+          abi: getContractAbi(contractKey, 'nft'),
+          functionName: commonFunctions.tokenId.name,
+        });
+        totalSupply = Number(totalSupply);
+        if (totalSupply === 0) {
+          logger.warn('holders', `Zero tokenId for ${contractKey}, possible contract issue`, {}, 'eth', contractKey);
+        }
+        logger.info('holders', `Fetched tokenId: ${totalSupply}`, {}, 'eth', contractKey);
+      } catch (error) {
+        logger.error('holders', `Failed to fetch tokenId: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+        throw new Error(`Failed to fetch tokenId: ${error.message}`);
+      }
+    } else {
+      try {
+        logger.debug('holders', `Fetching totalSupply for ${contractKey}`, {}, 'eth', contractKey);
+        totalSupply = await client.readContract({
+          address: contractAddress,
+          abi: getContractAbi(contractKey, 'nft'),
+          functionName: commonFunctions.totalSupply.name,
+        });
+        totalSupply = Number(totalSupply);
+        logger.info('holders', `Fetched totalSupply: ${totalSupply}`, {}, 'eth', contractKey);
+      } catch (error) {
+        logger.error('holders', `Failed to fetch totalSupply: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+        throw new Error(`Failed to fetch totalSupply: ${error.message}`);
+      }
+    }
+    // Get total burned supply
+    let totalBurned = 0;
+    if (contractKey === 'element280') {
+      totalBurned = await getBurnedCount(contractAddress, deploymentBlock, contractKey);
+      logger.info('holders', `Fetched burned count: ${totalBurned}`, {}, 'eth', contractKey);
+    } else if (contractKey === 'stax') {
+      try {
+        logger.debug('holders', `Fetching totalBurned for ${contractKey}`, {}, 'eth', contractKey);
+        totalBurned = await client.readContract({
+          address: contractAddress,
+          abi: getContractAbi(contractKey, 'nft'),
+          functionName: commonFunctions.totalBurned.name,
+        });
+        totalBurned = Number(totalBurned);
+        logger.info('holders', `Fetched totalBurned: ${totalBurned}`, {}, 'eth', contractKey);
+      } catch (error) {
+        logger.warn('holders', `totalBurned contract call failed, falling back to Transfer events`, {}, 'eth', contractKey);
+        totalBurned = await getBurnedCount(contractAddress, deploymentBlock, contractKey);
+      }
+    }
+    // Skip burns for Element369 and Ascendant
+    // Use hardcoded totalMinted or estimate
+    let totalMinted = contractConfig.totalMinted;
+    if (!totalMinted) {
+      totalMinted = totalSupply;
+      logger.info('holders', `Estimated totalMinted: ${totalMinted}`, {}, 'eth', contractKey);
+    }
+    cacheState.totalNfts = totalMinted;
+    cacheState.progressState.totalNfts = totalMinted;
+    cacheState.phase = 'Fetching Owners';
+    cacheState.progressPercentage = '10.0';
+    await saveCacheState(contractKey, cacheState);
+    logger.debug('holders', `Updated cache state to Fetching Owners`, {}, 'eth', contractKey);
+    // Fetch owners via Alchemy
+    let ownersResponse;
+    try {
+      logger.debug('holders', `Calling Alchemy getOwnersForContract for ${contractAddress}`, {}, 'eth', contractKey);
+      ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
+        block: 'latest',
+        withTokenBalances: true,
+      });
+      logger.info('holders', `Fetched ${ownersResponse.owners.length} owners`, {}, 'eth', contractKey);
+    } catch (error) {
+      logger.error('holders', `Failed to fetch owners: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+      throw new Error(`Failed to fetch owners: ${error.message}`);
+    }
+    const burnAddresses = [config.burnAddress, '0x000000000000000000000000000000000000dead'];
+    const holdersMap = new Map();
+    const tierMap = new Map();
+    let processedNfts = 0;
+    for (const owner of ownersResponse.owners) {
+      const wallet = owner.ownerAddress.toLowerCase();
+      if (burnAddresses.includes(wallet)) continue;
+      const tokenIds = owner.tokenBalances.map(tb => Number(tb.tokenId)).filter(id => id <= totalMinted);
+      if (tokenIds.length === 0) continue;
+      let batchTiers = [];
+      const tierFunction = getTierFunction(contractKey);
+      if (contractKey === 'ascendant') {
+        logger.debug('holders', `Fetching tiers for ${tokenIds.length} tokens for wallet ${wallet}`, {}, 'eth', contractKey);
+        batchTiers = await Promise.all(
+          tokenIds.map(async (tokenId) => {
+            try {
+              const attr = await client.readContract({
+                address: contractAddress,
+                abi: getContractAbi(contractKey, 'nft'),
+                functionName: tierFunction.name,
+                args: [tokenId],
+              });
+              return attr[1]; // tier is in attributes[1]
+            } catch (error) {
+              logger.warn('holders', `Failed to fetch tier for tokenId ${tokenId}: ${error.message}`, {}, 'eth', contractKey);
+              return 0; // Invalid token
+            }
+          })
+        );
+      } else {
+        const batchTokenDataFunction = getBatchTokenDataFunction(contractKey);
+        if (!batchTokenDataFunction) {
+          logger.error('holders', `Batch token data function not supported for ${contractKey}`, {}, 'eth', contractKey);
+          throw new Error(`Batch token data function not supported for ${contractKey}`);
+        }
+        try {
+          logger.debug('holders', `Fetching batch token data for ${tokenIds.length} tokens`, {}, 'eth', contractKey);
+          const tokenData = await client.readContract({
+            address: contractAddress,
+            abi: getContractAbi(contractKey, 'nft'),
+            functionName: batchTokenDataFunction.name,
+            args: contractKey === 'element280' ? [tokenIds, wallet] : [tokenIds],
+          });
+          batchTiers = contractKey === 'element280' ? tokenData[1] : tokenData[0]; // multipliers or tiers
+        } catch (error) {
+          logger.warn('holders', `Failed to fetch batch token data: ${error.message}`, {}, 'eth', contractKey);
+          batchTiers = tokenIds.map(() => 0);
+        }
+      }
+      let batchClaimable = [];
+      const rewardFunction = getRewardFunction(contractKey);
+      if (contractKey === 'ascendant') {
+        try {
+          logger.debug('holders', `Fetching claimable rewards for ${tokenIds.length} tokens`, {}, 'eth', contractKey);
+          const claimable = await client.readContract({
+            address: contractAddress,
+            abi: getContractAbi(contractKey, 'nft'),
+            functionName: rewardFunction.name,
+            args: [tokenIds],
+          });
+          batchClaimable = tokenIds.map(() => Number(claimable) / tokenIds.length / 1e18);
+        } catch (error) {
+          logger.warn('holders', `Failed to fetch claimable rewards: ${error.message}`, {}, 'eth', contractKey);
+          batchClaimable = tokenIds.map(() => 0);
+        }
+      } else {
+        try {
+          logger.debug('holders', `Fetching claimable rewards for ${tokenIds.length} tokens from vault`, {}, 'eth', contractKey);
+          const rewards = await client.readContract({
+            address: vaultAddress,
+            abi: getContractAbi(contractKey, 'vault'),
+            functionName: rewardFunction.name,
+            args: contractKey === 'element369' ? [tokenIds, wallet, false] : [tokenIds, wallet],
+          });
+          const rewardIndex = contractKey === 'element369' ? 3 : 1; // e280Pool for element369
+          batchClaimable = rewards[0].map((avail, idx) => (avail ? Number(rewards[rewardIndex]) / 1e18 : 0));
+        } catch (error) {
+          logger.warn('holders', `Failed to fetch claimable rewards: ${error.message}`, {}, 'eth', contractKey);
+          batchClaimable = tokenIds.map(() => 0);
+        }
+      }
+      const holderData = { tokens: [], tiers: new Map(), claimable: 0 };
+      tokenIds.forEach((tokenId, idx) => {
+        const tier = Number(batchTiers[idx]);
+        const claimable = batchClaimable[idx] || 0;
+        if (tier > 0) {
+          holderData.tokens.push(tokenId);
+          holderData.tiers.set(tier, (holderData.tiers.get(tier) || 0) + 1);
+          holderData.claimable += claimable;
+          tierMap.set(tier, (tierMap.get(tier) || 0) + 1);
+        }
+      });
+      if (holderData.tokens.length > 0) {
+        holdersMap.set(wallet, holderData);
+      }
+      processedNfts += tokenIds.length;
+      cacheState.progressState.processedNfts = processedNfts;
+      cacheState.progressPercentage = ((processedNfts / totalMinted) * 100).toFixed(1);
+      cacheState.phase = 'Processing Holders';
+      await saveCacheState(contractKey, cacheState);
+      logger.debug('holders', `Processed ${processedNfts}/${totalMinted} NFTs, progress: ${cacheState.progressPercentage}%`, {}, 'eth', contractKey);
+    }
+    const holders = Array.from(holdersMap.entries()).map(([owner, data]) => ({
+      owner,
+      tokens: data.tokens,
+      tiers: Object.fromEntries(data.tiers),
+      claimable: data.claimable.toFixed(4),
+    }));
+    const result = {
+      holders,
+      totalMinted,
+      totalLive: Number(totalSupply),
+      totalBurned: ['element280', 'stax'].includes(contractKey) ? totalBurned : null, // Only for Element280 and Stax
+      totalHolders: holdersMap.size,
+      tierMap: Object.fromEntries(tierMap),
+    };
+    cache.set(cacheKey, result);
+    cacheState.isPopulating = false;
+    cacheState.phase = 'Completed';
+    cacheState.progressPercentage = '100.0';
+    cacheState.totalHolders = holdersMap.size;
+    cacheState.totalLive = Number(totalSupply);
+    await saveCacheState(contractKey, cacheState);
+    logger.info('holders', `Completed cache population: ${holders.length} holders`, {}, 'eth', contractKey);
+    populationLocks.delete(contractKey);
+    return { status: 'success', ...result };
+  } catch (error) {
+    cacheState.error = error.message;
+    cacheState.phase = 'Error';
+    cacheState.progressState.error = error.message;
+    cacheState.isPopulating = false;
+    cacheState.errorLog = cacheState.errorLog ? [...cacheState.errorLog, error.message] : [error.message];
+    await saveCacheState(contractKey, cacheState);
+    logger.error('holders', `getHoldersMap failed: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    populationLocks.delete(contractKey);
+    return { status: 'error', error: error.message, holders: null };
+  }
+}
+// --- ./app/api/holders/utils/population.js ---
+import config from '@/contracts/config';
+import { formatUnits } from 'viem';
+import { client, retry, logger, getCache, setCache, saveCacheState } from '@/app/api/utils';
+import { getCacheState } from './cache';
+import { getNewEvents } from './events';
+import { getHoldersMap } from './holders';
+import { sanitizeBigInt } from './serialization';
+import NodeCache from 'node-cache';
+import fs from 'fs/promises';
+import path from 'path';
+const localCache = new NodeCache({ stdTTL: 86400 }); // 24-hour TTL
+const useRedis = process.env.USE_REDIS === 'true';
+async function getLocalFileCache(key, contractKey) {
+  logger.debug('population', `Attempting to load cache: ${key}`, {}, 'eth', contractKey);
+  if (useRedis) return getCache(key, contractKey);
+  const cachePath = path.join(process.cwd(), 'cache', `${key}.json`);
+  try {
+    const data = await fs.readFile(cachePath, 'utf8');
+    logger.debug('population', `Loaded local cache file: ${cachePath}`, {}, 'eth', contractKey);
+    return JSON.parse(data);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      logger.debug('population', `No local cache file found: ${cachePath}`, {}, 'eth', contractKey);
+    } else {
+      logger.error('population', `Failed to load local cache file ${cachePath}: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    }
+    return null;
+  }
+}
+async function setLocalFileCache(key, value, ttl, contractKey) {
+  logger.debug('population', `Saving cache: ${key}, holders: ${value.holders?.length || 'unknown'}`, {}, 'eth', contractKey);
+  if (useRedis) return setCache(key, value, ttl, contractKey);
+  const cachePath = path.join(process.cwd(), 'cache', `${key}.json`);
+  try {
+    await fs.mkdir(path.dirname(cachePath), { recursive: true });
+    await fs.writeFile(cachePath, JSON.stringify(value, null, 2));
+    await fs.chmod(cachePath, 0o644);
+    localCache.set(key, value, ttl);
+    logger.info('population', `Saved local cache file: ${cachePath}`, {}, 'eth', contractKey);
+  } catch (error) {
+    logger.error('population', `Failed to save local cache file ${cachePath}: ${error.message}`, { stack: error.stack }, 'eth', contractKey);
+    throw error;
+  }
+}
+export async function populateHoldersMapCache(contractKey, forceUpdate = false) {
+  const contractKeyLower = contractKey.toLowerCase();
+  logger.info('population', `Starting cache population for ${contractKeyLower}, forceUpdate=${forceUpdate}`, {}, 'eth', contractKeyLower);
+  let cacheState = await getCacheState(contractKeyLower);
+  if (cacheState.isPopulating && !forceUpdate) {
+    logger.info('population', `Cache population already in progress for ${contractKeyLower}`, {}, 'eth', contractKeyLower);
+    return { status: 'in_progress', holders: null };
+  }
+  cacheState.isPopulating = true;
+  cacheState.phase = 'Starting';
+  cacheState.error = null;
+  cacheState.errorLog = [];
+  cacheState.progressPercentage = '0.0';
+  const startTime = Date.now();
+  await saveCacheState(contractKeyLower, cacheState);
+  logger.debug('population', `Initialized cache state: ${JSON.stringify(cacheState)}`, {}, 'eth', contractKeyLower);
+  const errorLog = [];
+  try {
+    // Validate contract configuration
+    logger.debug('population', `Validating contract configuration for ${contractKeyLower}`, {}, 'eth', contractKeyLower);
+    const contractConfig = config.nftContracts[contractKeyLower];
+    const contractAddress = config.contractAddresses[contractKeyLower]?.address;
+    const vaultAddress = config.vaultAddresses[contractKeyLower]?.address;
+    if (!contractConfig || !contractAddress || (contractKeyLower !== 'ascendant' && !vaultAddress)) {
+      const errorMsg = `${contractKeyLower} configuration missing: ${JSON.stringify({ contractConfig: !!contractConfig, contractAddress, vaultAddress })}`;
+      logger.error('population', errorMsg, {}, 'eth', contractKeyLower);
+      throw new Error(errorMsg);
+    }
+    if (config.contractDetails[contractKeyLower]?.disabled) {
+      const errorMsg = `${contractKeyLower} is disabled`;
+      logger.error('population', errorMsg, {}, 'eth', contractKeyLower);
+      throw new Error(errorMsg);
+    }
+    logger.info('population', `Contract configuration validated for ${contractKeyLower}`, {}, 'eth', contractKeyLower);
+    // Check for cached data
+    logger.debug('population', `Checking for cached data: ${contractKeyLower}_holders`, {}, 'eth', contractKeyLower);
+    const cachedData = await getLocalFileCache(`${contractKeyLower}_holders`, contractKeyLower);
+    const isCacheValid = cachedData && Array.isArray(cachedData.holders) && Number.isInteger(cachedData.totalBurned) && !forceUpdate;
+    if (isCacheValid) {
+      logger.info('population', `Valid cache found for ${contractKeyLower}, checking for new events`, {}, 'eth', contractKeyLower);
+      const fromBlock = cacheState.lastProcessedBlock && cacheState.lastProcessedBlock >= config.deploymentBlocks[contractKeyLower]?.block
+        ? cacheState.lastProcessedBlock
+        : config.deploymentBlocks[contractKeyLower]?.block || 0;
+      logger.debug('population', `Fetching events from block ${fromBlock}`, {}, 'eth', contractKeyLower);
+      cacheState.phase = 'Fetching Events';
+      cacheState.progressPercentage = '10.0';
+      await saveCacheState(contractKeyLower, cacheState);
+      const { burnedTokenIds, transferTokenIds, lastBlock } = await getNewEvents(contractKeyLower, contractAddress, fromBlock, errorLog);
+      cacheState.lastProcessedBlock = lastBlock;
+      cacheState.progressPercentage = '20.0';
+      await saveCacheState(contractKeyLower, cacheState);
+      logger.info('population', `Fetched ${burnedTokenIds.length} burn events, ${transferTokenIds.length} transfer events, lastBlock=${lastBlock}`, {}, 'eth', contractKeyLower);
+      let currentBlock;
+      try {
+        currentBlock = await client.getBlockNumber();
+        logger.debug('population', `Current block number: ${currentBlock}`, {}, 'eth', contractKeyLower);
+      } catch (error) {
+        errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_block_number', error: error.message });
+        logger.error('population', `Failed to fetch block number: ${error.message}`, { stack: error.stack }, 'eth', contractKeyLower);
+        throw error;
+      }
+      if (burnedTokenIds.length > 0 || transferTokenIds.length > 0) {
+        logger.info('population', `Processing new events for ${contractKeyLower}`, {}, 'eth', contractKeyLower);
+        cacheState.phase = 'Processing Events';
+        cacheState.progressPercentage = '30.0';
+        await saveCacheState(contractKeyLower, cacheState);
+        const holdersMap = new Map();
+        let totalBurned = cachedData.totalBurned || 0;
+        let processedHolders = 0;
+        const totalHolders = cachedData.holders.length;
+        for (const holder of cachedData.holders) {
+          const updatedTokenIds = holder.tokenIds.filter(id => !burnedTokenIds.includes(id));
+          if (updatedTokenIds.length > 0) {
+            const updatedHolder = {
+              ...holder,
+              tokenIds: updatedTokenIds,
+              total: updatedTokenIds.length,
+              tiers: Array(Object.keys(config.nftContracts[contractKeyLower].tiers).length).fill(0),
+              multiplierSum: 0,
+              ...(contractKeyLower === 'element369' ? { infernoRewards: 0, fluxRewards: 0, e280Rewards: 0 } : {}),
+              ...(contractKeyLower === 'element280' || contractKeyLower === 'stax' ? { claimableRewards: 0 } : {}),
+              ...(contractKeyLower === 'ascendant' ? {
+                shares: 0,
+                lockedAscendant: 0,
+                pendingDay8: 0,
+                pendingDay28: 0,
+                pendingDay90: 0,
+                claimableRewards: 0,
+              } : {}),
+            };
+            // Sequential tier queries
+            for (const tokenId of updatedTokenIds) {
+              try {
+                const tierResult = await retry(
+                  () => client.readContract({
+                    address: contractAddress,
+                    abi: getContractAbi(contractKeyLower, 'nft'),
+                    functionName: contractKeyLower === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
+                    args: [BigInt(tokenId)],
+                  }),
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                );
+                const tier = contractKeyLower === 'ascendant' ? Number(tierResult[1] || 0) : Number(tierResult);
+                const maxTier = Object.keys(config.nftContracts[contractKeyLower].tiers).length;
+                if (tier >= 1 && tier <= maxTier) {
+                  updatedHolder.tiers[tier - 1]++;
+                  updatedHolder.multiplierSum += config.nftContracts[contractKeyLower].tiers[tier]?.multiplier || 0;
+                } else {
+                  errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId, error: `Invalid tier ${tier}` });
+                }
+              } catch (error) {
+                errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId, error: error.message });
+                logger.warn('population', `Failed to fetch tier for tokenId ${tokenId}: ${error.message}`, {}, 'eth', contractKeyLower);
+              }
+            }
+            // Handle claimable rewards and Ascendant-specific logic
+            if (contractKeyLower === 'element280' || contractKeyLower === 'stax') {
+              try {
+                const claimableResult = await retry(
+                  () => client.readContract({
+                    address: contractAddress,
+                    abi: getContractAbi(contractKeyLower, 'nft'),
+                    functionName: 'batchClaimableAmount',
+                    args: [updatedTokenIds.map(id => BigInt(id))],
+                  }),
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                );
+                updatedHolder.claimableRewards = parseFloat(formatUnits(claimableResult || 0, 18));
+              } catch (error) {
+                errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_claimable', wallet: holder.owner, error: error.message });
+                logger.warn('population', `Failed to fetch claimable rewards for ${holder.owner}: ${error.message}`, {}, 'eth', contractKeyLower);
+              }
+            }
+            if (contractKeyLower === 'ascendant') {
+              for (const tokenId of updatedTokenIds) {
+                try {
+                  const recordResult = await retry(
+                    () => client.readContract({
+                      address: contractAddress,
+                      abi: getContractAbi(contractKeyLower, 'nft'),
+                      functionName: 'userRecords',
+                      args: [BigInt(tokenId)],
+                    }),
+                    { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                  );
+                  if (Array.isArray(recordResult)) {
+                    updatedHolder.shares += parseFloat(formatUnits(recordResult[0] || 0, 18));
+                    updatedHolder.lockedAscendant += parseFloat(formatUnits(recordResult[1] || 0, 18));
+                  }
+                } catch (error) {
+                  errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_records', tokenId, error: error.message });
+                  logger.warn('population', `Failed to fetch records for tokenId ${tokenId}: ${error.message}`, {}, 'eth', contractKeyLower);
+                }
+              }
+              try {
+                const claimableResult = await retry(
+                  () => client.readContract({
+                    address: contractAddress,
+                    abi: getContractAbi(contractKeyLower, 'nft'),
+                    functionName: 'batchClaimableAmount',
+                    args: [updatedTokenIds.map(id => BigInt(id))],
+                  }),
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                );
+                updatedHolder.claimableRewards = parseFloat(formatUnits(claimableResult || 0, 18));
+              } catch (error) {
+                errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_claimable', wallet: holder.owner, error: error.message });
+                logger.warn('population', `Failed to fetch claimable rewards for ${holder.owner}: ${error.message}`, {}, 'eth', contractKeyLower);
+              }
+              const totalSharesRaw = await retry(
+                async () => {
+                  const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'totalShares' });
+                  if (result === null || result === undefined) throw new Error('totalShares returned null');
+                  return result;
+                },
+                { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+              );
+              const totalShares = parseFloat(formatUnits(totalSharesRaw, 18));
+              const toDistributeDay8 = parseFloat(formatUnits(await retry(
+                async () => {
+                  const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [0] });
+                  if (result === null || result === undefined) throw new Error('toDistribute day8 returned null');
+                  return result;
+                },
+                { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+              ), 18));
+              const toDistributeDay28 = parseFloat(formatUnits(await retry(
+                async () => {
+                  const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [1] });
+                  if (result === null || result === undefined) throw new Error('toDistribute day28 returned null');
+                  return result;
+                },
+                { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+              ), 18));
+              const toDistributeDay90 = parseFloat(formatUnits(await retry(
+                async () => {
+                  const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [2] });
+                  if (result === null || result === undefined) throw new Error('toDistribute day90 returned null');
+                  return result;
+                },
+                { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+              ), 18));
+              const pendingRewardPerShareDay8 = totalShares > 0 ? toDistributeDay8 / totalShares : 0;
+              const pendingRewardPerShareDay28 = totalShares > 0 ? toDistributeDay28 / totalShares : 0;
+              const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
+              updatedHolder.pendingDay8 = updatedHolder.shares * pendingRewardPerShareDay8;
+              updatedHolder.pendingDay28 = updatedHolder.shares * pendingRewardPerShareDay28;
+              updatedHolder.pendingDay90 = updatedHolder.shares * pendingRewardPerShareDay90;
+            }
+            holdersMap.set(holder.owner, updatedHolder);
+          } else {
+            totalBurned += holder.total;
+          }
+          processedHolders++;
+          const holderProgress = ((processedHolders / totalHolders) * 100).toFixed(2);
+          cacheState.progressPercentage = (30 + (holderProgress * 0.5)).toFixed(2); // 30% to 80% for holder processing
+          await saveCacheState(contractKeyLower, cacheState);
+          logger.debug('population', `Processed ${processedHolders}/${totalHolders} holders, progress: ${cacheState.progressPercentage}%`, {}, 'eth', contractKeyLower);
+        }
+        cacheState.phase = 'Processing Transfers';
+        cacheState.progressPercentage = '80.0';
+        await saveCacheState(contractKeyLower, cacheState);
+        logger.debug('population', `Processing transfer events`, {}, 'eth', contractKeyLower);
+        for (const transfer of transferTokenIds) {
+          const fromHolder = holdersMap.get(transfer.from);
+          if (fromHolder) {
+            fromHolder.tokenIds = fromHolder.tokenIds.filter(id => id !== transfer.tokenId);
+            fromHolder.total = fromHolder.tokenIds.length;
+            if (fromHolder.total === 0) {
+              holdersMap.delete(transfer.from);
+            } else {
+              fromHolder.tiers = Array(Object.keys(config.nftContracts[contractKeyLower].tiers).length).fill(0);
+              fromHolder.multiplierSum = 0;
+              try {
+                const tierResult = await retry(
+                  () => client.readContract({
+                    address: contractAddress,
+                    abi: getContractAbi(contractKeyLower, 'nft'),
+                    functionName: contractKeyLower === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
+                    args: [BigInt(transfer.tokenId)],
+                  }),
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                );
+                const tier = contractKeyLower === 'ascendant' ? Number(tierResult[1] || 0) : Number(tierResult);
+                if (tier >= 1 && tier <= Object.keys(config.nftContracts[contractKeyLower].tiers).length) {
+                  fromHolder.tiers[tier - 1]++;
+                  fromHolder.multiplierSum += config.nftContracts[contractKeyLower].tiers[tier]?.multiplier || 0;
+                }
+              } catch (error) {
+                errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId: transfer.tokenId, error: error.message });
+                logger.warn('population', `Failed to fetch tier for transfer tokenId ${transfer.tokenId}: ${error.message}`, {}, 'eth', contractKeyLower);
+              }
+              if (contractKeyLower === 'ascendant') {
+                fromHolder.shares = 0;
+                fromHolder.lockedAscendant = 0;
+                fromHolder.pendingDay8 = 0;
+                fromHolder.pendingDay28 = 0;
+                fromHolder.pendingDay90 = 0;
+                fromHolder.claimableRewards = 0;
+                try {
+                  const recordResult = await retry(
+                    () => client.readContract({
+                      address: contractAddress,
+                      abi: getContractAbi(contractKeyLower, 'nft'),
+                      functionName: 'userRecords',
+                      args: [BigInt(transfer.tokenId)],
+                    }),
+                    { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                  );
+                  if (Array.isArray(recordResult)) {
+                    fromHolder.shares += parseFloat(formatUnits(recordResult[0] || 0, 18));
+                    fromHolder.lockedAscendant += parseFloat(formatUnits(recordResult[1] || 0, 18));
+                  }
+                } catch (error) {
+                  errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_records', tokenId: transfer.tokenId, error: error.message });
+                  logger.warn('population', `Failed to fetch records for transfer tokenId ${transfer.tokenId}: ${error.message}`, {}, 'eth', contractKeyLower);
+                }
+                try {
+                  const claimableResult = await retry(
+                    () => client.readContract({
+                      address: contractAddress,
+                      abi: getContractAbi(contractKeyLower, 'nft'),
+                      functionName: 'batchClaimableAmount',
+                      args: [fromHolder.tokenIds.map(id => BigInt(id))],
+                    }),
+                    { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                  );
+                  fromHolder.claimableRewards = parseFloat(formatUnits(claimableResult || 0, 18));
+                } catch (error) {
+                  errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_claimable', wallet: fromHolder.owner, error: error.message });
+                  logger.warn('population', `Failed to fetch claimable rewards for ${fromHolder.owner}: ${error.message}`, {}, 'eth', contractKeyLower);
+                }
+                const totalSharesRaw = await retry(
+                  async () => {
+                    const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'totalShares' });
+                    if (result === null || result === undefined) throw new Error('totalShares returned null');
+                    return result;
+                  },
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                );
+                const totalShares = parseFloat(formatUnits(totalSharesRaw, 18));
+                const toDistributeDay8 = parseFloat(formatUnits(await retry(
+                  async () => {
+                    const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [0] });
+                    if (result === null || result === undefined) throw new Error('toDistribute day8 returned null');
+                    return result;
+                  },
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                ), 18));
+                const toDistributeDay28 = parseFloat(formatUnits(await retry(
+                  async () => {
+                    const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [1] });
+                    if (result === null || result === undefined) throw new Error('toDistribute day28 returned null');
+                    return result;
+                  },
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                ), 18));
+                const toDistributeDay90 = parseFloat(formatUnits(await retry(
+                  async () => {
+                    const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [2] });
+                    if (result === null || result === undefined) throw new Error('toDistribute day90 returned null');
+                    return result;
+                  },
+                  { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+                ), 18));
+                const pendingRewardPerShareDay8 = totalShares > 0 ? toDistributeDay8 / totalShares : 0;
+                const pendingRewardPerShareDay28 = totalShares > 0 ? toDistributeDay28 / totalShares : 0;
+                const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
+                fromHolder.pendingDay8 = fromHolder.shares * pendingRewardPerShareDay8;
+                fromHolder.pendingDay28 = fromHolder.shares * pendingRewardPerShareDay28;
+                fromHolder.pendingDay90 = fromHolder.shares * pendingRewardPerShareDay90;
+              }
+              holdersMap.set(transfer.from, fromHolder);
+            }
+          }
+          const toHolder = holdersMap.get(transfer.to) || {
+            owner: transfer.to,
+            tokenIds: [],
+            tiers: Array(Object.keys(config.nftContracts[contractKeyLower].tiers).length).fill(0),
+            total: 0,
+            multiplierSum: 0,
+            ...(contractKeyLower === 'element369' ? { infernoRewards: 0, fluxRewards: 0, e280Rewards: 0 } : {}),
+            ...(contractKeyLower === 'element280' || contractKeyLower === 'stax' ? { claimableRewards: 0 } : {}),
+            ...(contractKeyLower === 'ascendant' ? {
+              shares: 0,
+              lockedAscendant: 0,
+              pendingDay8: 0,
+              pendingDay28: 0,
+              pendingDay90: 0,
+              claimableRewards: 0,
+            } : {}),
+          };
+          toHolder.tokenIds.push(transfer.tokenId);
+          toHolder.total = toHolder.tokenIds.length;
+          try {
+            const tierResult = await retry(
+              () => client.readContract({
+                address: contractAddress,
+                abi: getContractAbi(contractKeyLower, 'nft'),
+                functionName: contractKeyLower === 'ascendant' ? 'getNFTAttribute' : 'getNftTier',
+                args: [BigInt(transfer.tokenId)],
+              }),
+              { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+            );
+            const tier = contractKeyLower === 'ascendant' ? Number(tierResult[1] || 0) : Number(tierResult);
+            if (tier >= 1 && tier <= Object.keys(config.nftContracts[contractKeyLower].tiers).length) {
+              toHolder.tiers[tier - 1]++;
+              toHolder.multiplierSum += config.nftContracts[contractKeyLower].tiers[tier]?.multiplier || 0;
+            }
+          } catch (error) {
+            errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_tier', tokenId: transfer.tokenId, error: error.message });
+            logger.warn('population', `Failed to fetch tier for transfer tokenId ${transfer.tokenId}: ${error.message}`, {}, 'eth', contractKeyLower);
+          }
+          if (contractKeyLower === 'element280' || contractKeyLower === 'stax') {
+            try {
+              const claimableResult = await retry(
+                () => client.readContract({
+                  address: contractAddress,
+                  abi: getContractAbi(contractKeyLower, 'nft'),
+                  functionName: 'batchClaimableAmount',
+                  args: [toHolder.tokenIds.map(id => BigInt(id))],
+                }),
+                { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+              );
+              toHolder.claimableRewards = parseFloat(formatUnits(claimableResult || 0, 18));
+            } catch (error) {
+              errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_claimable', wallet: toHolder.owner, error: error.message });
+              logger.warn('population', `Failed to fetch claimable rewards for ${toHolder.owner}: ${error.message}`, {}, 'eth', contractKeyLower);
+            }
+          }
+          if (contractKeyLower === 'ascendant') {
+            try {
+              const recordResult = await retry(
+                () => client.readContract({
+                  address: contractAddress,
+                  abi: getContractAbi(contractKeyLower, 'nft'),
+                  functionName: 'userRecords',
+                  args: [BigInt(transfer.tokenId)],
+                }),
+                { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+              );
+              if (Array.isArray(recordResult)) {
+                toHolder.shares += parseFloat(formatUnits(recordResult[0] || 0, 18));
+                toHolder.lockedAscendant += parseFloat(formatUnits(recordResult[1] || 0, 18));
+              }
+            } catch (error) {
+              errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_records', tokenId: transfer.tokenId, error: error.message });
+              logger.warn('population', `Failed to fetch records for transfer tokenId ${transfer.tokenId}: ${error.message}`, {}, 'eth', contractKeyLower);
+            }
+            try {
+              const claimableResult = await retry(
+                () => client.readContract({
+                  address: contractAddress,
+                  abi: getContractAbi(contractKeyLower, 'nft'),
+                  functionName: 'batchClaimableAmount',
+                  args: [toHolder.tokenIds.map(id => BigInt(id))],
+                }),
+                { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+              );
+              toHolder.claimableRewards = parseFloat(formatUnits(claimableResult || 0, 18));
+            } catch (error) {
+              errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_claimable', wallet: toHolder.owner, error: error.message });
+              logger.warn('population', `Failed to fetch claimable rewards for ${toHolder.owner}: ${error.message}`, {}, 'eth', contractKeyLower);
+            }
+            const totalSharesRaw = await retry(
+              async () => {
+                const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'totalShares' });
+                if (result === null || result === undefined) throw new Error('totalShares returned null');
+                return result;
+              },
+              { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+            );
+            const totalShares = parseFloat(formatUnits(totalSharesRaw, 18));
+            const toDistributeDay8 = parseFloat(formatUnits(await retry(
+              async () => {
+                const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [0] });
+                if (result === null || result === undefined) throw new Error('toDistribute day8 returned null');
+                return result;
+              },
+              { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+            ), 18));
+            const toDistributeDay28 = parseFloat(formatUnits(await retry(
+              async () => {
+                const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [1] });
+                if (result === null || result === undefined) throw new Error('toDistribute day28 returned null');
+                return result;
+              },
+              { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+            ), 18));
+            const toDistributeDay90 = parseFloat(formatUnits(await retry(
+              async () => {
+                const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'toDistribute', args: [2] });
+                if (result === null || result === undefined) throw new Error('toDistribute day90 returned null');
+                return result;
+              },
+              { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+            ), 18));
+            const pendingRewardPerShareDay8 = totalShares > 0 ? toDistributeDay8 / totalShares : 0;
+            const pendingRewardPerShareDay28 = totalShares > 0 ? toDistributeDay28 / totalShares : 0;
+            const pendingRewardPerShareDay90 = totalShares > 0 ? toDistributeDay90 / totalShares : 0;
+            toHolder.pendingDay8 = toHolder.shares * pendingRewardPerShareDay8;
+            toHolder.pendingDay28 = toHolder.shares * pendingRewardPerShareDay28;
+            toHolder.pendingDay90 = toHolder.shares * pendingRewardPerShareDay90;
+          }
+          holdersMap.set(transfer.to, toHolder);
+        }
+        const holderList = Array.from(holdersMap.values());
+        const totalMultiplierSum = holderList.reduce((sum, h) => sum + h.multiplierSum, 0);
+        holderList.forEach(holder => {
+          holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+          holder.displayMultiplierSum = holder.multiplierSum / (contractKeyLower === 'element280' ? 10 : 1);
+          holder.rank = holderList.indexOf(holder) + 1;
+        });
+        let burnedCountContract;
+        try {
+          burnedCountContract = await retry(
+            async () => {
+              const result = await client.readContract({ address: contractAddress, abi: getContractAbi(contractKeyLower, 'nft'), functionName: 'totalBurned' });
+              return Number(result);
+            },
+            { retries: config.alchemy.maxRetries, delay: config.alchemy.batchDelayMs }
+          );
+        } catch (error) {
+          errorLog.push({ timestamp: new Date().toISOString(), phase: 'fetch_burned', error: error.message });
+          logger.warn('population', `Failed to fetch totalBurned: ${error.message}`, {}, 'eth', contractKeyLower);
+          burnedCountContract = 0;
+        }
+        totalBurned = burnedCountContract || totalBurned;
+        cacheState.phase = 'Finalizing Cache';
+        cacheState.progressPercentage = '90.0';
+        await saveCacheState(contractKeyLower, cacheState);
+        logger.debug('population', `Finalizing cache for ${contractKeyLower}`, {}, 'eth', contractKeyLower);
+        const cacheData = {
+          holders: sanitizeBigInt(holderList),
+          totalBurned,
+          totalTokens: holderList.reduce((sum, h) => sum + h.total, 0),
+          totalPages: Math.ceil(holderList.length / config.contractDetails[contractKeyLower].pageSize),
+          summary: {
+            totalLive: holderList.reduce((sum, h) => sum + h.total, 0),
+            totalBurned,
+            totalMinted: config.nftContracts[contractKeyLower].expectedTotalSupply + config.nftContracts[contractKeyLower].expectedBurned,
+            tierDistribution: holderList.reduce((acc, h) => {
+              h.tiers.forEach((count, i) => acc[i] = (acc[i] || 0) + count);
+              return acc;
+            }, Array(Object.keys(config.nftContracts[contractKeyLower].tiers).length).fill(0)),
+            multiplierPool: totalMultiplierSum,
+          },
+          globalMetrics: contractKeyLower === 'ascendant' ? cacheState.globalMetrics : { totalTokens: holderList.reduce((sum, h) => sum + h.total, 0) },
+          timestamp: Date.now(),
+        };
+        await setLocalFileCache(`${contractKeyLower}_holders`, cacheData, 86400, contractKeyLower);
+        cacheState.lastUpdated = Date.now();
+        cacheState.totalOwners = holderList.length;
+        cacheState.totalLiveHolders = holderList.length;
+        cacheState.lastProcessedBlock = lastBlock;
+        cacheState.phase = 'Completed';
+        cacheState.progressPercentage = '100.0';
+        cacheState.progressState = {
+          step: 'completed',
+          processedNfts: cacheState.progressState.totalNfts,
+          totalNfts: cacheState.progressState.totalNfts,
+          processedTiers: cacheState.progressState.totalTiers,
+          totalTiers: cacheState.progressState.totalTiers,
+          error: null,
+          errorLog,
+        };
+        await saveCacheState(contractKeyLower, cacheState);
+        const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+        logger.info('population', `Cache population completed for ${contractKeyLower}: ${holderList.length} holders, ${totalBurned} burned, took ${elapsedTime}s`, {}, 'eth', contractKeyLower);
+        return { status: 'updated', holders: holderList };
+      } else {
+        cacheState.isPopulating = false;
+        cacheState.phase = 'Completed';
+        cacheState.progressPercentage = '100.0';
+        cacheState.lastProcessedBlock = Number(currentBlock);
+        await saveCacheState(contractKeyLower, cacheState);
+        logger.info('population', `Cache up to date for ${contractKeyLower}, no new events`, {}, 'eth', contractKeyLower);
+        return { status: 'up_to_date', holders: cachedData.holders };
+      }
+    }
+    logger.info('population', `No valid cache, performing full population for ${contractKeyLower}`, {}, 'eth', contractKeyLower);
+    cacheState.phase = 'Full Population';
+    cacheState.progressPercentage = '50.0';
+    await saveCacheState(contractKeyLower, cacheState);
+    const result = await getHoldersMap(contractKeyLower, cacheState);
+    if (result.status === 'error') {
+      logger.error('population', `getHoldersMap failed: ${result.error || 'Unknown error'}`, {}, 'eth', contractKeyLower);
+      throw new Error(result.error || 'Failed to populate holders map');
+    }
+    const holderList = Array.from(result.holdersMap?.values() || []);
+    const totalBurned = result.totalBurned || 0;
+    cacheState.phase = 'Finalizing Cache';
+    cacheState.progressPercentage = '90.0';
+    await saveCacheState(contractKeyLower, cacheState);
+    const cacheData = {
+      holders: sanitizeBigInt(holderList),
+      totalBurned,
+      totalTokens: holderList.reduce((sum, h) => sum + h.total, 0),
+      totalPages: Math.ceil(holderList.length / config.contractDetails[contractKeyLower].pageSize),
+      summary: {
+        totalLive: holderList.reduce((sum, h) => sum + h.total, 0),
+        totalBurned,
+        totalMinted: config.nftContracts[contractKeyLower].expectedTotalSupply + config.nftContracts[contractKeyLower].expectedBurned,
+        tierDistribution: holderList.reduce((acc, h) => {
+          h.tiers.forEach((count, i) => acc[i] = (acc[i] || 0) + count);
+          return acc;
+        }, Array(Object.keys(config.nftContracts[contractKeyLower].tiers).length).fill(0)),
+        multiplierPool: holderList.reduce((sum, h) => sum + h.multiplierSum, 0),
+      },
+      globalMetrics: result.globalMetrics || {},
+      timestamp: Date.now(),
+    };
+    await setLocalFileCache(`${contractKeyLower}_holders`, cacheData, 86400, contractKeyLower);
+    cacheState.lastUpdated = Date.now();
+    cacheState.totalOwners = holderList.length;
+    cacheState.totalLiveHolders = holderList.length;
+    cacheState.lastProcessedBlock = result.lastProcessedBlock || cacheState.lastProcessedBlock;
+    cacheState.phase = 'Completed';
+    cacheState.progressPercentage = '100.0';
+    cacheState.progressState = {
+      step: 'completed',
+      processedNfts: cacheState.progressState.totalNfts,
+      totalNfts: cacheState.progressState.totalNfts,
+      processedTiers: cacheState.progressState.totalTiers,
+      totalTiers: cacheState.progressState.totalTiers,
+      error: null,
+      errorLog,
+    };
+    await saveCacheState(contractKeyLower, cacheState);
+    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    logger.info('population', `Full cache population completed for ${contractKeyLower}: ${holderList.length} holders, ${totalBurned} burned, took ${elapsedTime}s`, {}, 'eth', contractKeyLower);
+    return { status: 'updated', holders: holderList };
+  } catch (error) {
+    cacheState.isPopulating = false;
+    cacheState.error = error.message;
+    cacheState.errorLog = errorLog.length > 0 ? errorLog : [error.message];
+    cacheState.phase = 'Error';
+    cacheState.progressPercentage = cacheState.progressPercentage || '0.0';
+    await saveCacheState(contractKeyLower, cacheState);
+    logger.error('population', `Cache population failed for ${contractKeyLower}: ${error.message}`, { stack: error.stack }, 'eth', contractKeyLower);
+    return { status: 'error', error: error.message, holders: null };
+  }
+}
+// --- ./app/api/holders/utils/serialization.js ---
+export function sanitizeBigInt(obj) {
+  if (typeof obj === 'bigint') return obj.toString();
+  if (Array.isArray(obj)) return obj.map(item => sanitizeBigInt(item));
+  if (typeof obj === 'object' && obj !== null) {
+    const sanitized = {};
+    for (const [key, value] of Object.entries(obj)) {
+      sanitized[key] = sanitizeBigInt(value);
+    }
+    return sanitized;
+  }
+  return obj;
+}
+// --- ./app/api/init/_init.js ---
+import '@/app/lib/serverInit';
+// --- ./app/api/init/route.js ---
+import { NextResponse } from 'next/server';
+import { logger } from '@/app/lib/logger';
+import { initializeCache } from '@/app/api/utils';
+import chalk from 'chalk';
+console.log(chalk.cyan('[Init Route] Importing logger and utils'));
+logger.info('init', 'Init route module loaded', 'eth', 'general').catch(console.error);
+export async function GET() {
+  await logger.info('init', 'Init endpoint called', 'eth', 'general');
+  await initializeCache();
+  return NextResponse.json({
+    message: 'Initialization triggered',
+    debug: process.env.DEBUG,
+    nodeEnv: process.env.NODE_ENV,
+  });
+}
+// --- ./app/api/utils.js ---
+import NodeCache from 'node-cache';
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { Redis } from '@upstash/redis';
+import { createPublicClient, http } from 'viem';
+import { mainnet } from 'viem/chains';
+import { Alchemy } from 'alchemy-sdk';
+import config from '@/contracts/config';
+import pLimit from 'p-limit';
+import { logger } from '@/app/lib/logger';
+import chalk from 'chalk';
+console.log(chalk.cyan('[Utils] Initializing utils...'));
+logger.info('utils', 'Utils module loaded', 'eth', 'general').catch(error => {
+  console.error(chalk.red('[Utils] Logger error:'), error.message);
+});
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const isDebug = process.env.DEBUG === 'true';
+const isProduction = process.env.NODE_ENV === 'production';
+const cache = new NodeCache({
+  stdTTL: 0,
+  checkperiod: 120,
+});
+const cacheDir = path.join(process.cwd(), 'cache');
+const redisEnabled = Object.keys(config.nftContracts).some(
+  contract => process.env[`DISABLE_${contract.toUpperCase()}_REDIS`] !== 'true' && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+);
+let redis = null;
+if (redisEnabled) {
+  try {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    logger.info('utils', 'Upstash Redis initialized', 'eth', 'general');
+  } catch (error) {
+    logger.error('utils', `Failed to initialize Upstash Redis: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    redis = null;
+  }
+}
+const alchemyApiKey = config.alchemy.apiKey || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+if (!alchemyApiKey) {
+  logger.error('utils', 'Alchemy API key is missing', {}, 'eth', 'general');
+  throw new Error('Alchemy API key is missing');
+}
+const client = createPublicClient({
+  chain: mainnet,
+  transport: http(`https://eth-mainnet.g.alchemy.com/v2/${alchemyApiKey}`),
+});
+const alchemy = new Alchemy({
+  apiKey: config.alchemy.apiKey,
+  network: 'eth-mainnet',
+});
+async function ensureCacheDir() {
+  try {
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.chmod(cacheDir, 0o755);
+    logger.info('utils', `Created/chmod cache directory: ${cacheDir}`, 'eth', 'general');
+  } catch (error) {
+    logger.error('utils', `Failed to create/chmod cache directory ${cacheDir}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    throw error;
+  }
+}
+async function initializeCache() {
+  try {
+    logger.info('utils', 'Starting cache initialization', 'eth', 'general');
+    await ensureCacheDir();
+    const testKey = 'test_node_cache';
+    const testValue = { ready: true };
+    const nodeCacheSuccess = cache.set(testKey, testValue);
+    if (nodeCacheSuccess) {
+      logger.info('utils', 'Node-cache is ready', 'eth', 'general');
+      cache.del(testKey);
+    } else {
+      logger.error('utils', 'Node-cache failed to set test key', {}, 'eth', 'general');
+    }
+    if (redisEnabled && redis) {
+      try {
+        await redis.set('test_redis', JSON.stringify(testValue));
+        const redisData = await redis.get('test_redis');
+        if (redisData && JSON.parse(redisData).ready) {
+          logger.info('utils', 'Redis cache is ready', 'eth', 'general');
+          await redis.del('test_redis');
+        } else {
+          logger.error('utils', 'Redis cache test failed: invalid data', {}, 'eth', 'general');
+        }
+      } catch (error) {
+        logger.error('utils', `Redis cache test failed: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+      }
+    }
+    const collections = Object.keys(config.nftContracts).filter(key => !config.nftContracts[key].disabled).map(key => key.toLowerCase());
+    for (const collection of collections) {
+      const cacheFile = path.join(cacheDir, `${collection}_holders.json`);
+      try {
+        await fs.access(cacheFile);
+        logger.info('utils', `Cache file exists: ${cacheFile}`, 'eth', collection);
+      } catch (error) {
+        if (error.code === 'ENOENT') {
+          await fs.writeFile(cacheFile, JSON.stringify({ holders: [], totalBurned: 0, timestamp: Date.now() }));
+          await fs.chmod(cacheFile, 0o644);
+          logger.info('utils', `Created empty cache file: ${cacheFile}`, 'eth', collection);
+        } else {
+          logger.error('utils', `Failed to access cache file ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', collection);
+        }
+      }
+    }
+    logger.info('utils', 'Cache initialization completed', 'eth', 'general');
+    return true;
+  } catch (error) {
+    logger.error('utils', `Cache initialization error: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    return false;
+  }
+}
+async function retry(operation, { retries, delay = 1000 }) {
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (error.message.includes('429') && attempt === retries) {
+        logger.error('utils', `Circuit breaker: Rate limit exceeded after ${retries} attempts`, {}, 'eth', 'general');
+        throw new Error('Rate limit exceeded');
+      }
+      logger.warn('utils', `Retry attempt ${attempt}/${retries} failed: ${error.message}`, 'eth', 'general');
+      await new Promise(resolve => setTimeout(resolve, delay * Math.min(attempt, 3)));
+    }
+  }
+  throw lastError;
+}
+async function batchMulticall(calls, batchSize = config.alchemy.batchSize || 10) {
+  const results = [];
+  const delay = async () => new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs || 500));
+  const concurrencyLimit = pLimit(3);
+  const batchPromises = [];
+  for (let i = 0; i < calls.length; i += batchSize) {
+    const batch = calls.slice(i, i + batchSize);
+    batchPromises.push(
+      concurrencyLimit(async () => {
+        try {
+          await delay();
+          const batchResults = await client.multicall({
+            contracts: batch.map(call => ({
+              address: call.address,
+              abi: call.abi,
+              functionName: call.functionName,
+              args: call.args || [],
+            })),
+            allowFailure: true,
+          });
+          const batchResult = batchResults.map((result, index) => ({
+            status: result.status === 'success' ? 'success' : 'failure',
+            result: result.status === 'success' ? result.result : null,
+            error: result.status === 'failure' ? result.error?.message || 'Unknown error' : null,
+          }));
+          return batchResult;
+        } catch (error) {
+          logger.error('utils', `Batch multicall failed: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+          return batch.map(() => ({
+            status: 'failure',
+            result: null,
+            error: error.message,
+          }));
+        }
+      })
+    );
+  }
+  const batchResults = (await Promise.all(batchPromises)).flat();
+  results.push(...batchResults);
+  return results;
+}
+async function getOwnersForContract(contractAddress, abi, options = {}) {
+  let owners = [];
+  let pageKey = options.pageKey || null;
+  const maxPages = options.maxPages || 10;
+  let pageCount = 0;
+  do {
+    try {
+      const response = await alchemy.nft.getOwnersForContract(contractAddress, {
+        withTokenBalances: options.withTokenBalances || false,
+        pageKey,
+      });
+      if (!response.owners || !Array.isArray(response.owners)) {
+        logger.error('utils', `Invalid Alchemy response for ${contractAddress}: ${JSON.stringify(response)}`, {}, 'eth', 'general');
+        throw new Error('Invalid owners response from Alchemy API');
+      }
+      for (const owner of response.owners) {
+        const tokenBalances = owner.tokenBalances || [];
+        if (tokenBalances.length > 0) {
+          const validBalances = tokenBalances.filter(
+            tb => tb.tokenId && Number(tb.balance) > 0
+          );
+          if (validBalances.length > 0) {
+            owners.push({
+              ownerAddress: owner.ownerAddress.toLowerCase(),
+              tokenBalances: validBalances.map(tb => ({
+                tokenId: Number(tb.tokenId),
+                balance: Number(tb.balance),
+              })),
+            });
+          }
+        }
+      }
+      pageKey = response.pageKey || null;
+      pageCount++;
+      if (pageCount >= maxPages) {
+        logger.warn('utils', `Reached max pages (${maxPages}) for owner fetching`, 'eth', 'general');
+        break;
+      }
+    } catch (error) {
+      logger.error('utils', `Failed to fetch owners for ${contractAddress}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+      throw error;
+    }
+  } while (pageKey);
+  logger.info('utils', `Fetched ${owners.length} owners for contract: ${contractAddress}`, 'eth', 'general');
+  return owners;
+}
+async function setCache(key, value, ttl, prefix) {
+  try {
+    const cacheKey = `${prefix}_${key}`;
+    const success = cache.set(cacheKey, value);
+    logger.info('utils', `Set in-memory cache: ${cacheKey}, success: ${success}, holders: ${value.holders?.length || 'unknown'}`, 'eth', prefix.toLowerCase());
+    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
+      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
+        try {
+          await redis.set(cacheKey, JSON.stringify(value));
+          logger.info('utils', `Persisted ${cacheKey} to Redis, holders: ${value.holders.length}`, 'eth', prefix.toLowerCase());
+        } catch (error) {
+          logger.error('utils', `Failed to persist ${cacheKey} to Redis: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+        }
+      } else {
+        const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
+        logger.info('utils', `Writing to cache file: ${cacheFile}`, 'eth', prefix.toLowerCase());
+        await ensureCacheDir();
+        try {
+          await fs.writeFile(cacheFile, JSON.stringify(value));
+          await fs.chmod(cacheFile, 0o644);
+          logger.info('utils', `Persisted ${cacheKey} to ${cacheFile}, holders: ${value.holders.length}`, 'eth', prefix.toLowerCase());
+        } catch (error) {
+          logger.error('utils', `Failed to write cache file ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+          throw error;
+        }
+      }
+    }
+    return success;
+  } catch (error) {
+    logger.error('utils', `Failed to set cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+    return false;
+  }
+}
+async function getCache(key, prefix) {
+  try {
+    const cacheKey = `${prefix}_${key}`;
+    let data = cache.get(cacheKey);
+    if (data !== undefined) {
+      logger.debug('utils', `Cache hit: ${cacheKey}, holders: ${data.holders?.length || 'unknown'}`, 'eth', prefix.toLowerCase());
+      return data;
+    }
+    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
+      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
+        try {
+          const redisData = await redis.get(cacheKey);
+          if (redisData) {
+            const parsed = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
+            if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
+              const success = cache.set(cacheKey, parsed);
+              logger.info('utils', `Loaded ${cacheKey} from Redis, cached: ${success}, holders: ${parsed.holders.length}`, 'eth', prefix.toLowerCase());
+              return parsed;
+            } else {
+              logger.warn('utils', `Invalid data in Redis for ${cacheKey}`, 'eth', prefix.toLowerCase());
+            }
+          }
+        } catch (error) {
+          logger.error('utils', `Failed to load cache from Redis for ${cacheKey}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+        }
+      }
+      const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
+      try {
+        const fileData = await fs.readFile(cacheFile, 'utf8');
+        const parsed = JSON.parse(fileData);
+        if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
+          const success = cache.set(cacheKey, parsed);
+          logger.info('utils', `Loaded ${cacheKey} from ${cacheFile}, cached: ${success}, holders: ${parsed.holders.length}`, 'eth', prefix.toLowerCase());
+          return parsed;
+        } else {
+          logger.warn('utils', `Invalid data in ${cacheFile}`, 'eth', prefix.toLowerCase());
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          logger.error('utils', `Failed to load cache from ${cacheFile}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+        } else {
+          logger.debug('utils', `No cache file at ${cacheFile}`, 'eth', prefix.toLowerCase());
+        }
+      }
+    }
+    logger.info('utils', `Cache miss: ${cacheKey}`, 'eth', prefix.toLowerCase());
+    return null;
+  } catch (error) {
+    logger.error('utils', `Failed to get cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+    return null;
+  }
+}
+async function saveCacheState(collection, state, prefix) {
+  try {
+    const cacheFile = path.join(cacheDir, `cache_state_${prefix.toLowerCase()}.json`);
+    await ensureCacheDir();
+    await fs.writeFile(cacheFile, JSON.stringify(state, null, 2));
+    await fs.chmod(cacheFile, 0o644);
+    logger.debug('utils', `Saved cache state for ${prefix}: ${cacheFile}`, 'eth', prefix.toLowerCase());
+  } catch (error) {
+    logger.error('utils', `Failed to save cache state for ${prefix}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+  }
+}
+async function loadCacheState(collection, prefix) {
+  try {
+    const cacheFile = path.join(cacheDir, `cache_state_${prefix.toLowerCase()}.json`);
+    const data = await fs.readFile(cacheFile, 'utf8');
+    const parsed = JSON.parse(data);
+    logger.debug('utils', `Loaded cache state for ${prefix}: ${cacheFile}`, 'eth', prefix.toLowerCase());
+    return parsed;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      logger.debug('utils', `No cache state found for ${prefix}, initializing new state`, 'eth', prefix.toLowerCase());
+      // Initialize a default cache state
+      const defaultState = {
+        isPopulating: false,
+        totalOwners: 0,
+        totalLiveHolders: 0,
+        progressState: {
+          step: 'idle',
+          processedNfts: 0,
+          totalNfts: 0,
+          processedTiers: 0,
+          totalTiers: 0,
+          error: null,
+          errorLog: [],
+        },
+        lastUpdated: null,
+        lastProcessedBlock: null,
+        globalMetrics: {},
+      };
+      await saveCacheState(collection, defaultState, prefix); // Create the file
+      return defaultState;
+    }
+    logger.error('utils', `Failed to load cache state for ${prefix}: ${error.message}`, { stack: error.stack }, 'eth', prefix.toLowerCase());
+    return null;
+  }
+}
+async function getTransactionReceipt(transactionHash) {
+  try {
+    const receipt = await client.getTransactionReceipt({ hash: transactionHash });
+    logger.debug('utils', `Fetched transaction receipt for ${transactionHash}`, 'eth', 'general');
+    return receipt;
+  } catch (error) {
+    logger.error('utils', `Failed to fetch transaction receipt for ${transactionHash}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    throw error;
+  }
+}
+async function validateContract(contractKey) {
+  const normalizedKey = contractKey.toLowerCase();
+  if (!config.contractDetails[normalizedKey]) {
+    throw new Error(`Invalid contract: ${normalizedKey}`);
+  }
+  if (config.contractDetails[normalizedKey].disabled) {
+    throw new Error(`${normalizedKey} contract not deployed`);
+  }
+  return {
+    contractAddress: config.contractAddresses[normalizedKey]?.address,
+    abi: config.abis[normalizedKey]?.main,
+  };
+}
+export {
+  client,
+  retry,
+  logger,
+  getCache,
+  setCache,
+  saveCacheState,
+  loadCacheState,
+  batchMulticall,
+  getOwnersForContract,
+  getTransactionReceipt,
+  initializeCache,
+  validateContract
+};
+// --- ./app/lib/logger.js ---
+import fs from 'fs/promises';
+import path from 'path';
+import chalk from 'chalk';
+const logDir = path.join(process.cwd(), 'logs');
+console.log(chalk.cyan('[Logger] Initializing logger...'));
+console.log(chalk.cyan('[Logger] process.env.DEBUG:'), process.env.DEBUG);
+console.log(chalk.cyan('[Logger] process.env.NODE_ENV:'), process.env.NODE_ENV);
+console.log(chalk.cyan('[Logger] Log directory:'), logDir);
+const isDebug = process.env.DEBUG === 'true';
+console.log(chalk.cyan('[Logger] isDebug:'), isDebug);
+async function ensureLogDir() {
+  try {
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.chmod(logDir, 0o755);
+    console.log(chalk.cyan('[Logger] Created or verified log directory:'), logDir);
+  } catch (error) {
+    console.error(chalk.red('[Logger] Failed to create log directory:'), error.message);
+  }
+}
+ensureLogDir().catch(error => {
+  console.error(chalk.red('[Logger] ensureLogDir error:'), error.message);
+});
+export const logger = {
+  info: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [INFO] ${message}`;
+    console.log(chalk.green(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote INFO log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write INFO log:'), error.message);
+      }
+    }
+  },
+  warn: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [WARN] ${message}`;
+    console.log(chalk.yellow(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote WARN log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write WARN log:'), error.message);
+      }
+    }
+  },
+  error: async (scope, message, details = {}, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [ERROR] ${message} ${JSON.stringify(details)}`;
+    console.error(chalk.red(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote ERROR log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write ERROR log:'), error.message);
+      }
+    }
+  },
+  debug: async (scope, message, chain = 'eth', collection = 'general') => {
+    if (!isDebug) return;
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [DEBUG] ${message}`;
+    console.log(chalk.blue(log));
+    try {
+      const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+      await fs.appendFile(logFile, `${log}\n`);
+      console.log(chalk.cyan('[Logger] Wrote DEBUG log to:'), logFile);
+    } catch (error) {
+      console.error(chalk.red('[Logger] Failed to write DEBUG log:'), error.message);
+    }
+  },
+};
+try {
+  logger.info('startup', 'Logger module loaded').catch(error => {
+    console.error(chalk.red('[Logger] Startup log error:'), error.message);
+  });
+} catch (error) {
+  console.error(chalk.red('[Logger] Immediate log error:'), error.message);
+}
+// --- ./app/lib/serverInit.js ---
+import { logger } from '@/app/lib/logger';
+import { initializeCache } from '@/app/api/utils';
+import chalk from 'chalk';
+console.log(chalk.cyan('[ServerInit] Initializing server...'));
+try {
+  logger.info('serverInit', 'Server initialization started');
+  await initializeCache();
+} catch (error) {
+  logger.error('serverInit', `Initialize cache error: ${error.message}`, { stack: error.stack });
+  console.error(chalk.red('[ServerInit] Initialization error:'), error.message);
+}
+export const serverInit = true;
+// --- ./app/nft/[chain]/[contract]/page.js ---
+'use client';
+import { useState, useEffect } from 'react';
+import { notFound } from 'next/navigation';
+import nextDynamic from 'next/dynamic';
+import config from '@/contracts/config';
+import LoadingIndicator from '@/client/components/LoadingIndicator';
+import { useNFTStore } from '@/app/store';
+import { HoldersResponseSchema } from '@/client/lib/schemas';
+import * as React from 'react';
+import { z } from 'zod'; // Import Zod for schema validation
+const NFTPageWrapper = nextDynamic(() => import('@/client/components/NFTPageWrapper'), { ssr: false });
+export const dynamic = 'force-dynamic';
+const ProgressResponseSchema = z.object({
+  isPopulating: z.boolean(),
+  totalLiveHolders: z.number(),
+  totalOwners: z.number(),
+  phase: z.string(),
+  progressPercentage: z.string(),
+  lastProcessedBlock: z.number().nullable(),
+  error: z.any().nullable(),
+  errorLog: z.array(z.any()),
+});
+async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[NFTContractPage] [INFO] Fetching data for ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+      console.log(`[NFTContractPage] [INFO] ${apiKey} is disabled`);
+      return { error: `${apiKey} is not available` };
+    }
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000';
+    const endpoint = apiEndpoint.startsWith('http') ? apiEndpoint : `${baseUrl}${apiEndpoint}`;
+    const pollProgress = async () => {
+      const progressUrl = `${endpoint}/progress`;
+      const res = await fetch(progressUrl, { cache: 'no-store', signal: AbortSignal.timeout(config.alchemy.timeoutMs) });
+      if (!res.ok) throw new Error(`Progress fetch failed: ${res.status}`);
+      const progress = await res.json();
+      console.log(`[NFTContractPage] [DEBUG] Progress: ${JSON.stringify(progress)}`);
+      // Validate progress response
+      const validation = ProgressResponseSchema.safeParse(progress);
+      if (!validation.success) {
+        console.error(`[NFTContractPage] [ERROR] Invalid progress data: ${JSON.stringify(validation.error.errors)}`);
+        throw new Error('Invalid progress data');
+      }
+      return validation.data;
+    };
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalShares = 0;
+    let totalBurned = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+    const maxPollTime = 180000; // 180 seconds
+    const startTime = Date.now();
+    let progress = await pollProgress();
+    while (progress.isPopulating || progress.phase !== 'Completed') {
+      if (Date.now() - startTime > maxPollTime) {
+        console.error(`[NFTContractPage] [ERROR] Cache population timeout for ${apiKey}`);
+        return { error: 'Cache population timed out' };
+      }
+      console.log(`[NFTContractPage] [INFO] Waiting for ${apiKey} cache: ${progress.phase} (${progress.progressPercentage}%)`);
+      await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+      progress = await pollProgress();
+      if (progress.phase === 'Error') {
+        console.error(`[NFTContractPage] [ERROR] Cache population failed: ${progress.error || 'Unknown error'}`);
+        return { error: `Cache population failed: ${progress.error || 'Unknown error'}` };
+      }
+    }
+    while (page < totalPages) {
+      const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[NFTContractPage] [DEBUG] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'force-cache' });
+      console.log(`[NFTContractPage] [DEBUG] Response status: ${res.status}`);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[NFTContractPage] [ERROR] Failed to fetch ${url}: ${res.status} ${errorText}`);
+        return { error: `Failed to fetch data: ${res.status}` };
+      }
+      const json = await res.json();
+      console.log(`[NFTContractPage] [DEBUG] Response body: ${JSON.stringify(json, (key, value) => typeof value === 'bigint' ? value.toString() : value)}`);
+      if (json.isCachePopulating) {
+        return { isCachePopulating: true, progress }; // Trigger polling
+      }
+      const validation = HoldersResponseSchema.safeParse(json);
+      if (!validation.success) {
+        console.error(`[NFTContractPage] [ERROR] Invalid holders data: ${JSON.stringify(validation.error.errors)}`);
+        if (apiKey === 'ascendant') {
+          console.log(`[NFTContractPage] [INFO] Triggering POST for ${apiKey}`);
+          await fetch(endpoint, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forceUpdate: false }) });
+          const retryRes = await fetch(url, { cache: 'no-store' });
+          if (!retryRes.ok) {
+            const retryError = await retryRes.text();
+            console.error(`[NFTContractPage] [ERROR] Retry failed: ${retryRes.status} ${retryError}`);
+            return { error: `Retry failed: ${retryRes.status}` };
+          }
+          const retryJson = await retryRes.json();
+          const retryValidation = HoldersResponseSchema.safeParse(retryJson);
+          if (!retryValidation.success) {
+            console.error(`[NFTContractPage] [ERROR] Retry invalid holders data: ${JSON.stringify(retryValidation.error.errors)}`);
+            return { error: 'Invalid holders data after retry' };
+          }
+          json.holders = retryJson.holders;
+          json.totalTokens = retryJson.totalTokens;
+          json.totalShares = retryJson.totalShares;
+          json.totalBurned = retryJson.totalBurned;
+          json.summary = retryJson.summary;
+          json.totalPages = retryJson.totalPages;
+        } else {
+          return { error: 'Invalid holders data' };
+        }
+      }
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalTokens;
+      totalBurned = json.totalBurned || totalBurned;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[NFTContractPage] [INFO] Fetched page ${page} for ${apiKey}: ${json.holders.length} holders`);
+    }
+    return {
+      holders: allHolders,
+      totalTokens,
+      totalShares,
+      totalBurned,
+      summary,
+    };
+  } catch (error) {
+    console.error(`[NFTContractPage] [ERROR] Error fetching ${apiKey}: ${error.message}, stack: ${error.stack}`);
+    return { error: error.message };
+  }
+}
+export default function NFTContractPage({ params }) {
+  const { chain, contract } = React.use(params);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(null);
+  const { getCache, setCache } = useNFTStore();
+  const apiKeyMap = {
+    Element280: 'element280',
+    Element369: 'element369',
+    Stax: 'stax',
+    Ascendant: 'ascendant',
+    E280: 'e280',
+  };
+  const apiKey = apiKeyMap[contract];
+  useEffect(() => {
+    if (!config.supportedChains.includes(chain) || !apiKey) {
+      console.log(`[NFTContractPage] [ERROR] Invalid chain=${chain} or contract=${contract}`);
+      notFound();
+    }
+    async function fetchData() {
+      setLoading(true);
+      setError(null);
+      setData(null);
+      const contractConfig = config.contractDetails[apiKey] || {};
+      const cacheKey = `contract_${apiKey}`;
+      const cachedData = getCache(cacheKey);
+      if (cachedData) {
+        console.log(`[NFTContractPage] [INFO] Cache hit for ${cacheKey}`);
+        setData(cachedData);
+        setLoading(false);
+        return;
+      }
+      console.log(`[NFTContractPage] [INFO] Cache miss for ${cacheKey}, fetching data`);
+      const result = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+      if (result.isCachePopulating) {
+        const poll = async () => {
+          const progressResult = await fetchCollectionData(apiKey, contractConfig.apiEndpoint, contractConfig.pageSize || 1000);
+          setProgress(progressResult.progress);
+          if (progressResult.isCachePopulating) {
+            setTimeout(poll, config.alchemy.batchDelayMs);
+          } else if (progressResult.error) {
+            setError(progressResult.error);
+            setLoading(false);
+          } else {
+            setCache(cacheKey, progressResult);
+            setData(progressResult);
+            setLoading(false);
+          }
+        };
+        poll();
+      } else if (result.error) {
+        setError(result.error);
+        setLoading(false);
+      } else {
+        setCache(cacheKey, result);
+        setData(result);
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [chain, contract, apiKey, getCache, setCache]);
+  if (!config.supportedChains.includes(chain) || !apiKey) {
+    notFound();
+  }
+  if (loading) {
+    return (
+      <div className="container page-content">
+        <h1 className="title mb-6">{contract} Collection</h1>
+        <LoadingIndicator
+          status={`Loading ${contract} data... ${progress ? `Phase: ${progress.phase} (${progress.progressPercentage}%)` : ''}`}
+          progress={progress}
+        />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="container page-content">
+        <h1 className="title mb-6">{contract} Collection</h1>
+        <p className="text-error">{error}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="container page-content">
+      <h1 className="title mb-6">{contract} Collection</h1>
+      <NFTPageWrapper
+        chain={chain}
+        contract={apiKey}
+        data={data}
+        rewardToken={config.contractDetails[apiKey]?.rewardToken}
+      />
+    </div>
+  );
+}
+// --- ./app/nft/layout.js ---
+'use client';
+import Navbar from '@/client/components/Navbar';
+import NFTLayoutWrapper from '@/client/components/NFTLayoutWrapper';
+import '@/app/global.css'; // Target global.css in app directory
+import { Inter } from 'next/font/google';
+import { Suspense } from 'react';
+const inter = Inter({ subsets: ['latin'] });
+export default function NFTLayout({ children }) {
+  return (
+    <NFTLayoutWrapper>
+      <main className={`flex-grow container page-content ${inter.className}`}>
+        <Suspense fallback={<div>Loading...</div>}>
+          {children}
+        </Suspense>
+      </main>
+      <footer className="footer">
+        <p>© {new Date().getFullYear()} TitanXUtils. All rights reserved.</p>
+      </footer>
+    </NFTLayoutWrapper>
+  );
+}
+// --- ./app/nft/page.js ---
+'use client';
+import { motion } from 'framer-motion';
+import { fetchCollectionData } from '@/client/lib/fetchCollectionData';
+import config from '@/contracts/config';
+import LoadingIndicator from '@/client/components/LoadingIndicator';
+import NFTSummary from '@/client/components/NFTSummary';
+import React from 'react';
+const collections = Object.entries(config.contractDetails).map(([apiKey, { name, apiEndpoint, pageSize, disabled }]) => ({
+  apiKey,
+  name,
+  apiEndpoint,
+  pageSize,
+  disabled,
+}));
+export default function NFTOverview() {
+  const [collectionsData, setCollectionsData] = React.useState([]);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
+  const handleCollectionClick = async (apiKey, apiEndpoint, pageSize, disabled) => {
+    if (disabled) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchCollectionData(apiKey, apiEndpoint, pageSize);
+      if (data.error) {
+        setError(data.error);
+      } else {
+        setCollectionsData([{ apiKey, data }]);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <div className="min-h-screen bg-gray-900 text-gray-100 p-6 flex flex-col items-center">
+      <h1 className="title mb-6">NFT Collections</h1>
+      <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl mb-6">
+        {collections.map(({ apiKey, name, apiEndpoint, pageSize, disabled }) => (
+          <motion.button
+            key={apiKey}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => handleCollectionClick(apiKey, apiEndpoint, pageSize, disabled)}
+            className={`btn btn-secondary w-full ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={disabled}
+          >
+            {name}
+          </motion.button>
+        ))}
+      </div>
+      {loading && <LoadingIndicator status="Loading collection..." />}
+      {error && <p className="text-error">{error}</p>}
+      {collectionsData.some(c => c.data.error?.includes('Cache is populating') || c.data.error?.includes('Failed to fetch cache progress') || c.data.error?.includes('timed out')) && (
+        <p className="text-body">Data is being loaded, please wait a moment...</p>
+      )}
+      {collectionsData.length > 0 && !loading && <NFTSummary collectionsData={collectionsData} />}
+    </div>
+  );
+}
+# .env.local
+NEXT_PUBLIC_ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI
+ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI
+ETHERSCAN_API_KEY=GZDQAWE7C9MKSWQ3ANT2BFPUW8SXXZJ9MF
+NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=1dd2a69d54ac94fdefad918243183710
+UPSTASH_REDIS_REST_URL=https://splendid-sunbird-26504.upstash.io
+UPSTASH_REDIS_REST_TOKEN=AWeIAAIjcDE5ODI2M2QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YXAxMA
+KV_REST_API_URL=https://splendid-sunbird-26504.upstash.io
+KV_REST_API_TOKEN=AWeIAAIjcDE5ODI2M3QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YXAxMA
+KV_REST_API_READ_ONLY_TOKEN=AmeIAAIgcDFuapUIQ7Gfl8xCFpd9nryMqcpkq_DbU-d9DkuesRnhQg
+KV_URL=rediss://default:AWeIAAIjcDE5ODI2M2QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YXAxMA@splendid-sunbird-26504.upstash.io:6379
+PERSIST_CACHE=true
+DEBUG=true
+LOG_LEVEL=debug
+USE_FALLBACK_DATA=false
+ESLINT_NO_DEV_ERRORS=true
+USE_ALCHEMY_FOR_OWNERS=true
+NEXT_NO_WORKER_THREADS=true
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+DISABLE_ELEMENT369_REDIS=true
+DISABLE_STAX_REDIS=true
+DISABLE_ASCENDANT_REDIS=true
+DISABLE_E280_REDIS=true
+DISABLE_ELEMENT280_REDIS=true

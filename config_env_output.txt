@@ -1,0 +1,145 @@
+================= Includes the following config and environment files =================
+./jsconfig.json
+./.env.production
+./tailwind.config.js
+./.env.local
+./postcss.config.mjs
+./next.config.mjs
+./.eslintrc.json
+
+
+================= Contents of above config and environment files =================
+
+
+----- ./jsconfig.json -----
+
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"],
+      "@/client/*": ["./client/*"],
+      "@/client/components/*": ["./client/components/*"],
+      "@/client/lib/*": ["./client/lib/*"],
+      "@/contracts/*": ["./contracts/*"], // Add this for contracts directory
+      "@/contracts/config": ["./contracts/config.js"], // Update to point to contracts/config.js
+      "@/app/*": ["./app/*"],
+      "@/abi/*": ["./abi/*"] // Add for ABI files
+    }
+  }
+}
+----- ./.env.production -----
+
+# .env.production
+PERSIST_CACHE=true
+DEBUG=false
+LOG_LEVEL=info
+USE_FALLBACK_DATA=false
+ESLINT_NO_DEV_ERRORS=false
+USE_ALCHEMY_FOR_OWNERS=true
+NEXT_NO_WORKER_THREADS=true
+NEXT_PUBLIC_API_BASE_URL=https://your-app.vercel.app
+DISABLE_ELEMENT369_REDIS=false
+DISABLE_STAX_REDIS=false
+DISABLE_ASCENDANT_REDIS=true
+DISABLE_E280_REDIS=false
+DISABLE_ELEMENT280_REDIS=false
+----- ./tailwind.config.js -----
+
+
+
+/** @type {import('tailwindcss').Config} */
+module.exports = {
+  content: [
+    './app/**/*.{js,ts,jsx,tsx}',
+    './client/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+};
+----- ./.env.local -----
+
+# env/.env.local
+NEXT_PUBLIC_ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI
+ALCHEMY_API_KEY=rzv6zozYQsbMIjcRuHg8HA8a4O5IhYYI
+ETHERSCAN_API_KEY=GZDQAWE7C9MKSWQ3ANT2BFPUW8SXXZJ9MF
+NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID=1dd2a69d54ac94fdefad918243183710
+UPSTASH_REDIS_REST_URL=https://splendid-sunbird-26504.upstash.io
+UPSTASH_REDIS_REST_TOKEN=AWeIAAIjcDE5ODI2M2QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YXAxMA
+KV_REST_API_URL=https://splendid-sunbird-26504.upstash.io
+KV_REST_API_TOKEN=AWeIAAIjcDE5ODI2M3QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YXAxMA
+KV_REST_API_READ_ONLY_TOKEN=AmeIAAIgcDFuapUIQ7Gfl8xCFpd9nryMqcpkq_DbU-d9DkuesRnhQg
+KV_URL=rediss://default:AWeIAAIjcDE5ODI2M2QyMGMzNWU0MmE1YWZmYjRhNTljZmQwMzU0YXAxMA@splendid-sunbird-26504.upstash.io:6379
+PERSIST_CACHE=true
+DEBUG=true
+LOG_LEVEL=debug
+USE_FALLBACK_DATA=false
+ESLINT_NO_DEV_ERRORS=true
+USE_ALCHEMY_FOR_OWNERS=true
+NEXT_NO_WORKER_THREADS=true
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+DISABLE_ELEMENT369_REDIS=true
+DISABLE_STAX_REDIS=true
+DISABLE_ASCENDANT_REDIS=true
+DISABLE_E280_REDIS=true
+DISABLE_ELEMENT280_REDIS=true
+----- ./postcss.config.mjs -----
+
+// This file is used to configure PostCSS, a tool for transforming CSS with JavaScript.
+const config = {
+  plugins: ["tailwindcss"],
+};
+export default config;
+
+----- ./next.config.mjs -----
+
+// ./next.config.mjs
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  serverExternalPackages: ['viem', 'alchemy-sdk'],
+  webpack: (config) => {
+    config.resolve.fallback = { fs: false, path: false };
+    config.module.rules.push({
+      test: /\.json$/,
+      type: 'json',
+    });
+    return config;
+  },
+};
+
+export default nextConfig;
+
+----- ./.eslintrc.json -----
+
+{
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2020": true
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended",
+    "next/core-web-vitals"
+  ],
+  "rules": {
+    "react/display-name": "off",
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "react/prop-types": "off",
+    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "react/no-unescaped-entities": "off",
+    "no-constant-condition": ["error", { "checkLoops": false }]
+  }
+}
+
+================= Includes the following config and environment files =================
+./jsconfig.json
+./.env.production
+./tailwind.config.js
+./.env.local
+./postcss.config.mjs
+./next.config.mjs
+./.eslintrc.json

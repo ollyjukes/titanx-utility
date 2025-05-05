@@ -1,14 +1,29 @@
+// ./app/nft/[chain]/[contract]/page.js
 'use client';
 import { useState, useEffect } from 'react';
 import { notFound } from 'next/navigation';
 import nextDynamic from 'next/dynamic';
-import config from '@/config';
-import LoadingIndicator from '@/components/LoadingIndicator';
+import config from '@/contracts/config';
+import LoadingIndicator from '@/client/components/LoadingIndicator';
 import { useNFTStore } from '@/app/store';
-import { HoldersResponseSchema } from '@/lib/schemas';
+import { HoldersResponseSchema } from '@/client/lib/schemas';
+import * as React from 'react';
+import { z } from 'zod'; // Import Zod for schema validation
 
-const NFTPageWrapper = nextDynamic(() => import('@/components/NFTPageWrapper'), { ssr: false });
+const NFTPageWrapper = nextDynamic(() => import('@/client/components/NFTPageWrapper'), { ssr: false });
 export const dynamic = 'force-dynamic';
+
+// Schema for progress endpoint response
+const ProgressResponseSchema = z.object({
+  isPopulating: z.boolean(),
+  totalLiveHolders: z.number(),
+  totalOwners: z.number(),
+  phase: z.string(),
+  progressPercentage: z.string(),
+  lastProcessedBlock: z.number().nullable(),
+  error: z.any().nullable(),
+  errorLog: z.array(z.any()),
+});
 
 async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
   console.log(`[NFTContractPage] [INFO] Fetching data for ${apiKey} from ${apiEndpoint}`);
@@ -27,7 +42,14 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
       if (!res.ok) throw new Error(`Progress fetch failed: ${res.status}`);
       const progress = await res.json();
       console.log(`[NFTContractPage] [DEBUG] Progress: ${JSON.stringify(progress)}`);
-      return progress;
+
+      // Validate progress response
+      const validation = ProgressResponseSchema.safeParse(progress);
+      if (!validation.success) {
+        console.error(`[NFTContractPage] [ERROR] Invalid progress data: ${JSON.stringify(validation.error.errors)}`);
+        throw new Error('Invalid progress data');
+      }
+      return validation.data;
     };
 
     let allHolders = [];
@@ -128,7 +150,7 @@ async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
 }
 
 export default function NFTContractPage({ params }) {
-  const { chain, contract } = params;
+  const { chain, contract } = React.use(params);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);

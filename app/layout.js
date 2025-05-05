@@ -1,6 +1,6 @@
 // File: app/layout.js
 
-import Navbar from '@/components/Navbar';
+import Navbar from '@/client/components/Navbar';
 import '@/app/global.css'; // Target global.css in app directory
 import { Inter } from 'next/font/google';
 

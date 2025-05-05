@@ -1,7 +1,7 @@
 // File: app/nft/layout.js
 'use client';
-import Navbar from '@/components/Navbar';
-import NFTLayoutWrapper from '@/components/NFTLayoutWrapper';
+import Navbar from '@/client/components/Navbar';
+import NFTLayoutWrapper from '@/client/components/NFTLayoutWrapper';
 import '@/app/global.css'; // Target global.css in app directory
 import { Inter } from 'next/font/google';
 import { Suspense } from 'react';
