@@ -537,13 +537,20 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
     if (tierResult.status === 'success') {
       if (contractKey === 'ascendant') {
         const result = tierResult.result;
+        let parsedResult;
+        // Handle both array and object formats
         if (Array.isArray(result) && result.length >= 3) {
-          rarityNumber = Number(result[0]) || 0;
-          tier = Number(result[1]) || 0;
-          rarity = Number(result[2]) || 0;
-          if (!config.debug.suppressDebug) {
-            logger.debug('utils', `Parsed attributes for token ${tokenId} (ascendant): tier=${tier}, rarityNumber=${rarityNumber}, rarity=${rarity}`, 'eth', contractKey);
-          }
+          parsedResult = {
+            rarityNumber: Number(result[0]) || 0,
+            tier: Number(result[1]) || 0,
+            rarity: Number(result[2]) || 0
+          };
+        } else if (typeof result === 'object' && result !== null && 'rarityNumber' in result && 'tier' in result && 'rarity' in result) {
+          parsedResult = {
+            rarityNumber: Number(result.rarityNumber) || 0,
+            tier: Number(result.tier) || 0,
+            rarity: Number(result.rarity) || 0
+          };
         } else {
           logger.warn('utils', `Invalid getNFTAttribute result for token ${tokenId}: result=${safeStringify(result)}`, 'eth', contractKey);
           errorLog.push({
@@ -554,6 +561,12 @@ async function getHoldersMap(contractKey, contractAddress, abi, vaultAddress, va
             error: `Invalid getNFTAttribute result: ${safeStringify(result)}`
           });
           return;
+        }
+        rarityNumber = parsedResult.rarityNumber;
+        tier = parsedResult.tier;
+        rarity = parsedResult.rarity;
+        if (!config.debug.suppressDebug) {
+          logger.debug('utils', `Parsed attributes for token ${tokenId} (ascendant): tier=${tier}, rarityNumber=${rarityNumber}, rarity=${rarity}`, 'eth', contractKey);
         }
       } else {
         tier = typeof tierResult.result === 'bigint' ? Number(tierResult.result) : Number(tierResult.result) || 0;
