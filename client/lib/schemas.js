@@ -24,6 +24,7 @@ export const HoldersResponseSchema = z.object({
         z.object({
           tokenId: z.number(),
           tier: z.number(),
+          rawTier: z.number().optional(), // Added for debugging
           rarityNumber: z.number(),
           rarity: z.number()
         })
