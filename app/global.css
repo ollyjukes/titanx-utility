@@ -22,6 +22,10 @@ body {
     @apply py-8;
   }
 
+  .main-content {
+    @apply pt-16 pb-[4rem]; /* Padding to prevent overlap with fixed footer */
+  }
+
   /* Cards */
   .card {
     @apply rounded-lg shadow-lg p-6 bg-gray-800 border border-gray-700/50;
@@ -164,7 +168,8 @@ body {
 
   /* Footer */
   .footer {
-    @apply bg-gray-800 py-4 text-center text-gray-400;
+    @apply bg-gray-800 py-4 text-center text-gray-400 fixed bottom-0 left-0 w-full z-10;
+    min-height: 4rem; /* Ensures consistent footer height */
   }
 
   /* Search Input */
@@ -200,6 +205,10 @@ body {
 
   .text-center-section {
     @apply text-center py-12;
+  }
+
+  .motion-button {
+    pointer-events: auto;
   }
 }
 

@@ -1,5 +1,4 @@
 // app/page.js
-
 'use client';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -10,6 +9,7 @@ export default function Home() {
 
   useEffect(() => {
     setIsLoaded(true);
+    console.log('Homepage hydrated');
   }, []);
 
   return (
@@ -31,27 +31,30 @@ export default function Home() {
                 Your gateway to exploring the TitanX ecosystem. Dive into NFT protocols, auctions, mining, and more.
               </p>
               <div className="mt-8 flex flex-col sm:flex-row justify-center gap-4">
-                <motion.div
-                  className="inline-block bg-orange-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-orange-600 transition-colors duration-200"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                <Link
+                  href="/mining"
+                  className="flex-1 sm:w-48 bg-green-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-green-600 transition-colors duration-200 text-center font-semibold motion-button"
+                  style={{ pointerEvents: 'auto' }}
+                  onClick={() => console.log('Navigating to /mining')}
                 >
-                  <Link href="/nft">NFT Protocols</Link>
-                </motion.div>
-                <motion.div
-                  className="inline-block bg-blue-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-blue-600 transition-colors duration-200"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                  Mining
+                </Link>
+                <Link
+                  href="/auctions"
+                  className="flex-1 sm:w-48 bg-blue-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-blue-600 transition-colors duration-200 text-center font-semibold motion-button"
+                  style={{ pointerEvents: 'auto' }}
+                  onClick={() => console.log('Navigating to /auctions')}
                 >
-                  <Link href="/auctions">TitanX Auctions</Link>
-                </motion.div>
-                <motion.div
-                  className="inline-block bg-green-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-green-600 transition-colors duration-200"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                  TitanX Auctions
+                </Link>
+                <Link
+                  href="/nft"
+                  className="flex-1 sm:w-48 bg-orange-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-orange-600 transition-colors duration-200 text-center font-semibold motion-button"
+                  style={{ pointerEvents: 'auto' }}
+                  onClick={() => console.log('Navigating to /nft')}
                 >
-                  <Link href="/mining">Mining</Link>
-                </motion.div>
+                  NFT Protocols
+                </Link>
               </div>
             </motion.section>
           )}

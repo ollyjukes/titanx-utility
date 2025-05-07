@@ -112,37 +112,35 @@ function Navbar() {
             <div key={item.name} className="block">
               {item.subItems ? (
                 <>
-                  <div
-                    className="flex justify-between items-center cursor-pointer nav-link py-3 px-4 text-gray-100 hover:text-orange-400 rounded-md transition-colors duration-200 font-semibold text-base"
-                    onClick={() =>
-                      item.name === 'NFT' &&
-                      setIsNFTDropdownOpen(!isNFTDropdownOpen)
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        item.name === 'NFT' &&
-                          setIsNFTDropdownOpen(!isNFTDropdownOpen);
-                      }
-                    }}
-                    tabIndex={0}
-                  >
-                    <span>{item.name}</span>
+                  <div className="flex justify-between items-center">
+                    <Link
+                      href={item.href}
+                      onClick={() => setIsOpen(false)}
+                      className="flex-1 py-3 px-4 text-gray-100 hover:text-orange-400 rounded-md transition-colors duration-200 font-semibold text-base"
+                    >
+                      {item.name}
+                    </Link>
                     {item.name === 'NFT' && (
-                      <svg
-                        className="w-5 h-5 transition-transform duration-200"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        style={{ transform: isNFTDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                      <button
+                        onClick={() => setIsNFTDropdownOpen(!isNFTDropdownOpen)}
+                        className="p-2"
+                        aria-label={isNFTDropdownOpen ? 'Close NFT dropdown' : 'Open NFT dropdown'}
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
+                        <svg
+                          className="w-5 h-5 transition-transform duration-200"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                          style={{ transform: isNFTDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M19 9l-7 7-7-7"
+                          />
+                        </svg>
+                      </button>
                     )}
                   </div>
                   {item.name === 'NFT' && isNFTDropdownOpen && (
