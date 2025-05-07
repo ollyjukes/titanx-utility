@@ -202,7 +202,7 @@ export default function AboutPage() {
           <motion.div className="card" variants={itemVariants}>
             <p className="text-body leading-relaxed">
               All aspects of this site will be free to use initially until usage is analyzed. Aspects that assist you in
-              your decision making may later be chargeable on a 1-year subscription basis.
+              your decision making may later be chargeable on a 1-year subscription basis
             </p>
             <div className="flex justify-center mt-4">
               <motion.button
