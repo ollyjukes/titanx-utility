@@ -1,0 +1,166 @@
+#!/bin/bash
+
+# Clear the terminal
+clear
+
+# Define output files
+STRUCTURE_FILE="project_dir_structure.txt"
+CONTENT_FILE="project_text_files.txt"
+ABI_CONTENT_FILE="abi_project_code.txt"
+SUMMARY_FILE="project_summary.txt"
+
+# Clean up previous output files
+rm -f "$STRUCTURE_FILE" "$CONTENT_FILE" "$ABI_CONTENT_FILE" "$SUMMARY_FILE"
+
+# Step 1: Generate directory structure with timestamps
+echo "Generating directory structure..." >&2
+find . -type f \
+  -not -path "./node_modules/*" \
+  -not -path "./public/*" \
+  -not -path "./.git/*" \
+  -not -path "./.next/*" \
+  -not -name "package-lock.json" \
+  -not -name "*.log" \
+  \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.mjs" -o -name "*.json" -o -name "*.md" -o -name ".env*" -o -name ".gitignore" \) \
+  -exec ls -lrt "{}" \; > "$STRUCTURE_FILE" 2>> "$SUMMARY_FILE"
+if [ $? -ne 0 ]; then
+  echo "Error: Failed to generate directory structure" >> "$SUMMARY_FILE"
+fi
+# Explicitly include abi/*.json files in structure
+echo -e "\n--- ABI Directory Files ---" >> "$STRUCTURE_FILE"
+if [ -d "./abi" ]; then
+  find ./abi -type f -name "*.json" -exec ls -lrt "{}" \; >> "$STRUCTURE_FILE" 2>> "$SUMMARY_FILE"
+  if [ $? -eq 0 ] && [ -n "$(find ./abi -type f -name "*.json")" ]; then
+    echo "Successfully included abi/*.json files in structure" >> "$SUMMARY_FILE"
+  else
+    echo "Warning: No .json files found in abi/ or error occurred" >> "$SUMMARY_FILE"
+  fi
+else
+  echo "Error: abi/ directory not found" >> "$SUMMARY_FILE"
+fi
+echo "Directory structure saved to $STRUCTURE_FILE" >&2
+
+# Step 2: Dump non-ABI file contents plus specific Element280 ABI JSONs
+echo "Dumping non-ABI file contents and Element280 ABI JSONs..." >&2
+CONTENT_FILE="project_text_files.txt"
+> "$CONTENT_FILE"  # Clear the file first
+find . -type f \
+  -not -path "./node_modules/*" \
+  -not -path "./public/*" \
+  -not -path "./.git/*" \
+  -not -path "./.next/*" \
+  -not -path "./scripts/*" \
+  \( -path "./abi/element280.json" -o -path "./abi/element280Vault.json" \
+     -o -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" \
+     -o -name "*.css" -o -name "*.mjs" -o -name "*.md" -o -name ".env*" \
+     -o -name ".gitignore" \) \
+  -not -name "*.json" \
+  -not -name "*.log" \
+  -exec sh -c 'echo -e "\n---\nFile: {}" && cat "{}"' \; >> "$CONTENT_FILE" 2>> "$SUMMARY_FILE"
+if [ $? -eq 0 ] && [ -s "$CONTENT_FILE" ]; then
+  echo "Successfully dumped non-ABI files and Element280 ABI JSONs to $CONTENT_FILE" >> "$SUMMARY_FILE"
+else
+  echo "Warning: No files found or error occurred" >> "$SUMMARY_FILE"
+fi
+echo "Non-ABI file contents and Element280 ABI JSONs saved to $CONTENT_FILE" >&2
+
+# Step 3: Dump ABI file contents
+echo "Dumping ABI file contents..." >&2
+echo -e "--- ABI Directory Contents ---" > "$ABI_CONTENT_FILE"
+if [ -d "./abi" ]; then
+  find ./abi -type f -name "*.json" -exec sh -c 'echo -e "\n---\nFile: {}" && cat "{}"' \; >> "$ABI_CONTENT_FILE" 2>> "$SUMMARY_FILE"
+  if [ $? -eq 0 ] && [ -n "$(find ./abi -type f -name "*.json")" ]; then
+    echo "Successfully dumped ABI file contents to $ABI_CONTENT_FILE" >> "$SUMMARY_FILE"
+  else
+    echo "Warning: No .json files found in abi/ or error occurred" >> "$SUMMARY_FILE"
+  fi
+else
+  echo "Error: abi/ directory not found" >> "$SUMMARY_FILE"
+fi
+echo "ABI file contents saved to $ABI_CONTENT_FILE" >&2
+
+# Step 4: Generate a project summary
+echo "Generating project summary..." >&2
+echo "Project Summary" > "$SUMMARY_FILE"
+echo "==============" >> "$SUMMARY_FILE"
+
+# Directory tree overview
+if command -v tree >/dev/null 2>&1; then
+  echo -e "\nDirectory Tree:" >> "$SUMMARY_FILE"
+  tree -if --noreport -I "node_modules|.git|.next|public" . >> "$SUMMARY_FILE"
+else
+  echo -e "\nDirectory Tree: (Install 'tree' with 'brew install tree' for this feature)" >> "$SUMMARY_FILE"
+fi
+
+# Package.json dependencies
+if [ -f "package.json" ]; then
+  echo -e "\nDependencies from package.json:" >> "$SUMMARY_FILE"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.dependencies | keys[]' "package.json" 2>/dev/null | sed 's/^/  - /' >> "$SUMMARY_FILE"
+    echo -e "\nDev Dependencies from package.json:" >> "$SUMMARY_FILE"
+    jq -r '.devDependencies | keys[]' "package.json" 2>/dev/null | sed 's/^/  - /' >> "$SUMMARY_FILE"
+  else
+    echo "  (Install 'jq' with 'brew install jq' to parse package.json)" >> "$SUMMARY_FILE"
+  fi
+else
+  echo -e "\npackage.json not found" >> "$SUMMARY_FILE"
+fi
+
+# Check for referenced but missing files
+echo -e "\nReferenced Files Not Found:" >> "$SUMMARY_FILE"
+echo "---------------------------" >> "$SUMMARY_FILE"
+
+REFERENCED_FILES=(
+"./app/api/holders/Element280/validate-burned/route.js"
+"./app/api/holders/\[contract\]/route.js"
+"./app/api/holders/\[contract\]/progress/route.js"
+"./app/api/utils.js"
+"./app/layout.js"
+"./app/mining/page.js"
+"./app/nft/\[chain\]/\[contract\]/page.js"
+"./app/nft/layout.js"
+"./app/page.js"
+"./app/store.js"
+"./components/HolderTable/Ascendant.js"
+"./components/HolderTable/E280.js"
+"./components/HolderTable/Element280.js"
+"./components/HolderTable/Element369.js"
+"./components/HolderTable/Stax.js"
+"./components/LoadingIndicator.js"
+"./components/NFTPage.js"
+"./components/NFTSummary.js"
+"./components/Navbar.jsx"
+"./components/SearchResultsModal.js"
+"./config.js"
+)
+
+for file in "${REFERENCED_FILES[@]}"; do
+  if ! grep -q "$file" "$STRUCTURE_FILE" 2>/dev/null; then
+    echo "- $file (Referenced but not found in project structure)" >> "$SUMMARY_FILE"
+  fi
+done
+echo "Project summary saved to $SUMMARY_FILE" >&2
+
+# Step 5: Output results to terminal (structure and summary only)
+clear
+echo "Project Directory Structure:"
+echo "============================"
+if [ -s "$STRUCTURE_FILE" ]; then
+  cat "$STRUCTURE_FILE"
+else
+  echo "No files found or error occurred. Check $SUMMARY_FILE for details." >&2
+fi
+
+echo -e "\nProject Summary:"
+echo "================"
+if [ -s "$SUMMARY_FILE" ]; then
+  cat "$SUMMARY_FILE"
+else
+  echo "Summary generation failed. Check for errors above." >&2
+fi
+
+echo -e "\nOutput complete." >&2
+echo "File contents are in $CONTENT_FILE (non-ABI files) and $ABI_CONTENT_FILE (ABI files)." >&2
+echo "Please share $STRUCTURE_FILE, $CONTENT_FILE, $ABI_CONTENT_FILE, and $SUMMARY_FILE (e.g., 'cat *.txt' or attach files)." >&2
+echo "clear; cat $STRUCTURE_FILE   $SUMMARY_FILE"
+echo "cut -d: -f1 import_statements.txt | sort -u | sed 's/.*/"&"/'  "

@@ -1,4 +1,4 @@
-// app/about/page.js
+ // app/about/page.js
 export default function AboutPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-6">
@@ -21,7 +21,7 @@ export default function AboutPage() {
           This is a continuos development project, and we are always looking for ways to improve the user experience. If you have any suggestions or feedback, please feel free to reach out to us on Twitter.
         </p>
         <p className="text-lg text-gray-300 leading-relaxed mt-4">
-          I'd like to add sections on our lending and farms protocols.  to be continued...
+          May add sections on our lending and farms protocols.  to be continued...
         </p>
       </div>
     </div>

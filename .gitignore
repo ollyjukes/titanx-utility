@@ -1,4 +1,4 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# See https://help.github.com/articles/ignoring-files/
 
 # dependencies
 /node_modules
@@ -32,13 +32,20 @@ yarn-error.log*
 .pnpm-debug.log*
 *.log
 
-# env files (can opt-in for committing if needed)
-.env*
-.env
+# local development files
+/log/               # Ignore all files in the log/ directory
+**/*.txt            # Ignore all .txt files in any directory
+
+
+# env files
+.env*               # Ignore .env files in root
 
 # vercel
 .vercel
 
-# typescript (optional if no TS)
+# typescript
 *.tsbuildinfo
 next-env.d.ts
+*.sqlite
+*.db
+scripts/backups/

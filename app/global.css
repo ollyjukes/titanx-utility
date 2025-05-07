@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base Styles */
+html {
+  @apply scroll-smooth;
+}
+
+body {
+  @apply min-h-screen flex flex-col bg-gray-900 text-gray-100 antialiased;
+}
+
+/* Component Classes */
+@layer components {
+  /* Layout */
+  .container {
+    @apply mx-auto max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .page-content {
+    @apply py-8;
+  }
+
+  /* Cards */
+  .card {
+    @apply rounded-lg shadow-lg p-6 bg-gray-800 border border-gray-700;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
+  }
+
+  .btn-primary {
+    @apply bg-blue-500 text-white hover:bg-blue-600;
+  }
+
+  .btn-secondary {
+    @apply bg-gray-700 text-gray-100 hover:bg-gray-600;
+  }
+
+  /* Typography */
+  .title {
+    @apply text-3xl font-bold tracking-tight text-gray-100;
+  }
+
+  .subtitle {
+    @apply text-2xl font-semibold text-gray-100;
+  }
+
+  .text-body {
+    @apply text-sm sm:text-base text-gray-300;
+  }
+
+  .text-error {
+    @apply text-red-400;
+  }
+
+  /* Tables */
+  .table-container {
+    @apply overflow-x-auto w-full rounded-lg shadow-lg animate-fade-in;
+  }
+
+  .table {
+    @apply w-full table-auto md:table-fixed bg-gray-800 text-gray-100;
+  }
+
+  .table-head {
+    @apply bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base text-white;
+  }
+
+  .table-body {
+    @apply text-xs md:text-sm text-gray-300;
+  }
+
+  .table-row {
+    @apply transition-colors border-b border-gray-700;
+  }
+
+  .table-row-even {
+    @apply bg-gray-800;
+  }
+
+  .table-row-odd {
+    @apply bg-gray-900;
+  }
+
+  .table-row:hover {
+    @apply bg-blue-900/30 shadow-sm;
+  }
+
+  .table-cell {
+    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold;
+  }
+
+  .table-link {
+    @apply text-blue-400 hover:text-blue-300 hover:underline break-all;
+  }
+
+  .table-pulse {
+    @apply animate-pulse;
+  }
+
+  .table-pulse-placeholder {
+    @apply h-4 bg-gray-600 rounded w-3/4;
+  }
+
+  /* Reward Columns (for Element369.js) */
+  .reward-cell {
+    @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-blue-400;
+  }
+
+  /* Chart Container */
+  .chart-container {
+    @apply bg-gray-800 p-4 rounded-lg;
+  }
+
+  /* Loading Indicator */
+  .loading-container {
+    @apply flex flex-col items-center justify-center gap-3 w-full flex-1;
+  }
+
+  .spinner {
+    @apply h-6 w-6 sm:h-8 sm:w-8 text-blue-400;
+  }
+
+  .progress-bar {
+    @apply w-64 bg-gray-700 rounded-full h-2.5 mt-2;
+  }
+
+  .progress-fill {
+    @apply bg-blue-400 h-2.5 rounded-full;
+  }
+
+  /* Navbar */
+  .nav {
+    @apply bg-gray-900 text-gray-100 sticky top-0 z-50 shadow-lg;
+  }
+
+  .nav-container {
+    @apply container py-4 flex justify-between items-center;
+  }
+
+  .nav-logo {
+    @apply text-2xl font-bold;
+  }
+
+  .nav-link {
+    @apply text-gray-300 hover:text-blue-400 transition-colors duration-200;
+  }
+
+  .nav-dropdown {
+    @apply absolute left-0 mt-2 w-56 bg-gray-800 rounded-lg shadow-xl;
+  }
+
+  .nav-dropdown-item {
+    @apply block px-4 py-2 text-gray-300 hover:bg-gray-700 hover:text-white rounded-md transition-colors;
+  }
+
+  .nav-toggle {
+    @apply p-2 rounded-full bg-gray-700 text-gray-100 hover:bg-gray-600 transition-colors;
+  }
+
+  /* Footer */
+  .footer {
+    @apply bg-gray-800 py-4 text-center text-gray-400;
+  }
+
+  /* Search Input */
+  .search-input {
+    @apply w-full p-2 bg-gray-700 text-gray-100 border border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500;
+  }
+
+  /* Modal Overlay */
+  .modal-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4;
+  }
+
+  /* Animations */
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Utility Classes */
+@layer utilities {
+  .grid-responsive {
+    @apply grid grid-cols-1 sm:grid-cols-2 gap-4;
+  }
+
+  .space-y-section {
+    @apply space-y-6;
+  }
+
+  .text-center-section {
+    @apply text-center py-12;
+  }
+}

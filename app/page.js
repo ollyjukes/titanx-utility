@@ -1,4 +1,5 @@
 // app/page.js
+
 'use client';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,7 +13,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-gray-100">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
         <AnimatePresence>
           {isLoaded && (
@@ -26,23 +27,30 @@ export default function Home() {
               <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight">
                 Welcome to TitanXUtils
               </h1>
-              <p className="mt-4 text-lg sm:text-xl text-gray-300">
-                Your gateway to exploring the TitanX ecosystem. Dive into NFT protocols, auctions, and more.
+              <p className="mt-4 text-lg sm:text-xl text-body">
+                Your gateway to exploring the TitanX ecosystem. Dive into NFT protocols, auctions, mining, and more.
               </p>
               <div className="mt-8 flex flex-col sm:flex-row justify-center gap-4">
                 <motion.div
-                  className="inline-block bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-orange-600 transition-colors duration-200"
+                  className="inline-block bg-orange-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-orange-600 transition-colors duration-200"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Link href="/nft">NFT Protocols</Link>
                 </motion.div>
                 <motion.div
-                  className="inline-block bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg hover:bg-blue-600 transition-colors duration-200"
+                  className="inline-block bg-blue-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-blue-600 transition-colors duration-200"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   <Link href="/auctions">TitanX Auctions</Link>
+                </motion.div>
+                <motion.div
+                  className="inline-block bg-green-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-green-600 transition-colors duration-200"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <Link href="/mining">Mining</Link>
                 </motion.div>
               </div>
             </motion.section>

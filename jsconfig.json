@@ -1,7 +1,15 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@/client/*": ["./client/*"],
+      "@/client/components/*": ["./client/components/*"],
+      "@/client/lib/*": ["./client/lib/*"],
+      "@/contracts/*": ["./contracts/*"], // Add this for contracts directory
+      "@/contracts/config": ["./contracts/config.js"], // Update to point to contracts/config.js
+      "@/app/*": ["./app/*"],
+      "@/abi/*": ["./abi/*"] // Add for ABI files
     }
   }
 }
