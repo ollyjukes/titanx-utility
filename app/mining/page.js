@@ -1,6 +1,7 @@
 // app/mining/page.js
 'use client';
 import { useState } from 'react';
+import { motion } from 'framer-motion';
 
 export default function Mining() {
   const [selectedMine, setSelectedMine] = useState(null);
@@ -45,13 +46,15 @@ export default function Mining() {
               className="bg-gray-800 rounded-lg shadow-md p-6 hover:bg-gray-700 
                 transition-all duration-200 hover:shadow-lg transform hover:-translate-y-1"
             >
-              <button
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => openModal(mine)}
-                className="text-blue-400 hover:text-blue-300 text-xl font-semibold 
-                  transition-colors duration-200 text-left w-full"
+                className="btn btn-primary w-full text-left font-semibold"
+                aria-label={`View ${mine.name} Mining`}
               >
                 {mine.name} Mining
-              </button>
+              </motion.button>
               <p className="text-gray-400 mt-2 text-sm truncate">
                 <span className="hover:underline">{mine.url}</span>
               </p>
@@ -66,13 +69,15 @@ export default function Mining() {
           onClick={handleBackgroundClick}
         >
           <div className="bg-gray-900 rounded-lg p-4 w-full max-w-4xl h-[80vh] relative">
-            <button
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={closeModal}
-              className="absolute top-2 right-2 text-gray-300 hover:text-white 
-                bg-gray-800 rounded-full w-8 h-8 flex items-center justify-center"
+              className="btn absolute top-2 right-2 bg-gray-800 text-gray-300 hover:bg-gray-700 rounded-full w-8 h-8 flex items-center justify-center"
+              aria-label="Close mining modal"
             >
               ✕
-            </button>
+            </motion.button>
             <h2 className="text-2xl font-bold text-white mb-4">{selectedMine.name} Mine</h2>
             <iframe
               src={selectedMine.url}

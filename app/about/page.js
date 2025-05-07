@@ -33,7 +33,7 @@ export default function AboutPage() {
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
       <main className="container pt-20 pb-16">
         <motion.section
-          className="text-center mb-12"
+          className="text-center mb-12 max-w-3xl mx-auto"
           variants={containerVariants}
           initial="hidden"
           animate="visible"
@@ -45,7 +45,7 @@ export default function AboutPage() {
             About TitanXUtils
           </motion.h1>
           <motion.p
-            className="text-lg sm:text-xl text-gray-300 max-w-3xl mx-auto leading-relaxed"
+            className="text-lg sm:text-xl text-gray-300 leading-relaxed"
             variants={itemVariants}
           >
             TitanXUtils is your premier platform for navigating the TitanX ecosystem with ease and precision.
@@ -53,7 +53,7 @@ export default function AboutPage() {
         </motion.section>
 
         {/* Introduction Section */}
-        <motion.section className="mb-16" variants={containerVariants} initial="hidden" animate="visible">
+        <motion.section className="mb-16 max-w-3xl mx-auto" variants={containerVariants} initial="hidden" animate="visible">
           <motion.div className="card" variants={itemVariants}>
             <h2 className="subtitle mb-4">Our Mission</h2>
             <p className="text-body leading-relaxed">
@@ -87,7 +87,7 @@ export default function AboutPage() {
           <motion.h2 className="subtitle text-center mb-8" variants={itemVariants}>
             Why TitanXUtils?
           </motion.h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-3xl mx-auto">
             <motion.div className="card hover:shadow-xl transition-shadow duration-300" variants={itemVariants}>
               <h3 className="text-xl font-semibold text-orange-400 mb-3">Centralized Hub</h3>
               <p className="text-body">
@@ -124,13 +124,17 @@ export default function AboutPage() {
                 A visionary developer with a passion for blockchain technology, JukesTheGreat drives the technical
                 innovation behind TitanXUtils, ensuring a robust and user-friendly platform.
               </p>
-              <a
-                href="#"
-                onClick={(e) => handleDMLink('JukesTheGreat', e)}
-                className="btn btn-primary mt-4 inline-block"
-              >
-                Contact on X
-              </a>
+              <div className="flex justify-center mt-4">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={(e) => handleDMLink('JukesTheGreat', e)}
+                  className="btn btn-primary shadow-lg hover:shadow-xl transition-shadow duration-200"
+                  aria-label="Contact @JukesTheGreat on X"
+                >
+                  Contact on X
+                </motion.button>
+              </div>
             </motion.div>
             <motion.div className="card hover:shadow-xl transition-shadow duration-300" variants={itemVariants}>
               <h3 className="text-xl font-semibold text-orange-400 mb-3">@KetoNatural1970</h3>
@@ -138,23 +142,27 @@ export default function AboutPage() {
                 A dedicated community advocate and strategist, KetoNatural1970 shapes the platform’s vision, focusing on
                 user experience and community engagement.
               </p>
-              <a
-                href="#"
-                onClick={(e) => handleDMLink('KetoNatural1970', e)}
-                className="btn btn-primary mt-4 inline-block"
-              >
-                Contact on X
-              </a>
+              <div className="flex justify-center mt-4">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={(e) => handleDMLink('KetoNatural1970', e)}
+                  className="btn btn-primary shadow-lg hover:shadow-xl transition-shadow duration-200"
+                  aria-label="Contact @KetoNatural1970 on X"
+                >
+                  Contact on X
+                </motion.button>
+              </div>
             </motion.div>
           </div>
         </motion.section>
 
         {/* Up Next Section */}
-        <motion.section className="mb-16" variants={containerVariants} initial="hidden" animate="visible">
+        <motion.section className="mb-16 max-w-3xl mx-auto" variants={containerVariants} initial="hidden" animate="visible">
           <motion.h2 className="subtitle text-center mb-8" variants={itemVariants}>
             Up Next...
           </motion.h2>
-          <motion.div className="card max-w-3xl mx-auto" variants={itemVariants}>
+          <motion.div className="card" variants={itemVariants}>
             <h3 className="text-xl font-semibold text-orange-400 mb-3">Upcoming Features</h3>
             <p className="text-body leading-relaxed">
               We’re working on exciting enhancements to elevate your TitanXUtils experience. Stay tuned for:
@@ -172,40 +180,46 @@ export default function AboutPage() {
             <p className="text-body mt-3">
               Have ideas for other features? Let us know!
             </p>
-            <a
-              href="#"
-              onClick={(e) => handleDMLink('JukesTheGreat', e)}
-              className="btn btn-primary mt-4 inline-block"
-              title="Send a DM to @JukesTheGreat on X"
-            >
-              Share Your Ideas
-            </a>
+            <div className="flex justify-center mt-4">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={(e) => handleDMLink('JukesTheGreat', e)}
+                className="btn btn-primary shadow-lg hover:shadow-xl transition-shadow duration-200"
+                aria-label="Share your ideas with @JukesTheGreat on X"
+              >
+                Share Your Ideas
+              </motion.button>
+            </div>
           </motion.div>
         </motion.section>
 
         {/* Free or Paid Section */}
-        <motion.section className="mb-16" variants={containerVariants} initial="hidden" animate="visible">
+        <motion.section className="mb-16 max-w-3xl mx-auto" variants={containerVariants} initial="hidden" animate="visible">
           <motion.h2 className="subtitle text-center mb-8" variants={itemVariants}>
             Free or Paid?
           </motion.h2>
-          <motion.div className="card max-w-3xl mx-auto" variants={itemVariants}>
+          <motion.div className="card" variants={itemVariants}>
             <p className="text-body leading-relaxed">
               All aspects of this site will be free to use initially until usage is analyzed. Aspects that assist you in
               your decision making may later be chargeable on a 1-year subscription basis.
             </p>
-            <a
-              href="#"
-              onClick={(e) => handleDMLink('JukesTheGreat', e)}
-              className="btn btn-primary mt-4 inline-block"
-              title="Send a DM to @JukesTheGreat on X"
-            >
-              Contact Us for Details
-            </a>
+            <div className="flex justify-center mt-4">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={(e) => handleDMLink('JukesTheGreat', e)}
+                className="btn btn-primary shadow-lg hover:shadow-xl transition-shadow duration-200"
+                aria-label="Contact @JukesTheGreat for details on X"
+              >
+                Contact Us for Details
+              </motion.button>
+            </div>
           </motion.div>
         </motion.section>
 
         {/* Feedback Section */}
-        <motion.section className="text-center" variants={containerVariants} initial="hidden" animate="visible">
+        <motion.section className="text-center max-w-3xl mx-auto" variants={containerVariants} initial="hidden" animate="visible">
           <motion.h2 className="subtitle mb-6" variants={itemVariants}>
             We Value Your Feedback
           </motion.h2>
@@ -213,15 +227,16 @@ export default function AboutPage() {
             TitanXUtils is a continuous development project, and your input is crucial. Have suggestions for new features,
             such as live ROI on auctions or direct auction participation? Reach out to us on X.
           </motion.p>
-          <motion.div variants={itemVariants}>
-            <a
-              href="#"
+          <motion.div variants={itemVariants} className="flex justify-center">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={(e) => handleDMLink('JukesTheGreat', e)}
-              className="btn btn-primary"
-              title="Send a DM to @JukesTheGreat on X"
+              className="btn btn-primary shadow-lg hover:shadow-xl transition-shadow duration-200"
+              aria-label="Share feedback with @JukesTheGreat on X"
             >
               Share Feedback
-            </a>
+            </motion.button>
           </motion.div>
         </motion.section>
       </main>

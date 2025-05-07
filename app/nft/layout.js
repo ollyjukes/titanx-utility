@@ -222,7 +222,8 @@ export default function NFTLayout({ children }) {
             whileTap={{ scale: 0.95 }}
             onClick={handleSearch}
             disabled={searchLoading}
-            className={`px-4 py-2 bg-orange-500 text-white rounded-md font-semibold hover:bg-orange-600 transition-colors ${searchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`btn btn-primary px-4 py-2 font-semibold shadow-lg hover:shadow-xl transition-shadow duration-200 ${searchLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            aria-label="Search by wallet address"
           >
             {searchLoading ? 'Searching...' : 'Search'}
           </motion.button>
@@ -230,18 +231,15 @@ export default function NFTLayout({ children }) {
         {error && <p className="text-red-500 mt-2">{error}</p>}
       </div>
 
-      <div className="flex space-x-4 mb-6">
+      <div className="flex space-x-4 mb-6 justify-center">
         {chains.map((chain) => (
           <motion.button
             key={chain.id}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => handleChainSelect(chain.id)}
-            className={`px-6 py-2 rounded-md font-semibold transition-colors ${
-              selectedChain === chain.id
-                ? 'bg-orange-500 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
+            className={`btn ${selectedChain === chain.id ? 'btn-primary' : 'btn-secondary'} px-6 py-2 font-semibold shadow-lg hover:shadow-xl transition-shadow duration-200`}
+            aria-label={`Select ${chain.name} chain`}
           >
             {chain.name}
           </motion.button>
@@ -249,14 +247,15 @@ export default function NFTLayout({ children }) {
       </div>
 
       {selectedChain === 'eth' && (
-        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl">
+        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl justify-center">
           {ethNFTs.map((nft) => (
-            <Link key={nft.name} href={nft.href} className="flex-1">
+            <Link key={nft.name} href={nft.href} passHref className="flex-1">
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => setShowE280Message(false)}
-                className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
+                className="btn btn-secondary w-full px-6 py-3 font-semibold hover:btn-primary transition-colors shadow-lg hover:shadow-xl"
+                aria-label={`View ${nft.name} collection`}
               >
                 {nft.name}
               </motion.button>
@@ -264,35 +263,37 @@ export default function NFTLayout({ children }) {
           ))}
         </div>
       )}
-{selectedChain === 'base' && (
-  <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl justify-center">
-    {baseNFTs.map((nft) => (
-      nft.href ? (
-        <Link key={nft.name} href={nft.href} className="flex-1">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setShowE280Message(false)}
-            className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
-          >
-            {nft.name}
-          </motion.button>
-        </Link>
-      ) : (
-        <div key={nft.name} className="flex justify-center">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={handleE280Click}
-            className="max-w-xs px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
-          >
-            {nft.name}
-          </motion.button>
+      {selectedChain === 'base' && (
+        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl justify-center">
+          {baseNFTs.map((nft) => (
+            nft.href ? (
+              <Link key={nft.name} href={nft.href} passHref className="flex-1">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => setShowE280Message(false)}
+                  className="btn btn-secondary w-full px-6 py-3 font-semibold hover:btn-primary transition-colors shadow-lg hover:shadow-xl"
+                  aria-label={`View ${nft.name} collection`}
+                >
+                  {nft.name}
+                </motion.button>
+              </Link>
+            ) : (
+              <div key={nft.name} className="flex justify-center">
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={handleE280Click}
+                  className="btn btn-secondary max-w-xs px-6 py-3 font-semibold hover:btn-primary transition-colors shadow-lg hover:shadow-xl"
+                  aria-label="View E280 collection (coming soon)"
+                >
+                  {nft.name}
+                </motion.button>
+              </div>
+            )
+          ))}
         </div>
-      )
-    ))}
-  </div>
-)}
+      )}
       {showE280Message && selectedChain === 'base' && (
         <div className="mt-6 text-center text-white">
           <p className="text-lg">Contract not yet deployed. Coming soon...</p>

@@ -30,30 +30,36 @@ export default function Home() {
               <p className="mt-4 text-lg sm:text-xl text-body">
                 Your gateway to exploring the TitanX ecosystem. Dive into NFT protocols, auctions, mining, and more.
               </p>
-              <div className="mt-8 flex flex-col sm:flex-row justify-center gap-4">
-                <Link
-                  href="/mining"
-                  className="flex-1 sm:w-48 bg-green-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-green-600 transition-colors duration-200 text-center font-semibold motion-button"
-                  style={{ pointerEvents: 'auto' }}
-                  onClick={() => console.log('Navigating to /mining')}
-                >
-                  Mining
+              <div className="mt-8 flex flex-col sm:flex-row justify-center gap-4 max-w-3xl mx-auto">
+                <Link href="/mining" passHref>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="btn btn-primary w-full sm:w-40 shadow-lg hover:shadow-xl transition-shadow duration-200"
+                    aria-label="Navigate to Mining page"
+                  >
+                    Mining
+                  </motion.button>
                 </Link>
-                <Link
-                  href="/auctions"
-                  className="flex-1 sm:w-48 bg-blue-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-blue-600 transition-colors duration-200 text-center font-semibold motion-button"
-                  style={{ pointerEvents: 'auto' }}
-                  onClick={() => console.log('Navigating to /auctions')}
-                >
-                  TitanX Auctions
+                <Link href="/auctions" passHref>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="btn btn-primary w-full sm:w-40 shadow-lg hover:shadow-xl transition-shadow duration-200"
+                    aria-label="Navigate to Auctions page"
+                  >
+                    TitanX Auctions
+                  </motion.button>
                 </Link>
-                <Link
-                  href="/nft"
-                  className="flex-1 sm:w-48 bg-orange-500 text-gray-100 px-6 py-3 rounded-lg shadow-lg hover:bg-orange-600 transition-colors duration-200 text-center font-semibold motion-button"
-                  style={{ pointerEvents: 'auto' }}
-                  onClick={() => console.log('Navigating to /nft')}
-                >
-                  NFT Protocols
+                <Link href="/nft" passHref>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="btn btn-primary w-full sm:w-40 shadow-lg hover:shadow-xl transition-shadow duration-200"
+                    aria-label="Navigate to NFT Protocols page"
+                  >
+                    NFT Protocols
+                  </motion.button>
                 </Link>
               </div>
             </motion.section>
