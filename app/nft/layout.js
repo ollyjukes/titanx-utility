@@ -264,34 +264,35 @@ export default function NFTLayout({ children }) {
           ))}
         </div>
       )}
-      {selectedChain === 'base' && (
-        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl">
-          {baseNFTs.map((nft) => (
-            nft.href ? (
-              <Link key={nft.name} href={nft.href} className="flex-1">
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={() => setShowE280Message(false)}
-                  className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
-                >
-                  {nft.name}
-                </motion.button>
-              </Link>
-            ) : (
-              <motion.button
-                key={nft.name}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleE280Click}
-                className="flex-1 w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
-              >
-                {nft.name}
-              </motion.button>
-            )
-          ))}
+{selectedChain === 'base' && (
+  <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 w-full max-w-6xl justify-center">
+    {baseNFTs.map((nft) => (
+      nft.href ? (
+        <Link key={nft.name} href={nft.href} className="flex-1">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowE280Message(false)}
+            className="w-full px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
+          >
+            {nft.name}
+          </motion.button>
+        </Link>
+      ) : (
+        <div key={nft.name} className="flex justify-center">
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleE280Click}
+            className="max-w-xs px-6 py-3 bg-gray-700 text-gray-300 rounded-md font-semibold hover:bg-orange-500 hover:text-white transition-colors"
+          >
+            {nft.name}
+          </motion.button>
         </div>
-      )}
+      )
+    ))}
+  </div>
+)}
       {showE280Message && selectedChain === 'base' && (
         <div className="mt-6 text-center text-white">
           <p className="text-lg">Contract not yet deployed. Coming soon...</p>

@@ -191,7 +191,7 @@ export default function AboutPage() {
           <motion.div className="card max-w-3xl mx-auto" variants={itemVariants}>
             <p className="text-body leading-relaxed">
               All aspects of this site will be free to use initially until usage is analyzed. Aspects that assist you in
-              making money may later be chargeable on a 1-year subscription basis.
+              your decision making may later be chargeable on a 1-year subscription basis.
             </p>
             <a
               href="#"
