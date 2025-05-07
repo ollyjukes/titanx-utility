@@ -3,12 +3,14 @@
 # Change to project root
 cd "$(dirname "$0")/.." || exit 1
 
-# Collect all files (not just .js) from ./app
-included_files=$(find ./app   -type f | sort)
-#included_files=$(find ./app -not -path "./app/api/*"  -type f | sort)
+# Find all files under ./app and ./components, excluding ./app/api
+included_files=$(find ./app ./components \
+    -path "./app/api" -prune -o \
+      -path "./app/dev" -prune -o \
+  -type f -print | sort)
 
 {
-  echo "================= Includes the following files under ./app ================="
+  echo "================= Includes the following files under ./app and ./components ================="
   echo "$included_files"
 
   echo -e "\n\n================= Contents of above files =================\n"
@@ -18,10 +20,9 @@ included_files=$(find ./app   -type f | sort)
     cat "$file"
   done <<< "$included_files"
 
-  echo -e "\n\n================= Includes the following files under ./app ================="
+  echo -e "\n\n================= Includes the following files under ./app and ./components ================="
   echo "$included_files"
 } > scripts/out/app_output.txt
 
 clear
 cat scripts/out/app_output.txt
-

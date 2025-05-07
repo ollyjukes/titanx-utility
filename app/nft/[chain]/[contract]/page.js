@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { notFound } from 'next/navigation';
 import nextDynamic from 'next/dynamic';
 import config from '@/contracts/config';
-import LoadingIndicator from '@/client/components/LoadingIndicator';
+import LoadingIndicator from '@/components/LoadingIndicator';
 import { useNFTStore } from '@/app/store';
 import { HoldersResponseSchema } from '@/app/lib/schemas';
 import * as React from 'react';
