@@ -1,7 +1,9 @@
 // app/api/holders/Element280/validate-burned/route.js
 import { NextResponse } from 'next/server';
 import config from '@/contracts/config';
-import { getTransactionReceipt, log, client, getCache, setCache } from '@/app/api/utils.js';
+import { getTransactionReceipt, getCache, setCache } from '@/app/api/utils/cache';
+import { log } from '@/app/api/utils/logging';
+import { client } from '@/app/api/utils/client';
 import { parseAbiItem } from 'viem';
 
 export async function POST(request) {

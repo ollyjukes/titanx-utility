@@ -4,7 +4,7 @@
 cd "$(dirname "$0")/.." || exit 1
 
 # Collect all files (not just .js) from ./app
-included_files=$(find ./client ./app  -type f  -name "*.js" | sort)
+included_files=$(find ./client   -type f  -name "*.js" | sort)
 #included_files=$(find ./client ./app -not -path "app/api/*" -not -path "app/lib/*" -type f  -name "*.js" | sort)
 
 {

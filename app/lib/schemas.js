@@ -24,7 +24,7 @@ export const HoldersResponseSchema = z.object({
         z.object({
           tokenId: z.number(),
           tier: z.number(),
-          rawTier: z.number().optional(), // Added for debugging
+          rawTier: z.number().optional(),
           rarityNumber: z.number(),
           rarity: z.number()
         })
@@ -65,8 +65,10 @@ export const ProgressResponseSchema = z.object({
   phase: z.string(),
   progressPercentage: z.string(),
   lastProcessedBlock: z.number().nullable(),
-  lastUpdated: z.number().nullable(),
+  lastUpdated: z.string().datetime().nullable(),
   error: z.string().nullable(),
   errorLog: z.array(z.any()),
   globalMetrics: z.object({}).optional(),
+  isErrorLogTruncated: z.boolean().optional(),
+  status: z.enum(['idle', 'pending', 'success', 'error']), // Added status field
 });

@@ -318,6 +318,20 @@ curl http://localhost:3000/api/holders/element280/progress
 curl http://localhost:3000/api/holders/ascendant/progress
 
 
+
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl http://localhost:3000/api/holders/element280/progress
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl http://localhost:3000/api/holders/element280/progress
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl http://localhost:3000/api/holders/element280/progress
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl http://localhost:3000/api/holders/element280/progress
+time curl -X POST http://localhost:3000/api/holders/element280;
+time curl http://localhost:3000/api/holders/element280/progress
+
+
+
 given the testing and server code below can you help me complete all the testing code please?  ideally I'd end up with one script ( maybe called  backend.test.js) which calls all the other testing scripts to do a comprehensive one call test of all the backend data retieval, caching functionality
 
 code below
@@ -389,8 +403,20 @@ node check-redis-keys.js
 
 
 =========
-I suppose the purpose of the global metrics section is to supply summary information when the data is listed above the holdermap.  THis Summary information needs to be made available when the NFT data is read from cache. Obviously the holder data will populate the HolderTableFor element280 I'd want to see:
-Total NFTs minted:  Total LIve NFTs, Total Burned, Total NFTs live NFTs broken down by their TierFor element369 I'd want to see:
-Total LIve NFTs, Total Burned, Total NFTs live NFTs broken down by their TierFor stax  I'd want to see:
-Total NFTs minted:  Total LIve NFTs, Total Burned, Total NFTs live NFTs broken down by their TierFor Ascendant I'd want to see everything in the global metrics
+The purpose of the global metrics section in the json data is to supply summary information for when the NFT collection button is selected and the data is retrieved. This summary section is to be displayed to the user in the brower above the NFT  HolderTable data. The HolderTable data is to be placed into memory and displayed in a table to the user.  
 
+We have existing client side code that may adjusted to accomodate any new data or fields that are being used.
+
+Below are the source code files that we can use to implement this.  Please check the code and propose any enhancements or changes that we need to implement.
+
+
+
+./client/components/NFTSummary.js should be the code that uses and displays the the global_metrics data in a Summary section.  however we implement this it needs to be code that is easily maintained including gthe ability to add an extra NFT collection as and when we need to. For example when the E280 BASE chain NFT is released.  `the holder data code should already be about right although we'll need to add extra fields to cater for the Ascendant extra fields.  Please use the NFT Store to cache all the data needed in memory.If the existing code needs to be re-organised a bit please say as there are many files now and I'm not certain what they all do or even if they're all needed
+
+what i would like.
+this is a client app that uses clever server side data fetching and caching.
+the client side should be able to query the persistent cached data ( node-cach for dev/redis for prod) to populate its memory cache (zustand) maybe using TanStack Query if applicable. whenever the user clicks an NFT collection the client side logic (useNFTData.js ) should populate its memory cache by querying the persistent cache data (node-cache or redis). querying the persistent cache should trigger  it to ensures its up to date.( the last block processed is recorded in cache and used to query the blockchain for new data)
+
+I have the following fetch data backend code that runs but fails to pull back data and populate the json files in ghe cache directory.
+Can we focus on ensuring the lastproccessedblock value is corrcetly updated by the code as blocks are read and processed.  THis has to conform to the alchemy free tier
+Lets test with stax for now but this needs to work for all NFT collections

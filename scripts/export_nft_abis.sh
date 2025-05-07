@@ -10,10 +10,11 @@ included_files=$(cat <<EOF
 ./abi/element280Vault.json
 ./abi/element369.json
 ./abi/element369Vault.json
-./abi/staxVault.json
-./abi/staxNFT.json
+
 EOF
 )
+#./abi/staxVault.json
+#./abi/staxNFT.json
 
 {
   echo "================= Includes the following files under ./abi ================="

@@ -250,7 +250,7 @@ const config = {
       stdTTL: 86400, // 24 hours for tier cache persistence
       checkperiod: 120,
     },
-    blockThreshold: 7200, // ~24 hours (7200 blocks * ~12s/block) for cache validity
+    blockThreshold: 1000, 
   },
 
   // Debug settings
