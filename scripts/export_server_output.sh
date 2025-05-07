@@ -4,7 +4,7 @@
 cd "$(dirname "$0")/.." || exit 1
 
 # Find all .js files in ./server
-included_files=$(find app/api app/lib client/lib -type f -name "*.js" | sort)
+included_files=$(find app/api  -type f -name "*.js" | sort)
 
 {
   echo "================= Includes the following JS files under ./server ================="

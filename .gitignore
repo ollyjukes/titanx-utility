@@ -49,3 +49,7 @@ next-env.d.ts
 *.sqlite
 *.db
 scripts/backups/
+
+# Allow specific directories
+!app/api/utils/
+!app/api/holders/cache/
