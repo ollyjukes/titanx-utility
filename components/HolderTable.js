@@ -1,14 +1,14 @@
 // components/HolderTable.js
 import { memo } from 'react';
 import { motion } from 'framer-motion';
-import { contractTiers } from "@/app/nft-contracts";
+import { contractTiers } from '@/app/nft-contracts';
 
 const rowVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
 };
 
-function HolderTable({ holders, contract, loading, totalShares }) {
+function HolderTable({ holders, contract, loading, totalShares, isModal = false }) {
   const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
   const isAscendant = contract === 'ascendantNFT';
   const isElement369 = contract === 'element369';
@@ -18,7 +18,7 @@ function HolderTable({ holders, contract, loading, totalShares }) {
     if (loading) {
       return (
         <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-          <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
+          <table className={`w-full text-white table-auto md:table-fixed ${isModal ? '' : 'bg-gray-800'}`}>
             <thead>
               <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
                 <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
@@ -111,7 +111,7 @@ function HolderTable({ holders, contract, loading, totalShares }) {
 
   return (
     <div className="overflow-x-auto w-full rounded-lg shadow-lg">
-      <table className="w-full bg-gray-800 text-white table-auto md:table-fixed">
+      <table className={`w-full text-white table-auto md:table-fixed ${isModal ? '' : 'bg-gray-800'}`}>
         <thead>
           <tr className="bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base">
             <th className="py-2 px-2 md:py-4 md:px-6 text-left font-semibold w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
@@ -156,9 +156,9 @@ function HolderTable({ holders, contract, loading, totalShares }) {
               variants={rowVariants}
               initial="hidden"
               animate="visible"
-              whileHover={{ scale: 1.02, backgroundColor: '#1e3a8a' }}
+              whileHover={{ scale: 1.02, backgroundColor: isModal ? 'transparent' : '#1e3a8a' }}
               transition={{ delay: index * 0.05 }}
-              className={`transition-colors ${index % 2 === 0 ? "bg-gray-800" : "bg-gray-900"}`}
+              className={`transition-colors ${isModal ? '' : index % 2 === 0 ? 'bg-gray-800' : 'bg-gray-900'}`}
             >
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">{holder.rank}</td>
               <td className="py-2 px-2 md:py-4 md:px-6 border-b border-gray-700">

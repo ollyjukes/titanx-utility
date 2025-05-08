@@ -3,14 +3,15 @@
 
 import './global.css';
 import { Inter } from 'next/font/google';
-import Navbar from '@/components/Navbar';
+import Navbar  from '@/components/Navbar';
 import ClientProvider from './ClientProvider';
+import ShootingStars from '@/components/ShootingStars';
 
 const inter = Inter({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   display: 'swap',
-  variable: '--font-inter',
+  variable: '--font-inter'
 });
 
 export default function RootLayout({ children }) {
@@ -33,6 +34,7 @@ export default function RootLayout({ children }) {
       <body className={`${inter.variable} bg-gray-900 text-white font-inter`}>
         <ClientProvider>
           <Navbar />
+          <ShootingStars />
           <main className="main-content">{children}</main>
           <footer className="footer bg-gray-800 py-4 text-center text-gray-400 fixed bottom-0 left-0 w-full z-10">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex flex-col sm:flex-row justify-between items-center">
