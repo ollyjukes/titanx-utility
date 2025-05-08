@@ -9,6 +9,7 @@ html {
 
 body {
   @apply min-h-screen flex flex-col bg-gray-900 text-gray-100 antialiased;
+  background: rgba(17, 24, 39, 0.8); /* Semi-transparent dark background */
 }
 
 /* Component Classes */
@@ -33,7 +34,7 @@ body {
 
   /* Buttons */
   .btn {
-    @apply inline-flex items-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400;
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-md font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-400;
   }
 
   .btn-primary {
@@ -72,35 +73,39 @@ body {
 
   /* Tables */
   .table-container {
-    @apply overflow-x-auto w-full rounded-lg shadow-lg animate-fade-in;
+    @apply overflow-x-auto w-full rounded-lg shadow-md animate-fade-in;
   }
 
   .table {
-    @apply w-full table-auto md:table-fixed bg-gray-800 text-gray-100;
+    @apply w-full table-auto md:table-fixed text-gray-100;
+    background: rgba(31, 41, 55, 0.1); /* 90% transparent bg-gray-800 */
   }
 
   .table-head {
-    @apply bg-gradient-to-r from-blue-600 to-blue-800 text-sm md:text-base text-white;
+    background: linear-gradient(to right, rgba(37, 99, 235, 0.2), rgba(30, 64, 175, 0.2)); /* Slightly less transparent header */
+    @apply text-sm md:text-base text-white;
   }
 
   .table-body {
     @apply text-xs md:text-sm text-gray-300;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); /* Subtle shadow for readability */
   }
 
   .table-row {
-    @apply transition-colors border-b border-gray-700;
+    @apply transition-colors border-b border-gray-700/30;
   }
 
   .table-row-even {
-    @apply bg-gray-800;
+    background: rgba(31, 41, 55, 0.1); /* 90% transparent bg-gray-800 */
   }
 
   .table-row-odd {
-    @apply bg-gray-900;
+    background: rgba(17, 24, 39, 0.1); /* 90% transparent bg-gray-900 */
   }
 
   .table-row:hover {
-    @apply bg-blue-900/30 shadow-sm;
+    background: rgba(30, 58, 138, 0.2); /* Slightly more opaque hover effect */
+    @apply shadow-sm;
   }
 
   .table-cell {
@@ -109,6 +114,7 @@ body {
 
   .table-link {
     @apply text-blue-400 hover:text-blue-300 hover:underline break-all;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); /* Shadow for link readability */
   }
 
   .table-pulse {
@@ -116,12 +122,26 @@ body {
   }
 
   .table-pulse-placeholder {
-    @apply h-4 bg-gray-600 rounded w-3/4;
+    @apply h-4 bg-gray-500 rounded w-3/4; /* Slightly lighter for visibility */
   }
 
   /* Reward Columns (for Element369.js) */
   .reward-cell {
     @apply py-2 px-2 md:py-4 md:px-6 text-left font-semibold text-blue-400;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Summary Section */
+  .summary-item {
+    @apply flex items-center py-1 text-body;
+  }
+
+  .summary-label {
+    @apply inline-block w-[20rem] text-left text-gray-300 mr-4 flex-shrink-0; /* Fixed width, 16px gap */
+  }
+
+  .summary-number {
+    @apply font-bold text-left text-gray-100;
   }
 
   /* Chart Container */
@@ -223,6 +243,11 @@ body {
 
 /* Ensure font rendering */
 @layer base {
+  .modal-table {
+    background: rgba(31, 41, 55, 0.3); /* Slightly less transparent for modals */
+    @apply rounded-lg;
+  }
+
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;

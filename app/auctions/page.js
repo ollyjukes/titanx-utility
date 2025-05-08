@@ -34,7 +34,7 @@ export default function Auctions() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
+    <div className="min-h-screen bg-transparent text-white">
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
         <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-center mb-6">
           TitanX Ecosystem Auctions
@@ -53,7 +53,7 @@ export default function Auctions() {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={() => openModal(auction)}
-                className="btn btn-primary w-full text-left font-semibold"
+                className="btn btn-primary w-full font-semibold"
                 aria-label={`View ${auction.name} Auction`}
               >
                 {auction.name} Auction

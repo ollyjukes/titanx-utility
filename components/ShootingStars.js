@@ -3,6 +3,12 @@
 
 import { useEffect } from 'react';
 
+// Shooting Star Configuration Constants
+const MIN_STAR_OPACITY = 0.4; // Minimum opacity for stars (0.0 to 1.0)
+const MAX_STAR_OPACITY = 1.0; // Maximum opacity for stars (0.0 to 1.0)
+const MIN_STAR_INTERVAL = 500; // Minimum time between new stars (in milliseconds)
+const MAX_STARS = 7; // Maximum number of stars on screen at once
+
 const ShootingStars = () => {
   useEffect(() => {
     const canvas = document.getElementById('stars-canvas');
@@ -30,18 +36,16 @@ const ShootingStars = () => {
         length: Math.random() * 60 + 20, // Slightly shorter for subtlety
         speedX: Math.cos(angle) * speed, // X-component of velocity
         speedY: Math.sin(angle) * speed, // Y-component of velocity
-        opacity: Math.random() * 0.4 + 0.4, // Slightly lower opacity for subtlety
+        opacity: Math.random() * (MAX_STAR_OPACITY - MIN_STAR_OPACITY) + MIN_STAR_OPACITY, // Random opacity within range
       };
     };
 
     // Generate stars with a delay
     let lastStarTime = 0;
-    const minStarInterval = 2000; // Minimum 2 seconds between stars
-    const maxStars = 3; // Reduced max stars for slower frequency
 
     const generateStars = () => {
       const currentTime = Date.now();
-      if (stars.length < maxStars && currentTime - lastStarTime > minStarInterval) {
+      if (stars.length < MAX_STARS && currentTime - lastStarTime > MIN_STAR_INTERVAL) {
         stars.push(createStar());
         lastStarTime = currentTime;
       }

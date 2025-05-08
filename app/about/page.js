@@ -30,7 +30,7 @@ export default function AboutPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-700 text-white">
+    <div className="min-h-screen bg-transparent text-white">
       <main className="container pt-20 pb-16">
         <motion.section
           className="text-center mb-12 max-w-3xl mx-auto"

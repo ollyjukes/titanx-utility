@@ -142,7 +142,6 @@ export default function NFTPage({ contractKey }) {
           toDistributeDay28,
           toDistributeDay90,
           pendingRewards,
-          totalMultiplierSum,
           totalClaimableRewards,
           totalInfernoRewards,
           totalFluxRewards,
@@ -176,49 +175,100 @@ export default function NFTPage({ contractKey }) {
       return (
         <>
           <h2 className="text-2xl font-semibold mb-2">Summary</h2>
-          <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
-          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
-          <p>Total Locked Ascendant: <span className="font-bold">{(data.totalLockedAscendant || 0).toLocaleString()}</span></p>
-          <p>Total Shares: <span className="font-bold">{(data.totalShares || 0).toLocaleString()}</span></p>
-          <p>Total Claimable Rewards: <span className="font-bold">{Math.floor(totalClaimableRewards).toLocaleString()} DRAGONX</span></p>
-          <p>Total Pending DragonX Rewards: <span className="font-bold">{(data.pendingRewards || 0).toLocaleString()}</span></p>
-          <p>Pending DAY8 Rewards: <span className="font-bold">{(data.toDistributeDay8 || 0).toLocaleString()}</span></p>
-          <p>Pending DAY28 Rewards: <span className="font-bold">{(data.toDistributeDay28 || 0).toLocaleString()}</span></p>
-          <p>Pending DAY90 Rewards: <span className="font-bold">{(data.toDistributeDay90 || 0).toLocaleString()}</span></p>
+          <div className="summary-item">
+            <span className="summary-label">Number of Unique Wallets Holding NFTs:</span>
+            <span className="summary-number">{data.holders.length}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Total Number of Active NFTs in Circulation:</span>
+            <span className="summary-number">{totalTokens.toLocaleString()}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Total Locked Ascendant:</span>
+            <span className="summary-number">{(data.totalLockedAscendant || 0).toLocaleString()}</span>
+          </div>
+          {/* Removed Total Shares for Ascendant as per requirement */}
+          <div className="summary-item">
+            <span className="summary-label">Total Claimable Rewards:</span>
+            <span className="summary-number">{Math.floor(totalClaimableRewards).toLocaleString()} DRAGONX</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Total Pending DragonX Rewards:</span>
+            <span className="summary-number">{(data.pendingRewards || 0).toLocaleString()}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Pending DAY8 Rewards:</span>
+            <span className="summary-number">{(data.toDistributeDay8 || 0).toLocaleString()}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Pending DAY28 Rewards:</span>
+            <span className="summary-number">{(data.toDistributeDay28 || 0).toLocaleString()}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Pending DAY90 Rewards:</span>
+            <span className="summary-number">{(data.toDistributeDay90 || 0).toLocaleString()}</span>
+          </div>
         </>
       );
     } else if (isElement369) {
       return (
         <>
           <h2 className="text-2xl font-semibold mb-2">Summary</h2>
-          <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
-          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
-          <p>Total Multiplier Sum: <span className="font-bold">{totalMultiplierSum.toLocaleString()}</span></p>
-          <p>Total Claimable Inferno Rewards: <span className="font-bold">{Math.floor(totalInfernoRewards).toLocaleString()}</span></p>
-          <p>Total Claimable Flux Rewards: <span className="font-bold">{Math.floor(totalFluxRewards).toLocaleString()}</span></p>
-          <p>Total Claimable E280 Rewards: <span className="font-bold">{Math.floor(totalE280Rewards).toLocaleString()}</span></p>
+          <div className="summary-item">
+            <span className="summary-label">Number of Unique Wallets Holding NFTs:</span>
+            <span className="summary-number">{data.holders.length}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Total Number of Active NFTs in Circulation:</span>
+            <span className="summary-number">{totalTokens.toLocaleString()}</span>
+          </div>
+          {/* Removed Total Multiplier Sum for Element369 as per requirement */}
+          <div className="summary-item">
+            <span className="summary-label">Total Claimable Inferno Rewards:</span>
+            <span className="summary-number">{Math.floor(totalInfernoRewards).toLocaleString()}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Total Claimable Flux Rewards:</span>
+            <span className="summary-number">{Math.floor(totalFluxRewards).toLocaleString()}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Total Claimable E280 Rewards:</span>
+            <span className="summary-number">{Math.floor(totalE280Rewards).toLocaleString()}</span>
+          </div>
         </>
       );
     } else {
       return (
         <>
           <h2 className="text-2xl font-semibold mb-2">Summary</h2>
-          <p>Number of Unique Wallets Holding NFTs: <span className="font-bold">{data.holders.length}</span></p>
-          <p>Total Number of Active NFTs in Circulation: <span className="font-bold">{totalTokens.toLocaleString()}</span></p>
-          <p>Total Multiplier Sum: <span className="font-bold">{totalMultiplierSum.toLocaleString()}</span></p>
-          <p>
-            Total Claimable Rewards:{' '}
-            <span className="font-bold">
+          <div className="summary-item">
+            <span className="summary-label">Number of Unique Wallets Holding NFTs:</span>
+            <span className="summary-number">{data.holders.length}</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-label">Total Number of Active NFTs in Circulation:</span>
+            <span className="summary-number">{totalTokens.toLocaleString()}</span>
+          </div>
+          {/* Conditionally render Total Multiplier Sum, excluding Element280, Element369, and Stax */}
+          {contractKey !== 'element280' && contractKey !== 'element369' && contractKey !== 'staxNFT' && (
+            <div className="summary-item">
+              <span className="summary-label">Total Multiplier Sum:</span>
+              <span className="summary-number">{totalMultiplierSum.toLocaleString()}</span>
+            </div>
+          )}
+          <div className="summary-item">
+            <span className="summary-label">Total Claimable Rewards:</span>
+            <span className="summary-number">
               {Math.floor(totalClaimableRewards).toLocaleString()} {rewardToken || ''}
             </span>
-          </p>
+          </div>
         </>
       );
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6 flex flex-col items-center">
+    <div className="min-h-screen bg-transparent text-white p-6 flex flex-col items-center">
       <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
       {loading ? (
         <LoadingIndicator status={`Loading all ${name || 'contract'} holders...`} />
