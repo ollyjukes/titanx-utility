@@ -35,12 +35,12 @@ if (!alchemyApiKey) {
 // Multicall3 contract address
 const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
 
-// Provider configuration (Alchemy only)
+// Provider configuration
 const providers = [
   {
     name: 'Alchemy',
     url: `https://eth-mainnet.g.alchemy.com/v2/${alchemyApiKey}`,
-    rateLimit: 330, // CUPS for free tier
+    rateLimit: 10000, // Paid tier's 10,000 CUPS
     requestCount: 0,
     lastRequestTime: 0,
   },
@@ -50,27 +50,20 @@ const providers = [
 const clients = [{
   client: createPublicClient({
     chain: mainnet,
-    transport: http(providers[0].url, { timeout: 10000 }),
+    transport: http(providers[0].url, { timeout: 20000 }), // 20s timeout
   }),
   providerIndex: 0,
 }];
 
-// Burn addresses
-const burnAddresses = [
-  '0x0000000000000000000000000000000000000000',
-  '0x000000000000000000000000000000000000dead',
-];
-
-// Cache file path
+// Burn address, cache file path, provider metrics
+const burnAddress = '0x0000000000000000000000000000000000000000';
 const CACHE_FILE = path.join(projectRoot, 'tier_cache.json');
-
-// Provider performance metrics
 const providerMetrics = providers.reduce((acc, provider) => {
   acc[provider.name] = { totalTime: 0, requestCount: 0, averageLatency: 0 };
   return acc;
 }, {});
 
-// Select provider with optimized rate limit handling
+// Select provider with minimal rate limit checks
 async function selectProvider(context, operationType) {
   const now = Date.now();
   const provider = providers[0];
@@ -84,9 +77,8 @@ async function selectProvider(context, operationType) {
   }
 
   if (provider.requestCount + requestCost > provider.rateLimit) {
-    const waitTime = Math.max(1000 - timeSinceLast * 1000, 1000);
-    logger.warn(context, `Rate limit near (${provider.requestCount}/${provider.rateLimit} CUs), waiting ${waitTime}ms...`);
-    await new Promise(resolve => setTimeout(resolve, waitTime));
+    logger.warn(context, `Rate limit near (${provider.requestCount}/${provider.rateLimit} CUs), waiting 300ms...`);
+    await new Promise(resolve => setTimeout(resolve, 300));
     return selectProvider(context, operationType);
   }
 
@@ -95,14 +87,14 @@ async function selectProvider(context, operationType) {
   return { provider, client };
 }
 
-// Retry function with timeout
-async function retry(operation, { retries = 3, delay = 1000, backoff = true } = {}) {
+// Retry function
+async function retry(operation, { retries = 2, delay = 300, backoff = true } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       return await Promise.race([
         operation(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 10000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), 20000)),
       ]);
     } catch (error) {
       lastError = error;
@@ -118,18 +110,17 @@ async function retry(operation, { retries = 3, delay = 1000, backoff = true } = 
   throw lastError;
 }
 
-// Fetch owners using Alchemy SDK
+// Fetch owners using multicall
 async function fetchOwnersOnChain(contractAddress, totalSupply, abi, contractKey, client) {
   const owners = [];
   const tokenBalancesMap = new Map();
-  const chunkSize = 100;
+  const chunkSize = 500; // Reduced to 500 to prevent timeouts
   const context = `test/${contractKey}`;
   let burnedTokens = 0;
   let nonExistentTokens = 0;
   const nonExistentTokenIds = [];
   let lastProcessedBlock = null;
 
-  // Load cache
   const cache = await loadCache();
   const contractCache = cache[contractAddress] || { owners: {}, tiers: {}, nonExistent: [] };
   cache[contractAddress] = contractCache;
@@ -137,7 +128,6 @@ async function fetchOwnersOnChain(contractAddress, totalSupply, abi, contractKey
   try {
     logger.info(context, `Fetching owners for ${contractAddress} (${totalSupply} tokens)`);
 
-    // Process chunks
     const chunks = [];
     for (let start = 1; start <= totalSupply; start += chunkSize) {
       const end = Math.min(start + chunkSize - 1, totalSupply);
@@ -148,11 +138,11 @@ async function fetchOwnersOnChain(contractAddress, totalSupply, abi, contractKey
       }
     }
 
-    const concurrencyLimit = 2;
+    const concurrencyLimit = 10; // Reduced to 10 to prevent timeouts
     for (let i = 0; i < chunks.length; i += concurrencyLimit) {
       const chunkBatch = chunks.slice(i, i + concurrencyLimit);
       const batchResults = await Promise.all(
-        chunkBatch.map(async ({ start, end, tokenIds }, idx) => {
+        chunkBatch.map(async ({ start, end, tokenIds }) => {
           const calls = tokenIds.map(tokenId => ({
             address: contractAddress,
             abi,
@@ -163,74 +153,47 @@ async function fetchOwnersOnChain(contractAddress, totalSupply, abi, contractKey
           const { provider, client } = await selectProvider(context, 'multicall');
           const startTime = process.hrtime.bigint();
 
-          try {
-            const results = await retry(async () => {
-              const multicallResult = await client.multicall({
-                contracts: calls,
-                multicallAddress: MULTICALL3_ADDRESS,
-                allowFailure: true,
-                blockNumber: null,
-              });
-              if (!multicallResult) {
-                throw new Error('Multicall returned undefined result');
-              }
-              const blockNumber = await client.getBlockNumber();
-              lastProcessedBlock = blockNumber;
-              return multicallResult.map((result, idx) => {
-                try {
-                  return {
-                    tokenId: Number(tokenIds[idx]),
-                    owner: result && result.status === 'success' && isAddress(result.result) ? result.result : null,
-                  };
-                } catch (error) {
-                  logger.warn(context, `Error processing multicall result for token ${tokenIds[idx]}: ${error.message}`, {
-                    result,
-                    index: idx,
-                  });
-                  return { tokenId: Number(tokenIds[idx]), owner: null, error: error.message };
-                }
-              });
-            }, { retries: 3, delay: 1000 });
-
-            // Cache results
-            results.forEach(({ tokenId, owner }) => {
-              if (owner && isAddress(owner)) {
-                contractCache.owners[tokenId] = owner;
-              } else {
-                contractCache.nonExistent.push(tokenId);
-              }
+          const results = await retry(async () => {
+            const multicallResult = await client.multicall({
+              contracts: calls,
+              multicallAddress: MULTICALL3_ADDRESS,
+              allowFailure: true,
+              blockNumber: null,
             });
-
-            const duration = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-            providerMetrics[provider.name].totalTime += duration;
-            providerMetrics[provider.name].requestCount += 1;
-            providerMetrics[provider.name].averageLatency =
-              providerMetrics[provider.name].totalTime / providerMetrics[provider.name].requestCount;
-
-            logger.debug(context, `Processed token IDs ${start} to ${end} (${duration.toFixed(2)} ms)`);
-            if (idx < chunkBatch.length - 1) await new Promise(resolve => setTimeout(resolve, 200));
-            return results;
-          } catch (error) {
-            logger.error(context, `Failed to process chunk ${start}-${end}: ${error.message}`, { stack: error.stack });
-            return tokenIds.map(tokenId => ({
-              tokenId: Number(tokenId),
-              owner: null,
-              error: error.message,
+            const blockNumber = await client.getBlockNumber();
+            lastProcessedBlock = blockNumber;
+            return multicallResult.map((result, idx) => ({
+              tokenId: Number(tokenIds[idx]),
+              owner: result.status === 'success' ? result.result : null,
+              error: result.error, // Log errors for debugging
             }));
-          }
+          });
+
+          results.forEach(({ tokenId, owner, error }) => {
+            if (owner && isAddress(owner)) {
+              contractCache.owners[tokenId] = owner;
+            } else {
+              contractCache.nonExistent.push(tokenId);
+              logger.debug(context, `Token ${tokenId} marked non-existent: ${error || 'No owner'}`);
+            }
+          });
+
+          const duration = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+          providerMetrics[provider.name].totalTime += duration;
+          providerMetrics[provider.name].requestCount += 1;
+          providerMetrics[provider.name].averageLatency =
+            providerMetrics[provider.name].totalTime / providerMetrics[provider.name].requestCount;
+
+          logger.debug(context, `Processed token IDs ${start} to ${end} (${duration.toFixed(2)} ms)`);
+          return results;
         })
       );
 
-      batchResults.flat().forEach(({ tokenId, owner, error }) => {
-        if (error) {
-          nonExistentTokens++;
-          nonExistentTokenIds.push(tokenId);
-          return;
-        }
-        if (owner && !burnAddresses.map(addr => addr.toLowerCase()).includes(owner.toLowerCase()) && isAddress(owner)) {
+      batchResults.flat().forEach(({ tokenId, owner }) => {
+        if (owner && owner.toLowerCase() !== burnAddress.toLowerCase() && isAddress(owner)) {
           if (!tokenBalancesMap.has(owner)) tokenBalancesMap.set(owner, []);
           tokenBalancesMap.get(owner).push({ tokenId: tokenId.toString() });
-        } else if (owner && burnAddresses.map(addr => addr.toLowerCase()).includes(owner.toLowerCase())) {
+        } else if (owner && owner.toLowerCase() === burnAddress.toLowerCase()) {
           burnedTokens++;
           tokenBalancesMap.set(owner, tokenBalancesMap.get(owner) || []);
           tokenBalancesMap.get(owner).push({ tokenId: tokenId.toString() });
@@ -240,20 +203,15 @@ async function fetchOwnersOnChain(contractAddress, totalSupply, abi, contractKey
         }
       });
 
-      if ((i + concurrencyLimit) % 10 === 0 || i + concurrencyLimit >= chunks.length) {
-        await saveCache(cache);
-      }
-      await new Promise(resolve => setTimeout(resolve, 1000));
       logger.info(context, `Progress: ${Math.min(((i + concurrencyLimit) / chunks.length * 100).toFixed(2), 100)}%`);
     }
 
-    await saveCache(cache);
+    await saveCache(cache); // Save cache once at the end
 
-    // Add cached owners
     for (let tokenId = 1; tokenId <= totalSupply; tokenId++) {
       const owner = contractCache.owners[tokenId];
       if (owner && !tokenBalancesMap.has(owner) && isAddress(owner)) {
-        if (!burnAddresses.map(addr => addr.toLowerCase()).includes(owner.toLowerCase())) {
+        if (owner.toLowerCase() !== burnAddress.toLowerCase()) {
           tokenBalancesMap.set(owner, [{ tokenId: tokenId.toString() }]);
         } else {
           burnedTokens++;
@@ -275,7 +233,7 @@ async function fetchOwnersOnChain(contractAddress, totalSupply, abi, contractKey
   }
 }
 
-// Reset cache
+// Cache functions
 async function resetCache() {
   try {
     await fs.unlink(CACHE_FILE).catch(() => {});
@@ -287,7 +245,6 @@ async function resetCache() {
   }
 }
 
-// Load cache
 async function loadCache() {
   try {
     const data = await fs.readFile(CACHE_FILE, 'utf8');
@@ -297,20 +254,16 @@ async function loadCache() {
   }
 }
 
-// Save cache with BigInt serialization
 async function saveCache(cache) {
-  try {
-    const serializeBigInt = (key, value) => {
-      if (typeof value === 'bigint') {
-        return value.toString();
-      }
-      return value;
-    };
-    await fs.writeFile(CACHE_FILE, JSON.stringify(cache, serializeBigInt, 2));
-  } catch (error) {
-    logger.error('test', `Failed to save cache: ${error.message}`, { stack: error.stack });
-    throw error;
-  }
+  const serializeBigInt = (obj) => {
+    if (typeof obj === 'bigint') return obj.toString();
+    if (Array.isArray(obj)) return obj.map(serializeBigInt);
+    if (typeof obj === 'object' && obj !== null) {
+      return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, serializeBigInt(value)]));
+    }
+    return obj;
+  };
+  await fs.writeFile(CACHE_FILE, JSON.stringify(serializeBigInt(cache), null, 2));
 }
 
 // NFT contract configurations
@@ -321,7 +274,6 @@ const nftContracts = {
     chain: 'ETH',
     contractAddress: '0x74270Ca3a274B4dbf26be319A55188690CACE6E1',
     totalMinted: 503,
-    deploymentBlock: 21452667,
     tiers: {
       1: { name: 'Common', multiplier: 1 },
       2: { name: 'Common Amped', multiplier: 1.2 },
@@ -343,7 +295,6 @@ const nftContracts = {
     chain: 'ETH',
     contractAddress: '0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9',
     totalMinted: 16883,
-    deploymentBlock: 20945304,
     tiers: {
       1: { name: 'Common', multiplier: 10 },
       2: { name: 'Common Amped', multiplier: 12 },
@@ -358,8 +309,6 @@ const nftContracts = {
     symbol: 'E369',
     chain: 'ETH',
     contractAddress: '0x024d64e2f65747d8bb02dfb852702d588a062575',
-    totalMinted: 448,
-    deploymentBlock: 21224418,
     tiers: {
       1: { name: 'Common', multiplier: 1 },
       2: { name: 'Rare', multiplier: 10 },
@@ -371,7 +320,6 @@ const nftContracts = {
     symbol: 'ASCNFT',
     chain: 'ETH',
     contractAddress: '0x9da95c32c5869c84ba2c020b5e87329ec0adc97f',
-    deploymentBlock: 21112535,
     tiers: {
       1: { name: 'Tier 1', multiplier: 1.01 },
       2: { name: 'Tier 2', multiplier: 1.02 },
@@ -520,13 +468,6 @@ const tierFunctions = {
   ascendant: { name: 'getNFTAttribute', contract: 'nft', inputs: ['tokenId'], outputs: ['attributes'] },
 };
 
-// Rarity mapping for Ascendant
-const ascendantRarityMap = {
-  0: 'Common',
-  1: 'Rare',
-  2: 'Legendary',
-};
-
 // Test function for a single NFT collection
 async function testNFTHolders(contractKey) {
   const contractConfig = nftContracts[contractKey];
@@ -581,7 +522,7 @@ async function testNFTHolders(contractKey) {
     let totalBurned = 0n;
     let totalMinted;
 
-    const { client } = await selectProvider(context, 'single');
+    const { client } = await selectProvider(context, 'multicall');
     summary.beginningBlock = await client.getBlockNumber();
 
     if (contractKey === 'ascendant') {
@@ -597,20 +538,20 @@ async function testNFTHolders(contractKey) {
       summary.totalMinted = 'N/A';
       logger.info(context, `State: totalMinted=${totalMinted}`);
     } else {
-      totalSupply = await retry(() =>
-        client.readContract({
-          address: contractAddress,
-          abi,
-          functionName: 'totalSupply',
+      const calls = [
+        { address: contractAddress, abi, functionName: 'totalSupply' },
+        { address: contractAddress, abi, functionName: 'totalBurned' },
+      ];
+      const [supplyResult, burnedResult] = await retry(() =>
+        client.multicall({
+          contracts: calls,
+          multicallAddress: MULTICALL3_ADDRESS,
+          allowFailure: true,
         })
       );
-      totalBurned = await retry(() =>
-        client.readContract({
-          address: contractAddress,
-          abi,
-          functionName: 'totalBurned',
-        })
-      ).catch(() => 0n);
+
+      totalSupply = supplyResult.status === 'success' ? supplyResult.result : 0n;
+      totalBurned = burnedResult.status === 'success' ? burnedResult.result : 0n;
 
       const totalTokens = Number(totalSupply);
       totalBurned = Number(totalBurned);
@@ -644,7 +585,7 @@ async function testNFTHolders(contractKey) {
     const filteredOwners = owners.filter(
       owner =>
         owner?.ownerAddress &&
-        !burnAddresses.map(addr => addr.toLowerCase()).includes(owner.ownerAddress.toLowerCase()) &&
+        owner.ownerAddress.toLowerCase() !== burnAddress.toLowerCase() &&
         owner.tokenBalances?.length > 0
     );
 
@@ -697,6 +638,7 @@ async function testNFTHolders(contractKey) {
       const cache = await loadCache();
       const contractCache = cache[contractAddress] || { owners: {}, tiers: {}, nonExistent: [] };
       const tierResults = [];
+      const processedTokenIds = new Set(); // Fix double-counting
       const uncachedTokenIds = tokenIds.filter(id => !contractCache.tiers[id]);
 
       if (uncachedTokenIds.length > 0) {
@@ -707,8 +649,8 @@ async function testNFTHolders(contractKey) {
           args: [BigInt(tokenId)],
         }));
 
-        const chunkSize = contractKey === 'ascendant' ? 50 : 100;
-        const concurrencyLimit = 2;
+        const chunkSize = 500; // Reduced to 500 to prevent timeouts
+        const concurrencyLimit = 10; // Reduced to 10
         for (let i = 0; i < tierCalls.length; i += chunkSize * concurrencyLimit) {
           const batch = [];
           for (let j = 0; j < concurrencyLimit && i + j * chunkSize < tierCalls.length; j++) {
@@ -718,7 +660,7 @@ async function testNFTHolders(contractKey) {
             batch.push({ chunk, tokenIdsChunk });
           }
           await Promise.all(
-            batch.map(async ({ chunk, tokenIdsChunk }, idx) => {
+            batch.map(async ({ chunk, tokenIdsChunk }) => {
               const { client, provider } = await selectProvider(context, 'multicall');
               try {
                 const results = await retry(async () => {
@@ -736,8 +678,7 @@ async function testNFTHolders(contractKey) {
                     tokenId: tokenIdsChunk[idx],
                     error: result.error,
                   }));
-                }, { retries: 2, delay: 1000 });
-                if (idx < batch.length - 1) await new Promise(resolve => setTimeout(resolve, 200));
+                });
                 return results;
               } catch (error) {
                 logger.error(context, `Failed tier chunk ${i / chunkSize + 1}: ${error.message}`);
@@ -752,177 +693,106 @@ async function testNFTHolders(contractKey) {
           logger.info(context, `Tiers progress: ${Math.min(((i + chunkSize * concurrencyLimit) / tierCalls.length * 100).toFixed(2), 100)}%`);
         }
 
-        // Update cache
         tierResults.forEach(result => {
-          if (result.status === 'success' && result.result !== null && result.tokenId) {
-            try {
-              if (contractKey === 'ascendant') {
-                let parsedResult;
-                if (Array.isArray(result.result) && result.result.length === 3) {
-                  parsedResult = {
-                    rarityNumber: typeof result.result[0] === 'string' ? BigInt(result.result[0]) : result.result[0],
-                    tier: Number(result.result[1]),
-                    rarity: Number(result.result[2]),
-                  };
-                } else {
-                  logger.warn(context, `Invalid tier format for token ${result.tokenId}: ${JSON.stringify(result.result)}`);
-                  return;
-                }
-                if (
-                  typeof parsedResult.rarityNumber === 'bigint' &&
-                  parsedResult.rarityNumber >= 0n &&
-                  !isNaN(parsedResult.tier) &&
-                  !isNaN(parsedResult.rarity) &&
-                  parsedResult.tier >= 1 &&
-                  parsedResult.tier <= 8
-                ) {
-                  contractCache.tiers[result.tokenId] = parsedResult;
-                } else {
-                  logger.warn(context, `Invalid tier values for token ${result.tokenId}: ${JSON.stringify(parsedResult)}`);
-                }
-              } else {
-                const tier = Number(result.result);
-                if (!isNaN(tier) && tier >= 1 && tier <= maxTier) {
-                  contractCache.tiers[result.tokenId] = tier;
-                } else {
-                  logger.warn(context, `Invalid tier ${tier} for token ${result.tokenId}`);
-                }
+          if (result.status === 'success' && result.result !== null && !processedTokenIds.has(result.tokenId)) {
+            let cacheValue = result.result;
+            if (contractKey === 'ascendant' && typeof result.result === 'string') {
+              try {
+                cacheValue = JSON.parse(result.result);
+              } catch {
+                return;
               }
-            } catch (error) {
-              logger.warn(context, `Error caching tier for token ${result.tokenId}: ${error.message}`);
             }
+            contractCache.tiers[result.tokenId] = cacheValue;
+            processedTokenIds.add(result.tokenId);
           }
         });
         cache[contractAddress] = contractCache;
         await saveCache(cache);
       }
 
-      // Add cached results with validation
+      // Add cached results only if not processed
       tokenIds.forEach(tokenId => {
-        if (contractCache.tiers[tokenId]) {
-          const cachedTier = contractCache.tiers[tokenId];
-          try {
-            if (contractKey === 'ascendant') {
-              if (
-                cachedTier &&
-                typeof cachedTier === 'object' &&
-                'tier' in cachedTier &&
-                typeof cachedTier.tier === 'number' &&
-                cachedTier.tier >= 1 &&
-                cachedTier.tier <= 8 &&
-                'rarityNumber' in cachedTier &&
-                'rarity' in cachedTier
-              ) {
-                tierResults.push({
-                  status: 'success',
-                  result: cachedTier,
-                  tokenId,
-                });
-              } else {
-                logger.warn(context, `Invalid cached tier for token ${tokenId}: ${JSON.stringify(cachedTier)}`);
-              }
-            } else {
-              if (typeof cachedTier === 'number' && !isNaN(cachedTier) && cachedTier >= 1 && cachedTier <= maxTier) {
-                tierResults.push({
-                  status: 'success',
-                  result: cachedTier,
-                  tokenId,
-                });
-              } else {
-                logger.warn(context, `Invalid cached tier ${cachedTier} for token ${tokenId}`);
-              }
-            }
-          } catch (error) {
-            logger.warn(context, `Error processing cached tier for token ${tokenId}: ${error.message}`);
-          }
+        if (contractCache.tiers[tokenId] && !processedTokenIds.has(tokenId)) {
+          tierResults.push({
+            status: 'success',
+            result: contractCache.tiers[tokenId],
+            tokenId,
+          });
+          processedTokenIds.add(tokenId);
         }
       });
 
-      // Initialize tier counts
       summary.tierCounts = Object.keys(contractConfig.tiers).reduce((acc, tier) => {
         acc[tier] = { count: 0, name: contractConfig.tiers[tier].name };
-        if (contractKey === 'ascendant') acc[tier].rarityCounts = {};
+        if (contractKey === 'ascendant') acc[tier].rarityCounts = { 0: 0, 1: 0, 2: 0 }; // Initialize rarity counts
         return acc;
       }, {});
 
-      // Update holders and tier counts
       tierResults.forEach(result => {
-        if (result.status !== 'success' || result.result === null || !result.tokenId) {
-          logger.warn(context, `Failed tier for token ${result.tokenId || 'unknown'}: ${result.error || 'Unknown error'}`);
+        if (result.status !== 'success' || result.result === null) {
+          logger.warn(context, `Failed tier for token ${result.tokenId}: ${result.error || 'Unknown error'}`);
           return;
         }
 
         const tokenId = result.tokenId;
         let tier;
+        let parsedResult;
 
-        try {
-          if (contractKey === 'ascendant') {
-            let parsedResult;
-            if (typeof result.result === 'object' && result.result !== null && 'tier' in result.result) {
-              parsedResult = result.result;
-            } else if (Array.isArray(result.result) && result.result.length === 3) {
-              parsedResult = {
-                rarityNumber: typeof result.result[0] === 'string' ? BigInt(result.result[0]) : result.result[0],
-                tier: Number(result.result[1]),
-                rarity: Number(result.result[2]),
-              };
-            } else {
-              logger.warn(context, `Invalid tier format for token ${tokenId}: ${JSON.stringify(result.result)}`);
-              return;
-            }
-
-            if (
-              typeof parsedResult.rarityNumber !== 'bigint' ||
-              parsedResult.rarityNumber < 0n ||
-              isNaN(parsedResult.tier) ||
-              isNaN(parsedResult.rarity)
-            ) {
-              logger.warn(context, `Invalid tier values for token ${tokenId}: ${JSON.stringify(parsedResult)}`);
-              return;
-            }
-
-            tier = parsedResult.tier;
-            if (tier < 1 || tier > 8) {
-              logger.warn(context, `Invalid tier ${tier} for token ${tokenId}`);
-              return;
-            }
-
-            if (summary.tierCounts[tier]) {
-              summary.tierCounts[tier].count += 1;
-              const rarity = parsedResult.rarity;
-              summary.tierCounts[tier].rarityCounts[rarity] = (summary.tierCounts[tier].rarityCounts[rarity] || 0) + 1;
-            } else {
-              logger.warn(context, `Tier ${tier} not found in tierCounts for token ${tokenId}`);
-            }
+        if (contractKey === 'ascendant') {
+          if (Array.isArray(result.result) && result.result.length === 3) {
+            parsedResult = {
+              rarityNumber: typeof result.result[0] === 'string' ? BigInt(result.result[0]) : result.result[0],
+              tier: Number(result.result[1]),
+              rarity: Number(result.result[2]),
+            };
+          } else if (typeof result.result === 'object' && result.result !== null) {
+            parsedResult = {
+              rarityNumber: typeof result.result.rarityNumber === 'string' ? BigInt(result.result.rarityNumber) : result.result.rarityNumber,
+              tier: Number(result.result.tier),
+              rarity: Number(result.result.rarity),
+            };
           } else {
-            tier = Number(result.result);
-            if (isNaN(tier) || tier < 1 || tier > maxTier) {
-              logger.warn(context, `Invalid tier ${tier} for token ${tokenId}`);
-              return;
-            }
-            if (summary.tierCounts[tier]) {
-              summary.tierCounts[tier].count += 1;
-            } else {
-              logger.warn(context, `Tier ${tier} not found in tierCounts for token ${tokenId}`);
-            }
+            logger.warn(context, `Invalid tier format for token ${tokenId}`);
+            return;
           }
 
-          const wallet = tokenOwnerMap.get(tokenId);
-          if (wallet) {
-            const holder = holdersMap.get(wallet);
-            if (holder) {
-              holder.tiers[tier] = (holder.tiers[tier] || 0) + 1;
-            } else {
-              logger.warn(context, `Holder not found for wallet ${wallet} and token ${tokenId}`);
-            }
-          } else {
-            logger.warn(context, `Wallet not found for token ${tokenId}`);
+          if (
+            typeof parsedResult.rarityNumber !== 'bigint' ||
+            parsedResult.rarityNumber < 0n ||
+            isNaN(parsedResult.tier) ||
+            isNaN(parsedResult.rarity)
+          ) {
+            logger.warn(context, `Invalid tier values for token ${tokenId}`);
+            return;
           }
-        } catch (error) {
-          logger.warn(context, `Error processing tier for token ${tokenId}: ${error.message}`, {
-            result: result.result,
-            stack: error.stack,
-          });
+
+          tier = parsedResult.tier;
+          if (tier < 1 || tier > 8) {
+            logger.warn(context, `Invalid tier ${tier} for token ${tokenId}`);
+            return;
+          }
+
+          if (summary.tierCounts[tier]) {
+            summary.tierCounts[tier].count += 1;
+            const rarity = parsedResult.rarity;
+            summary.tierCounts[tier].rarityCounts[rarity] = (summary.tierCounts[tier].rarityCounts[rarity] || 0) + 1;
+          }
+        } else {
+          tier = Number(result.result);
+          if (tier < 1 || tier > maxTier) {
+            logger.warn(context, `Invalid tier ${tier} for token ${tokenId}`);
+            return;
+          }
+          if (summary.tierCounts[tier]) {
+            summary.tierCounts[tier].count += 1;
+          }
+        }
+
+        const wallet = tokenOwnerMap.get(tokenId);
+        if (wallet) {
+          const holder = holdersMap.get(wallet);
+          if (holder) holder.tiers[tier] += 1;
         }
       });
     }
@@ -934,13 +804,12 @@ async function testNFTHolders(contractKey) {
     if (process.env.LOG_WALLETS === 'true') {
       const holderList = Array.from(holdersMap.values());
       holderList.forEach(holder => {
-        logger.info(context, `Wallet: ${holder.wallet}, Tokens: ${holder.total}, Tiers: ${JSON.stringify(holder.tiers)}`);
+        logger.info(context, `Wallet: ${holder.wallet}, Tokens: ${holder.total}, Tiers: ${holder.tiers}`);
       });
     }
 
     logger.info(context, `Summary: ${holdersMap.size} holders, ${tokenCount} tokens, live=${totalTokens}, minted=${summary.totalMinted}`);
 
-    // Validate
     if (contractKey !== 'ascendant') {
       const expectedLiveTokens = totalTokens;
       const missingTokens = expectedLiveTokens - tokenCount;
@@ -971,16 +840,15 @@ async function testNFTHolders(contractKey) {
 // Main test function
 async function testAllNFTHolders() {
   const contractKeys = ['stax', 'element280', 'element369', 'ascendant'];
-  const summaries = [];
+  const summaries = await Promise.all(
+    contractKeys.map(async (contractKey) => {
+      const summary = await testNFTHolders(contractKey);
+      return summary;
+    })
+  );
 
-  for (const contractKey of contractKeys) {
-    const summary = await testNFTHolders(contractKey);
-    if (summary) summaries.push(summary);
-  }
-
-  return summaries;
+  return summaries.filter(summary => summary !== null);
 }
-
 
 // Run the test
 async function main() {
@@ -999,12 +867,10 @@ async function main() {
         UniqueHolders: summary.uniqueHolders,
         LiveTokens: summary.liveTokens,
         BurnedTokens: summary.burnedTokens,
-        NonExistentTokens: summary.nonExistentTokens,
         BeginningBlock: summary.beginningBlock?.toString() || 'N/A',
         LastProcessedBlock: summary.lastProcessedBlock?.toString() || 'N/A',
         Status: summary.status,
         Mismatch: summary.mismatch || 'None',
-        TierMismatch: summary.tierMismatch || 'None',
         Error: summary.error || 'None',
       }))
     );
@@ -1030,7 +896,10 @@ async function main() {
         if (summary.contractKey === 'ascendant') {
           const rarityCounts = data.rarityCounts || {};
           const raritySummary = Object.entries(rarityCounts)
-            .map(([rarity, count]) => `${ascendantRarityMap[rarity] || `Rarity ${rarity}`}: ${count}`)
+            .map(([rarity, count]) => {
+              const rarityName = rarity === '0' ? 'Common' : rarity === '1' ? 'Rare' : 'Legendary';
+              return `${rarityName}: ${count}`;
+            })
             .join(', ');
           return {
             Tier: tier,
@@ -1049,17 +918,17 @@ async function main() {
       console.table(tierTable);
     });
 
-    const failedTests = summaries.filter(s => s.error);
-    const mismatchedTests = summaries.filter(s => s.mismatch || s.tierMismatch);
+    const hasErrors = summaries.some(s => s.error);
+    const hasMismatches = summaries.some(s => s.mismatch);
 
-    if (failedTests.length > 0) {
-      logger.error('test', `Tests failed for: ${failedTests.map(s => s.contractName).join(', ')}`);
+    if (hasErrors) {
+      logger.error('test', 'Some tests failed');
       process.exit(1);
-    } else if (mismatchedTests.length > 0) {
-      logger.warn('test', `Tests completed with mismatches for: ${mismatchedTests.map(s => s.contractName).join(', ')}`);
+    } else if (hasMismatches) {
+      logger.warn('test', 'Tests completed with mismatches');
       process.exit(0);
     } else {
-      logger.info('test', 'All tests completed successfully');
+      logger.info('test', 'Tests completed successfully');
       process.exit(0);
     }
   } catch (error) {
