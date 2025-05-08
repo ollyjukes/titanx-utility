@@ -52,7 +52,9 @@ scripts/backups/
 
 # Allow specific directories
 !app/api/utils/
-!app/api/holders/cache/cache/
 temp/
 tier_cache.json
 .env.local
+
+cache/
+!app/api/holders/cache/
