@@ -39,6 +39,7 @@ yarn-error.log*
 
 # env files
 .env*               # Ignore .env files in root
+.env.local
 
 # vercel
 .vercel
@@ -52,9 +53,9 @@ scripts/backups/
 
 # Allow specific directories
 !app/api/utils/
-temp/
-tier_cache.json
-.env.local
-
+!scripts/
 cache/
 !app/api/holders/cache/
+temp/
+tier_cache.json
+
