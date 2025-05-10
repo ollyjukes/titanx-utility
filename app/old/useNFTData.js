@@ -2,7 +2,7 @@
 'use client';
 import { useQuery } from '@tanstack/react-query';
 import { useNFTStore } from '@/app/store';
-import config from '@/contracts/config';
+import config from '@/app/old/config';
 import { HoldersResponseSchema } from '@/app/lib/schemas';
 
 async function fetchNFTData(apiKey, apiEndpoint, pageSize) {

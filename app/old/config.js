@@ -1,5 +1,5 @@
 // ./contracts/config.js
-import { abis } from './abi.js';
+import { abis, abiFunctions } from '../contracts/abi_nft.js'; // Add abiFunctions import
 
 // Centralized contract configurations
 const nftContracts = {
@@ -22,12 +22,13 @@ const nftContracts = {
     },
     description: 'Element 280 NFTs can be minted with TitanX or ETH during a presale and redeemed for Element 280 tokens after a cooldown period. Multipliers contribute to a pool used for reward calculations.',
     maxTokensPerOwnerQuery: 100,
+    availableVaultFunctions: Object.keys(abiFunctions.element280.vaultFunctions), // Added
   },
   element369: {
     name: 'Element 369',
     symbol: 'E369',
     chain: 'ETH',
-    contractAddress: '0x024D64E2F65747d8bB02dFb852702D588A062575',
+    contractAddress: '0x024D64E2F65747d8bB02dFB852702D588A062575',
     vaultAddress: '0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5',
     deploymentBlock: '21224418',
     abi: abis.element369.nft,
@@ -37,6 +38,7 @@ const nftContracts = {
       3: { name: 'Legendary', multiplier: 100, price: '10000000000000000000000000000' },
     },
     description: 'Element 369 NFTs are minted with TitanX or ETH during specific sale cycles. Burning NFTs updates a multiplier pool and tracks burn cycles for reward distribution in the Holder Vault.',
+    availableVaultFunctions: Object.keys(abiFunctions.element369.vaultFunctions), // Added
   },
   stax: {
     name: 'Stax',
@@ -62,6 +64,7 @@ const nftContracts = {
       12: { name: 'Legendary LFG', multiplier: 200, price: '10000000000000000000000000000', amplifier: '5000000000000000000000000000' },
     },
     description: 'Stax NFTs are minted with TitanX or ETH during a presale. Burning NFTs after a cooldown period claims backing rewards, with multipliers contributing to a pool for cycle-based reward calculations.',
+    availableVaultFunctions: Object.keys(abiFunctions.stax.vaultFunctions), // Added
   },
   ascendant: {
     name: 'Ascendant',
@@ -83,6 +86,7 @@ const nftContracts = {
     },
     description: 'Ascendant NFTs are minted with ASCENDANT tokens and offer staking rewards from DragonX pools over 8, 28, and 90-day periods. Features fusion mechanics to combine same-tier NFTs into higher tiers.',
     maxTokensPerOwnerQuery: 1000,
+    availableVaultFunctions: null, // Added, no vault contract
   },
   e280: {
     name: 'E280',
@@ -95,8 +99,11 @@ const nftContracts = {
     tiers: {},
     description: 'E280 NFTs on BASE chain. Contract not yet deployed.',
     disabled: true,
+    availableVaultFunctions: null, // Added, no vault contract
   },
 };
+
+// ... rest of the file (contractTiers, contractDetails, config, etc.) remains unchanged ...
 
 // Tier order configurations
 const contractTiers = {
@@ -149,40 +156,41 @@ const contractTiers = {
 };
 
 // Contract details for API endpoints
+// app/contracts/config.js
 const contractDetails = {
   element280: {
     name: 'Element 280',
     chain: 'ETH',
     pageSize: 100,
-    apiEndpoint: '/api/holders/Element280',
+    apiEndpoint: '/api/holders/element280', // Changed to lowercase
     rewardToken: 'ELMNT',
   },
   element369: {
     name: 'Element 369',
     chain: 'ETH',
     pageSize: 1000,
-    apiEndpoint: '/api/holders/Element369',
+    apiEndpoint: '/api/holders/element369', // Changed to lowercase
     rewardToken: 'INFERNO/FLUX/E280',
   },
   stax: {
     name: 'Stax',
     chain: 'ETH',
     pageSize: 1000,
-    apiEndpoint: '/api/holders/Stax',
+    apiEndpoint: '/api/holders/stax', // Changed to lowercase
     rewardToken: 'X28',
   },
   ascendant: {
     name: 'Ascendant',
     chain: 'ETH',
     pageSize: 1000,
-    apiEndpoint: '/api/holders/Ascendant',
+    apiEndpoint: '/api/holders/ascendant', // Changed to lowercase
     rewardToken: 'DRAGONX',
   },
   e280: {
     name: 'E280',
     chain: 'BASE',
     pageSize: 1000,
-    apiEndpoint: '/api/holders/E280',
+    apiEndpoint: '/api/holders/e280', // Changed to lowercase
     rewardToken: 'E280',
     disabled: true,
   },
@@ -235,6 +243,7 @@ const config = {
     retryMaxDelayMs: 10000,
     maxRetries: 3, // Increased for reliability
     timeoutMs: 30000,
+    concurrencyLimit: 100,
   },
 
   // Cache settings for Redis and NodeCache

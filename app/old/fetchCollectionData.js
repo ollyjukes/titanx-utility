@@ -1,4 +1,4 @@
-import config from '@/contracts/config';
+import config from '@/app/old/config';
 import { HoldersResponseSchema, ProgressResponseSchema } from '@/app/lib/schemas';
 
 // Debounce utility to prevent concurrent POST requests

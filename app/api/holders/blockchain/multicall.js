@@ -1,13 +1,15 @@
+// app/api/holders/blockchain/multicall.js
 import pLimit from 'p-limit';
 import { client } from '@/app/api/utils/client';
 import { logger } from '@/app/lib/logger';
-import config from '@/contracts/config';
+import config from '@/app/contracts_nft';
+import { BATCH_SIZE, BATCH_DELAY_MS } from '@/app/lib/constants';
 
-const concurrencyLimit = pLimit(3);
+const concurrencyLimit = pLimit(config.alchemy.concurrencyLimit || 100);
 
-export async function batchMulticall(calls, batchSize = config.alchemy.batchSize || 10) {
+export async function batchMulticall(calls, batchSize = BATCH_SIZE) {
   const results = [];
-  const delay = async () => new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs || 500));
+  const delay = async () => new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
 
   const batchPromises = [];
   for (let i = 0; i < calls.length; i += batchSize) {
@@ -25,15 +27,14 @@ export async function batchMulticall(calls, batchSize = config.alchemy.batchSize
             })),
             allowFailure: true,
           });
-
-          const batchResult = batchResults.map((result, index) => ({
+          logger.debug('multicall', `Processed batch ${i}-${i + batchSize - 1}: ${batchResults.length} results`, 'ETH', 'general');
+          return batchResults.map((result, index) => ({
             status: result.status === 'success' ? 'success' : 'failure',
             result: result.status === 'success' ? result.result : null,
             error: result.status === 'failure' ? result.error?.message || 'Unknown error' : null,
           }));
-          return batchResult;
         } catch (error) {
-          logger.error('blockchain/multicall', `Batch multicall failed: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+          logger.error('multicall', `Batch failed ${i}-${i + batchSize - 1}: ${error.message}`, { stack: error.stack }, 'ETH', 'general');
           return batch.map(() => ({
             status: 'failure',
             result: null,

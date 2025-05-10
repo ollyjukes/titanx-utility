@@ -161,3 +161,22 @@ The script extracts ownership and tier data for four NFT collections (`stax`, `e
 
 The script ensures efficiency and scalability for large collections like Element 280 while maintaining reliability through caching and retry mechanisms, leveraging Viem’s interaction with the Alchemy API.
 ==============================
+
+Requierments
+I'm currently working on NFT collection Element280, there are others (Stax, Element369 and Ascendant) not included in the below code.  I'd like to ensure node-cache is used locally for file persistent file data caching and redis for prod.
+the json files need to be split into three.  collection Summary, collection HolderTable and collection transfer data. 
+
+I'd like to efficiently modularise the code, keeping routes for each collection by name but reusing components to reduce code bloating. please help me achieve this.  if files or directories should be moved, deleted just say
+
+I'd like to be able to switch between each NFT collection and for the code to read the data in the cache. then using a last block processed value check the blockchain for any new events on that collection.  if any new events have occured these needs to be integrated and the cache updated with this data incliuding that lastest block
+
+I'm using the pay as you go alchemy tier for 10,000 CUs for performance should be maximised without constant retries happening.
+
+The browser shouldn't show any data until the summary and holderdata caches are completed.
+Loading and progress indicators should display progresss % to the user for each section
+
+want I really want is to record all the transaction data for that NFT collection for later analysis.  so buys/sells/burns.  basically all transactions.  we could leverage the alchemy sdk library for analysis
+For example I'd like to be able to add into our holder table any NFTs that that wallet has bought sold or burned.  do you understand?
+
+during this we do need to presverve the functioanlity where lastblock processed is recorded and cached for each NFT collection as this data needs to be written to the file and memoy cache ( for local) redis memory for prod.  This is so that futuer data pulls can query this caache first to read data, then the blockchain for any new data etc. this new datathen again needs to be saved to cache
+

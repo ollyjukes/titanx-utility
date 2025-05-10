@@ -1,29 +1,26 @@
+// app/api/utils/cache.js
 import NodeCache from 'node-cache';
 import fs from 'fs/promises';
 import path from 'path';
 import { Redis } from '@upstash/redis';
-import config from '@/contracts/config';
-import { getAddress } from 'viem';
+import config from '@/app/contracts_nft';
 import { logger } from '@/app/lib/logger';
-import { client } from '@/app/api/utils/client.js';
+import { getAddress } from 'viem';
+import { client } from '@/app/api/utils/client';
+import { sanitizeBigInt } from '@/app/api/holders/cache/utils'; // Add this import
 
-// Log config.nftContracts at startup
-logger.info(
-  'cache',
-  `Loaded config.nftContracts: keys=${Object.keys(config.nftContracts).join(', ')}`,
-  'general',
-  'general'
-);
-
+// Initialize NodeCache
 const cache = new NodeCache({
-  stdTTL: 0,
-  checkperiod: 120,
+  stdTTL: config.cache.nodeCache.stdTTL,
+  checkperiod: config.cache.nodeCache.checkperiod,
 });
 
+// Cache directory for file-based caching
 const cacheDir = path.join(process.cwd(), 'cache');
-const redisEnabled = Object.keys(config.nftContracts).some(
-  contract => process.env[`DISABLE_${contract.toUpperCase()}_REDIS`] !== 'true' && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-);
+
+// Determine environment and cache strategy
+const isProduction = process.env.NODE_ENV === 'production';
+const redisEnabled = isProduction && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN;
 let redis = null;
 
 if (redisEnabled) {
@@ -32,398 +29,170 @@ if (redisEnabled) {
       url: process.env.UPSTASH_REDIS_REST_URL,
       token: process.env.UPSTASH_REDIS_REST_TOKEN,
     });
-    logger.info('cache', 'Upstash Redis initialized', 'general', 'general');
+    logger.info('cache', 'Redis initialized for production', 'ETH', 'general');
   } catch (error) {
-    logger.error('cache', `Failed to initialize Upstash Redis: ${error.message}`, { stack: error.stack }, 'general', 'general');
-    redis = null;
+    logger.error('cache', `Redis initialization failed: ${error.message}`, { stack: error.stack }, 'ETH', 'general');
+    throw new Error('Redis initialization failed in production');
   }
 }
 
-// Log Redis status
-logger.info(
-  'cache',
-  `Redis enabled: ${redisEnabled}, contracts with disabled Redis: ${Object.keys(config.nftContracts).filter(c => process.env[`DISABLE_${c.toUpperCase()}_REDIS`] === 'true').join(', ')}`,
-  'general',
-  'general'
-);
-
 async function ensureCacheDir(collectionKey = 'general') {
-  const chain = config.nftContracts[collectionKey.toLowerCase()]?.chain || 'eth';
-  const collection = collectionKey.toLowerCase();
-  try {
-    logger.debug('cache', `Ensuring cache directory at: ${cacheDir}`, chain, collection);
-    await fs.mkdir(cacheDir, { recursive: true });
-    await fs.chmod(cacheDir, 0o755);
-    logger.info('cache', `Created/chmod cache directory: ${cacheDir}`, chain, collection);
-  } catch (error) {
-    logger.error('cache', `Failed to create/chmod cache directory ${cacheDir}: ${error.message}`, { stack: error.stack }, chain, collection);
-    throw error;
+  const chain = config.nftContracts[collectionKey.toLowerCase()]?.chain || 'ETH';
+  if (!isProduction) {
+    try {
+      await fs.mkdir(cacheDir, { recursive: true });
+      await fs.chmod(cacheDir, 0o755);
+      logger.info('cache', `Cache directory ensured: ${cacheDir}`, chain, collectionKey);
+    } catch (error) {
+      logger.error('cache', `Cache directory creation failed: ${error.message}`, { stack: error.stack }, chain, collectionKey);
+      throw error;
+    }
   }
 }
 
 export async function initializeCache() {
-  const collection = 'general';
-  const chain = 'general'; // General context for initialization
+  const chain = 'ETH';
+  const collectionKey = 'general';
   try {
-    logger.info('cache', `Starting cache initialization, contracts=${Object.keys(config.nftContracts).join(', ')}`, chain, collection);
-    await ensureCacheDir();
-
-    const testKey = 'test_node_cache';
-    const testValue = { ready: true };
-    const nodeCacheSuccess = cache.set(testKey, testValue);
-    if (nodeCacheSuccess) {
-      logger.info('cache', 'Node-cache is ready', chain, collection);
-      cache.del(testKey);
+    if (!isProduction) {
+      await ensureCacheDir();
+      const collections = Object.keys(config.nftContracts)
+        .filter(key => !config.nftContracts[key].disabled)
+        .map(key => key.toLowerCase());
+      for (const collection of collections) {
+        const files = ['summary', 'holders', 'transfers', 'state'].map(type => path.join(cacheDir, `${collection}_${type}.json`));
+        for (const file of files) {
+          try {
+            await fs.access(file);
+          } catch {
+            await fs.writeFile(file, JSON.stringify({ data: {}, timestamp: Date.now() }));
+            await fs.chmod(file, 0o644);
+          }
+        }
+      }
+      logger.info('cache', 'File-based cache initialized for development', chain, collectionKey);
+    } else if (redisEnabled) {
+      await redis.ping();
+      logger.info('cache', 'Redis cache initialized for production', chain, collectionKey);
     } else {
-      logger.error('cache', 'Node-cache failed to set test key', {}, chain, collection);
+      throw new Error('Redis not configured in production');
     }
-
-    if (redisEnabled && redis) {
-      try {
-        await redis.set('test_redis', JSON.stringify(testValue));
-        const redisData = await redis.get('test_redis');
-        if (redisData && JSON.parse(redisData).ready) {
-          logger.info('cache', 'Redis cache is ready', chain, collection);
-          await redis.del('test_redis');
-        } else {
-          logger.error('cache', 'Redis cache test failed: invalid data', {}, chain, collection);
-        }
-      } catch (error) {
-        logger.error('cache', `Redis cache test failed: ${error.message}`, { stack: error.stack }, chain, collection);
-      }
-    }
-
-    const collections = Object.keys(config.nftContracts)
-      .filter(key => !config.nftContracts[key].disabled)
-      .map(key => key.toLowerCase());
-    for (const collectionKey of collections) {
-      const chainKey = config.nftContracts[collectionKey]?.chain || 'eth';
-      const cacheFile = path.join(cacheDir, `${collectionKey}_holders.json`);
-      logger.debug('cache', `Checking cache file for ${collectionKey}: ${cacheFile}`, chainKey, collectionKey);
-      try {
-        await fs.access(cacheFile);
-        logger.info('cache', `Cache file exists: ${cacheFile}`, chainKey, collectionKey);
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          await ensureCacheDir(collectionKey);
-          await fs.writeFile(cacheFile, JSON.stringify({ holders: [], totalBurned: 0, timestamp: Date.now() }));
-          await fs.chmod(cacheFile, 0o644);
-          logger.info('cache', `Created empty cache file: ${cacheFile}`, chainKey, collectionKey);
-        } else {
-          logger.error('cache', `Failed to access cache file ${cacheFile}: ${error.message}`, { stack: error.stack }, chainKey, collectionKey);
-        }
-      }
-    }
-
-    logger.info('cache', 'Cache initialization completed', chain, collection);
     return true;
   } catch (error) {
-    logger.error('cache', `Cache initialization error: ${error.message}`, { stack: error.stack }, chain, collection);
-    return false;
+    logger.error('cache', `Cache initialization failed: ${error.message}`, { stack: error.stack }, chain, collectionKey);
+    throw error;
   }
 }
 
-export async function getCache(key, prefix) {
-  const chain = config.nftContracts[prefix.toLowerCase()]?.chain || 'eth';
+export async function getCache(key, prefix, type = 'holders') {
+  const chain = config.nftContracts[prefix.toLowerCase()]?.chain || 'ETH';
+  const cacheKey = `${prefix}_${type}_${key}`;
   try {
-    const cacheKey = `${prefix}_${key}`;
+    // Check NodeCache first
     let data = cache.get(cacheKey);
-    if (data !== undefined) {
-      logger.debug(
-        'cache',
-        `Cache hit: ${cacheKey}, holders: ${data.holders?.length || 'unknown'}`,
-        chain,
-        prefix.toLowerCase()
-      );
+    if (data) {
+      logger.debug('cache', `Node-cache hit: ${cacheKey}`, chain, prefix);
       return data;
     }
 
-    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
-      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
-        try {
-          logger.debug('cache', `Attempting to load ${cacheKey} from Redis`, chain, prefix.toLowerCase());
-          const redisData = await redis.get(cacheKey);
-          if (redisData) {
-            const parsed = typeof redisData === 'string' ? JSON.parse(redisData) : redisData;
-            if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
-              const success = cache.set(cacheKey, parsed);
-              logger.info(
-                'cache',
-                `Loaded ${cacheKey} from Redis, cached: ${success}, holders: ${parsed.holders.length}`,
-                chain,
-                prefix.toLowerCase()
-              );
-              return parsed;
-            } else {
-              logger.warn('cache', `Invalid data in Redis for ${cacheKey}`, chain, prefix.toLowerCase());
-            }
-          }
-        } catch (error) {
-          logger.error(
-            'cache',
-            `Failed to load cache from Redis for ${cacheKey}: ${error.message}`,
-            { stack: error.stack },
-            chain,
-            prefix.toLowerCase()
-          );
+    if (isProduction) {
+      // Production: Check Redis
+      if (redis && !config.cache.redis[`disable${prefix.charAt(0).toUpperCase() + prefix.slice(1)}`]) {
+        const redisData = await redis.get(cacheKey);
+        if (redisData) {
+          data = JSON.parse(redisData);
+          cache.set(cacheKey, data); // Sync to NodeCache
+          logger.info('cache', `Redis hit: ${cacheKey}`, chain, prefix);
+          return data;
         }
       }
-
-      const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
-      logger.debug('cache', `Attempting to read cache from ${cacheFile}`, chain, prefix.toLowerCase());
+      logger.debug('cache', `Redis cache miss: ${cacheKey}`, chain, prefix);
+      return null;
+    } else {
+      // Development: Check file system
+      const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_${type}.json`);
       try {
         const fileData = await fs.readFile(cacheFile, 'utf8');
-        const parsed = JSON.parse(fileData);
-        if (parsed && Array.isArray(parsed.holders) && Number.isInteger(parsed.totalBurned)) {
-          const success = cache.set(cacheKey, parsed);
-          logger.info(
-            'cache',
-            `Loaded ${cacheKey} from ${cacheFile}, cached: ${success}, holders: ${parsed.holders.length}`,
-            chain,
-            prefix.toLowerCase()
-          );
-          return parsed;
-        } else {
-          logger.warn('cache', `Invalid data in ${cacheFile}`, chain, prefix.toLowerCase());
-        }
+        data = JSON.parse(fileData);
+        cache.set(cacheKey, data); // Sync to NodeCache
+        logger.info('cache', `File cache hit: ${cacheFile}`, chain, prefix);
+        return data;
       } catch (error) {
-        if (error.code !== 'ENOENT') {
-          logger.error(
-            'cache',
-            `Failed to load cache from ${cacheFile}: ${error.message}`,
-            { stack: error.stack },
-            chain,
-            prefix.toLowerCase()
-          );
-        } else {
-          logger.debug('cache', `No cache file at ${cacheFile}`, chain, prefix.toLowerCase());
-        }
+        logger.debug('cache', `File cache miss: ${cacheFile}`, chain, prefix);
+        return null;
       }
     }
-
-    logger.info('cache', `Cache miss: ${cacheKey}`, chain, prefix.toLowerCase());
-    return null;
   } catch (error) {
-    logger.error('cache', `Failed to get cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, chain, prefix.toLowerCase());
+    logger.error('cache', `Get cache failed: ${cacheKey}, ${error.message}`, { stack: error.stack }, chain, prefix);
     return null;
   }
 }
 
-export async function setCache(key, value, ttl, prefix) {
-  const chain = config.nftContracts[prefix.toLowerCase()]?.chain || 'eth';
+export async function setCache(key, value, ttl, prefix, type = 'holders') {
+  const chain = config.nftContracts[prefix.toLowerCase()]?.chain || 'ETH';
+  const cacheKey = `${prefix}_${type}_${key}`;
   try {
-    const cacheKey = `${prefix}_${key}`;
-    const success = cache.set(cacheKey, value); // NodeCache
-    logger.info(
-      'cache',
-      `Set in-memory cache: ${cacheKey}, success: ${success}, holders: ${value.holders?.length || 'unknown'}`,
-      chain,
-      prefix.toLowerCase()
-    );
+    // Sanitize the value to handle BigInt
+    const sanitizedValue = sanitizeBigInt(value);
 
-    if (key === `${prefix.toLowerCase()}_holders` && Object.keys(config.nftContracts).map(k => k.toLowerCase()).includes(prefix.toLowerCase())) {
-      const holdersCount = value.holders ? value.holders.length : 0;
-      logger.info(
-        'cache',
-        `Persisting ${cacheKey} with ${holdersCount} holders, data: ${JSON.stringify(value).slice(0, 1000)}...`,
-        chain,
-        prefix.toLowerCase()
-      );
+    // Always set in NodeCache
+    cache.set(cacheKey, sanitizedValue, ttl);
 
-      // Write to Redis if enabled
-      if (redisEnabled && redis && process.env[`DISABLE_${prefix.toUpperCase()}_REDIS`] !== 'true') {
-        try {
-          logger.debug('cache', `Attempting to persist ${cacheKey} to Redis`, chain, prefix.toLowerCase());
-          await redis.set(cacheKey, JSON.stringify(value));
-          logger.info(
-            'cache',
-            `Persisted ${cacheKey} to Redis, holders: ${holdersCount}`,
-            chain,
-            prefix.toLowerCase()
-          );
-        } catch (error) {
-          logger.error(
-            'cache',
-            `Failed to persist ${cacheKey} to Redis: ${error.message}`,
-            { stack: error.stack },
-            chain,
-            prefix.toLowerCase()
-          );
-        }
-      } else {
-        logger.debug('cache', `Redis disabled for ${prefix} or not enabled, using filesystem`, chain, prefix.toLowerCase());
+    if (isProduction) {
+      // Production: Set in Redis
+      if (redis && !config.cache.redis[`disable${prefix.charAt(0).toUpperCase() + prefix.slice(1)}`]) {
+        await redis.set(cacheKey, JSON.stringify(sanitizedValue), { EX: ttl });
+        logger.info('cache', `Set Redis: ${cacheKey}`, chain, prefix);
       }
-
-      // Always write holders to filesystem
-      const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_holders.json`);
-      logger.debug('cache', `Attempting to write ${cacheKey} to ${cacheFile}`, chain, prefix.toLowerCase());
+    } else {
+      // Development: Set in file system
+      const cacheFile = path.join(cacheDir, `${prefix.toLowerCase()}_${type}.json`);
       await ensureCacheDir(prefix);
-      try {
-        await fs.writeFile(cacheFile, JSON.stringify(value, null, 2));
-        await fs.chmod(cacheFile, 0o644);
-        logger.info(
-          'cache',
-          `Persisted ${cacheKey} to ${cacheFile}, holders: ${holdersCount}`,
-          chain,
-          prefix.toLowerCase()
-        );
-      } catch (error) {
-        logger.error(
-          'cache',
-          `Failed to write cache file ${cacheFile}: ${error.message}`,
-          { stack: error.stack },
-          chain,
-          prefix.toLowerCase()
-        );
-        throw error;
-      }
+      await fs.writeFile(cacheFile, JSON.stringify(sanitizedValue, null, 2));
+      await fs.chmod(cacheFile, 0o644);
+      logger.info('cache', `Set file cache: ${cacheFile}`, chain, prefix);
     }
-    // Non-holders keys are only stored in NodeCache (unless custom logic exists for events)
-    return success;
+    return true;
   } catch (error) {
-    logger.error('cache', `Failed to set cache ${prefix}_${key}: ${error.message}`, { stack: error.stack }, chain, prefix.toLowerCase());
+    logger.error('cache', `Set cache failed: ${cacheKey}, ${error.message}`, { stack: error.stack }, chain, prefix);
     return false;
   }
 }
 
 export async function saveCacheState(key, state, prefix) {
-  const chain = config.nftContracts[prefix.toLowerCase()]?.chain || 'eth';
-  try {
-    const cacheKey = `state_${key}`;
-    cache.set(cacheKey, state, 0);
-    if (redisEnabled && redis) {
-      await redis.set(`state:${key}`, JSON.stringify(state), 'EX', 0);
-    }
-    logger.debug('cache', `Saved cache state for key: ${key}`, chain, prefix.toLowerCase());
-    return true;
-  } catch (error) {
-    logger.error('cache', `Failed to save cache state for ${key}: ${error.message}`, { stack: error.stack }, chain, prefix.toLowerCase());
-    throw error;
-  }
+  return setCache(key, state, 0, prefix, 'state');
 }
 
 export async function loadCacheState(key, prefix) {
-  const chain = config.nftContracts[prefix.toLowerCase()]?.chain || 'eth';
-  try {
-    const cacheKey = `state_${key}`;
-    let state = cache.get(cacheKey);
-    if (state === undefined && redisEnabled && redis) {
-      const redisData = await redis.get(`state:${key}`);
-      state = redisData ? JSON.parse(redisData) : null;
-      if (state) cache.set(cacheKey, state, 0);
-    }
-    logger.debug('cache', `Loaded cache state for key: ${key}`, chain, prefix.toLowerCase());
-    return state;
-  } catch (error) {
-    logger.error('cache', `Failed to load cache state for ${key}: ${error.message}`, { stack: error.stack }, chain, prefix.toLowerCase());
-    return null;
-  }
+  return getCache(key, prefix, 'state');
 }
 
 export async function getTransactionReceipt(transactionHash) {
   try {
     const receipt = await client.getTransactionReceipt({ hash: transactionHash });
-    logger.debug('utils', `Fetched transaction receipt for ${transactionHash}`, 'eth', 'general');
+    logger.debug('cache', `Fetched transaction receipt: ${transactionHash}`, 'ETH', 'general');
     return receipt;
   } catch (error) {
-    logger.error('utils', `Failed to fetch transaction receipt for ${transactionHash}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
+    logger.error('cache', `Failed to fetch receipt: ${transactionHash}, ${error.message}`, { stack: error.stack }, 'ETH', 'general');
     throw error;
   }
 }
 
 export async function validateContract(contractKey) {
-  const chain = config.nftContracts[contractKey.toLowerCase()]?.chain || 'eth';
-  const collection = contractKey.toLowerCase();
+  const chain = config.nftContracts[contractKey.toLowerCase()]?.chain || 'ETH';
   try {
-    // Log available contract keys for debugging
-    const availableContracts = Object.keys(config.nftContracts);
-    logger.debug(
-      'cache',
-      `Validating contract: received contractKey=${contractKey}, available contracts=${availableContracts.join(', ')}`,
-      chain,
-      collection
-    );
-
-    // Try exact match first
-    let contractConfig = config.nftContracts[contractKey.toLowerCase()];
-    let contractName = contractConfig?.name || contractKey;
-
-    // If not found, try case-insensitive match
-    if (!contractConfig) {
-      const lowerKey = contractKey.toLowerCase();
-      const matchingKey = availableContracts.find(key => key.toLowerCase() === lowerKey);
-      if (matchingKey) {
-        contractConfig = config.nftContracts[matchingKey];
-        contractName = contractConfig.name || matchingKey;
-        logger.warn(
-          'cache',
-          `Case mismatch for contractKey=${contractKey}, using matching key=${matchingKey}`,
-          chain,
-          collection
-        );
-      }
-    }
-
+    const contractConfig = config.nftContracts[contractKey.toLowerCase()];
     if (!contractConfig || !contractConfig.contractAddress) {
-      logger.error(
-        'cache',
-        `No configuration found for contract key: ${contractKey}. Available contracts: ${JSON.stringify(Object.keys(config.nftContracts))}`,
-        { configKeys: Object.keys(config.nftContracts), config: config.nftContracts },
-        chain,
-        collection
-      );
+      logger.error('cache', `No config for ${contractKey}`, {}, chain, contractKey);
       return false;
     }
-
-    const address = contractConfig.contractAddress;
-    logger.debug(
-      'cache',
-      `Validating contract: key=${contractKey}, name=${contractName}, address=${address}`,
-      chain,
-      collection
-    );
-
-    try {
-      // Validate address format
-      const formattedAddress = getAddress(address);
-      if (!formattedAddress) {
-        logger.error(
-          'cache',
-          `Invalid contract address format for ${contractName} (${contractKey}): ${address}`,
-          {},
-          chain,
-          collection
-        );
-        return false;
-      }
-
-      const code = await client.getBytecode({ address: formattedAddress });
-      const isValid = !!code && code !== '0x';
-      logger.info(
-        'cache',
-        `Contract validation for ${contractName} (${address}): ${isValid ? 'valid' : 'invalid'}`,
-        chain,
-        collection
-      );
-      return isValid;
-    } catch (error) {
-      logger.error(
-        'cache',
-        `Failed to validate contract ${contractName} (${address}): ${error.message}`,
-        { stack: error.stack },
-        chain,
-        collection
-      );
-      return false;
-    }
+    const address = getAddress(contractConfig.contractAddress);
+    const code = await client.getBytecode({ address });
+    const isValid = !!code && code !== '0x';
+    logger.info('cache', `Contract ${contractKey} (${address}): ${isValid ? 'valid' : 'invalid'}`, chain, contractKey);
+    return isValid;
   } catch (error) {
-    logger.error(
-      'cache',
-      `Unexpected error validating contract ${contractKey}: ${error.message}`,
-      { stack: error.stack },
-      chain,
-      collection
-    );
+    logger.error('cache', `Validate ${contractKey} failed: ${error.message}`, { stack: error.stack }, chain, contractKey);
     return false;
   }
 }

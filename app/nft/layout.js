@@ -4,7 +4,7 @@ import { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import SearchResultsModal from '@/components/SearchResultsModal';
-import { contractDetails } from '@/app/nft-contracts';
+import { contractDetails } from '@/app/contracts_nft';
 import { useNFTStore } from '@/app/store';
 
 export default function NFTLayout({ children }) {

@@ -1,298 +1,46 @@
 // components/NFTPage.js
-'use client';
-import { useState, useEffect } from 'react';
 import HolderTable from '@/components/HolderTable';
 import LoadingIndicator from '@/components/LoadingIndicator';
-import { contractDetails } from '@/app/nft-contracts';
-import { useNFTStore } from '@/app/store';
+import CollectionSelector from '@/components/CollectionSelector';
+import config from '@/app/contracts_nft';
 
-export default function NFTPage({ contractKey }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+export default function NFTPage({ contractKey, initialData, initialProgress }) {
+  const { name, apiEndpoint, rewardToken } = config.contractDetails[contractKey.toLowerCase()] || {};
 
-  const { name, apiEndpoint, rewardToken } = contractDetails[contractKey] || {};
-  const { getCache, setCache } = useNFTStore();
-  const isElement369 = contractKey === 'element369';
-  const isStax = contractKey === 'staxNFT';
-
-  useEffect(() => {
-    async function fetchAllHolders() {
-      if (!apiEndpoint) {
-        setError('Invalid contract configuration');
-        setLoading(false);
-        return;
-      }
-
-      if (contractKey === 'e280') {
-        setData({ holders: [], totalTokens: 0, message: 'E280 data not available yet' });
-        setCache(contractKey, { holders: [], totalTokens: 0, message: 'E280 data not available yet' });
-        setLoading(false);
-        return;
-      }
-
-      const cachedData = getCache(contractKey);
-      if (cachedData) {
-        setData(cachedData);
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        console.log(`[NFTPage] Starting fetch for ${contractKey} at ${apiEndpoint}`);
-        let allHolders = [];
-        let totalTokens = 0;
-        let totalLockedAscendant = 0;
-        let totalShares = 0;
-        let toDistributeDay8 = 0;
-        let toDistributeDay28 = 0;
-        let toDistributeDay90 = 0;
-        let pendingRewards = 0;
-        let totalClaimableRewards = 0;
-        let totalInfernoRewards = 0;
-        let totalFluxRewards = 0;
-        let totalE280Rewards = 0;
-        let page = 0;
-        let totalPages = Infinity;
-        const pageSize = 1000;
-
-        while (page < totalPages) {
-          let attempts = 0;
-          const maxAttempts = 3;
-          let success = false;
-
-          while (attempts < maxAttempts && !success) {
-            try {
-              console.log(`[NFTPage] Fetching ${contractKey} page ${page}`);
-              const res = await fetch(`${apiEndpoint}?page=${page}&pageSize=${pageSize}`, {
-                signal: AbortSignal.timeout(30000),
-              });
-              if (!res.ok) {
-                const errorText = await res.text();
-                throw new Error(`Page ${page} failed with status: ${res.status} - ${errorText}`);
-              }
-
-              const json = await res.json();
-              allHolders = allHolders.concat(json.holders || []);
-              totalTokens = json.totalTokens || totalTokens;
-              totalLockedAscendant = json.totalLockedAscendant || totalLockedAscendant;
-              totalShares = json.totalShares || totalShares;
-              toDistributeDay8 = json.toDistributeDay8 || toDistributeDay8;
-              toDistributeDay28 = json.toDistributeDay28 || toDistributeDay28;
-              toDistributeDay90 = json.toDistributeDay90 || toDistributeDay90;
-              pendingRewards = json.pendingRewards || pendingRewards;
-              totalPages = json.totalPages || 1;
-              page++;
-              success = true;
-              if (!json.holders || json.holders.length === 0) break;
-            } catch (err) {
-              attempts++;
-              if (err.message.includes('Rate limit') || err.name === 'TimeoutError') {
-                console.log(`[NFTPage] Retry ${attempts} for ${contractKey} page ${page} due to: ${err.message}`);
-                await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
-              } else {
-                throw err;
-              }
-            }
-          }
-          if (!success) {
-            throw new Error(`Failed to fetch page ${page} for ${contractKey} after ${maxAttempts} attempts`);
-          }
-        }
-
-        const uniqueHoldersMap = new Map();
-        allHolders.forEach(holder => {
-          if (holder && holder.wallet) uniqueHoldersMap.set(holder.wallet, holder);
-        });
-        const uniqueHolders = Array.from(uniqueHoldersMap.values());
-        console.log(`[NFTPage] Total Unique ${contractKey} Holders: ${uniqueHolders.length}`);
-
-        const totalMultiplierSum = uniqueHolders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
-        if (isElement369) {
-          totalInfernoRewards = uniqueHolders.reduce((sum, h) => sum + (h.infernoRewards || 0), 0);
-          totalFluxRewards = uniqueHolders.reduce((sum, h) => sum + (h.fluxRewards || 0), 0);
-          totalE280Rewards = uniqueHolders.reduce((sum, h) => sum + (h.e280Rewards || 0), 0);
-        } else {
-          totalClaimableRewards = uniqueHolders.reduce((sum, h) => sum + (h.claimableRewards || 0), 0);
-        }
-        if (!totalTokens && uniqueHolders.length > 0) {
-          totalTokens = uniqueHolders.reduce((sum, h) => sum + (h.total || 0), 0);
-        }
-
-        if (contractKey === 'ascendantNFT') {
-          uniqueHolders.forEach((holder, index) => {
-            holder.rank = index + 1;
-            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-          });
-        } else {
-          uniqueHolders.sort((a, b) => (b.multiplierSum || 0) - (a.multiplierSum || 0) || (b.total || 0) - (a.total || 0));
-          uniqueHolders.forEach((holder, index) => {
-            holder.rank = index + 1;
-            holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
-          });
-        }
-
-        const fetchedData = {
-          holders: uniqueHolders,
-          totalTokens,
-          totalLockedAscendant,
-          totalShares,
-          toDistributeDay8,
-          toDistributeDay28,
-          toDistributeDay90,
-          pendingRewards,
-          totalClaimableRewards,
-          totalInfernoRewards,
-          totalFluxRewards,
-          totalE280Rewards,
-        };
-
-        setCache(contractKey, fetchedData);
-        setData(fetchedData);
-        setLoading(false);
-      } catch (err) {
-        console.error('[NFTPage] Fetch Error:', err);
-        setError(`Failed to load ${name} holders: ${err.message}. Try refreshing later (Alchemy limit possible).`);
-        setLoading(false);
-      }
-    }
-
-    fetchAllHolders();
-  }, [contractKey, name, apiEndpoint, getCache, setCache]);
-
-  const renderSummary = () => {
+  const renderSummary = (data) => {
     if (!data) return null;
-
-    const totalMultiplierSum = data.totalMultiplierSum || 0;
+    const totalMultiplierSum = data.holders.reduce((sum, h) => sum + (h.multiplierSum || 0), 0);
     const totalTokens = data.totalTokens || 0;
-    const totalClaimableRewards = data.totalClaimableRewards || 0;
-    const totalInfernoRewards = data.totalInfernoRewards || 0;
-    const totalFluxRewards = data.totalFluxRewards || 0;
-    const totalE280Rewards = data.totalE280Rewards || 0;
-
-    if (contractKey === 'ascendantNFT') {
-      return (
-        <>
-          <h2 className="text-2xl font-semibold mb-2">Summary</h2>
-          <div className="summary-item">
-            <span className="summary-label">Number of Unique Wallets Holding NFTs:</span>
-            <span className="summary-number">{data.holders.length}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Total Number of Active NFTs in Circulation:</span>
-            <span className="summary-number">{totalTokens.toLocaleString()}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Total Locked Ascendant:</span>
-            <span className="summary-number">{(data.totalLockedAscendant || 0).toLocaleString()}</span>
-          </div>
-          {/* Removed Total Shares for Ascendant as per requirement */}
-          <div className="summary-item">
-            <span className="summary-label">Total Claimable Rewards:</span>
-            <span className="summary-number">{Math.floor(totalClaimableRewards).toLocaleString()} DRAGONX</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Total Pending DragonX Rewards:</span>
-            <span className="summary-number">{(data.pendingRewards || 0).toLocaleString()}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Pending DAY8 Rewards:</span>
-            <span className="summary-number">{(data.toDistributeDay8 || 0).toLocaleString()}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Pending DAY28 Rewards:</span>
-            <span className="summary-number">{(data.toDistributeDay28 || 0).toLocaleString()}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Pending DAY90 Rewards:</span>
-            <span className="summary-number">{(data.toDistributeDay90 || 0).toLocaleString()}</span>
-          </div>
-        </>
-      );
-    } else if (isElement369) {
-      return (
-        <>
-          <h2 className="text-2xl font-semibold mb-2">Summary</h2>
-          <div className="summary-item">
-            <span className="summary-label">Number of Unique Wallets Holding NFTs:</span>
-            <span className="summary-number">{data.holders.length}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Total Number of Active NFTs in Circulation:</span>
-            <span className="summary-number">{totalTokens.toLocaleString()}</span>
-          </div>
-          {/* Removed Total Multiplier Sum for Element369 as per requirement */}
-          <div className="summary-item">
-            <span className="summary-label">Total Claimable Inferno Rewards:</span>
-            <span className="summary-number">{Math.floor(totalInfernoRewards).toLocaleString()}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Total Claimable Flux Rewards:</span>
-            <span className="summary-number">{Math.floor(totalFluxRewards).toLocaleString()}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Total Claimable E280 Rewards:</span>
-            <span className="summary-number">{Math.floor(totalE280Rewards).toLocaleString()}</span>
-          </div>
-        </>
-      );
-    } else {
-      return (
-        <>
-          <h2 className="text-2xl font-semibold mb-2">Summary</h2>
-          <div className="summary-item">
-            <span className="summary-label">Number of Unique Wallets Holding NFTs:</span>
-            <span className="summary-number">{data.holders.length}</span>
-          </div>
-          <div className="summary-item">
-            <span className="summary-label">Total Number of Active NFTs in Circulation:</span>
-            <span className="summary-number">{totalTokens.toLocaleString()}</span>
-          </div>
-          {/* Conditionally render Total Multiplier Sum, excluding Element280, Element369, and Stax */}
-          {contractKey !== 'element280' && contractKey !== 'element369' && contractKey !== 'staxNFT' && (
-            <div className="summary-item">
-              <span className="summary-label">Total Multiplier Sum:</span>
-              <span className="summary-number">{totalMultiplierSum.toLocaleString()}</span>
-            </div>
-          )}
-          <div className="summary-item">
-            <span className="summary-label">Total Claimable Rewards:</span>
-            <span className="summary-number">
-              {Math.floor(totalClaimableRewards).toLocaleString()} {rewardToken || ''}
-            </span>
-          </div>
-        </>
-      );
-    }
+    const summary = data.summary || {};
+    return (
+      <>
+        <h2 className="text-2xl font-semibold mb-2">Summary</h2>
+        <div className="summary-item"><span className="summary-label">Unique Wallets:</span><span>{data.holders.length}</span></div>
+        <div className="summary-item"><span className="summary-label">Active NFTs:</span><span>{(summary.totalLive || totalTokens).toLocaleString()}</span></div>
+        <div className="summary-item"><span className="summary-label">Burned NFTs:</span><span>{(summary.totalBurned || 0).toLocaleString()}</span></div>
+        <div className="summary-item"><span className="summary-label">Minted NFTs:</span><span>{(summary.totalMinted || 0).toLocaleString()}</span></div>
+        <div className="summary-item"><span className="summary-label">Multiplier Pool:</span><span>{(summary.multiplierPool || totalMultiplierSum).toLocaleString()}</span></div>
+        <div className="summary-item"><span className="summary-label">Buy Transactions:</span><span>{data.transferSummary?.buyCount || 0}</span></div>
+        <div className="summary-item"><span className="summary-label">Sell Transactions:</span><span>{data.transferSummary?.sellCount || 0}</span></div>
+        <div className="summary-item"><span className="summary-label">Burn Transactions:</span><span>{data.transferSummary?.burnCount || 0}</span></div>
+      </>
+    );
   };
 
   return (
     <div className="min-h-screen bg-transparent text-white p-6 flex flex-col items-center">
       <h1 className="text-4xl font-bold mb-6">{name || 'Unknown Contract'} Holders</h1>
-      {loading ? (
-        <LoadingIndicator status={`Loading all ${name || 'contract'} holders...`} />
-      ) : error ? (
-        <p className="text-red-500 text-lg">Error: {error}</p>
-      ) : !data ? (
+      <CollectionSelector currentCollection={contractKey} />
+      {initialData.status === 'pending' || !initialData.holders ? (
+        <LoadingIndicator status={`Loading ${name || 'contract'} holders: ${initialProgress.step} (${initialProgress.progressPercentage})`} />
+      ) : initialData.error ? (
+        <p className="text-red-500 text-lg">Error: {initialData.error}</p>
+      ) : !initialData.holders.length ? (
         <p className="text-gray-400 text-lg">No data available for {name || 'this contract'}.</p>
-      ) : data.message ? (
-        <p className="text-gray-400 text-lg">{data.message}</p>
       ) : (
         <div className="w-full max-w-6xl">
-          <div className="mb-6 p-4 bg-gray-800 rounded-lg shadow">{renderSummary()}</div>
-          <HolderTable
-            holders={data.holders || []}
-            contract={contractKey}
-            loading={loading}
-            totalShares={contractKey === 'ascendantNFT' ? data.totalShares : undefined}
-          />
-          <div className="mt-8">
-            <h3 className="text-xl font-bold mb-2">Raw Data:</h3>
-            <pre className="text-sm bg-gray-700 p-4 rounded max-h-96 overflow-auto border-2 border-red-500">
-              {JSON.stringify(data, null, 2)}
-            </pre>
-          </div>
+          <div className="mb-6 p-4 bg-gray-800 rounded-lg shadow">{renderSummary(initialData)}</div>
+          <HolderTable holders={initialData.holders || []} contract={contractKey} loading={false} />
         </div>
       )}
     </div>

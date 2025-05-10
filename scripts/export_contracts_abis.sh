@@ -4,7 +4,7 @@
 cd "$(dirname "$0")/.." || exit 1
 
 # Dynamically collect all files under ./contracts
-contracts_files=$(find ./contracts -type f | sort)
+contracts_files=$(find app/contracts  -type f | sort)
 
 # Explicit list of ABI files
 abi_files=$(cat <<EOF
@@ -13,12 +13,12 @@ abi_files=$(cat <<EOF
 ./abi/element280Vault.json
 ./abi/element369.json
 ./abi/element369Vault.json
-
+./abi/staxVault.json
+./abi/staxNFT.json
 EOF
 )
 
-#./abi/staxVault.json
-#./abi/staxNFT.json
+
 
 
 {

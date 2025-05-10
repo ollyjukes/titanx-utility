@@ -5,7 +5,7 @@ import { Alchemy, Network } from 'alchemy-sdk';
 import dotenv from 'dotenv';
 import fs from 'fs/promises';
 import path from 'path';
-import { contractTiers } from '../app/nft-contracts.js';
+import { contractTiers } from '../app/old/nft-contracts.js';
 
 // Load ABI from file
 const ascendantAbi = JSON.parse(await fs.readFile(path.join(process.cwd(), 'abi', 'ascendantNFT.json'), 'utf8'));

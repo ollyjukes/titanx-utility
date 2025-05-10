@@ -1,74 +1,158 @@
+// app/lib/schemas.js
 import { z } from 'zod';
 
-export const HoldersResponseSchema = z.object({
-  holders: z.array(
+export const HolderSchema = z.object({
+  wallet: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid wallet address'),
+  rank: z.number().int().positive(),
+  total: z.number().int().nonnegative(),
+  multiplierSum: z.number().nonnegative(),
+  displayMultiplierSum: z.number().nonnegative(),
+  percentage: z.number().nonnegative(),
+  tiers: z.array(z.number().int().nonnegative()),
+  claimableRewards: z.number().nonnegative(),
+  buyCount: z.number().int().nonnegative(),
+  sellCount: z.number().int().nonnegative(),
+  burnCount: z.number().int().nonnegative(),
+  boughtNfts: z.array(
     z.object({
-      wallet: z.string(),
-      tokenIds: z.array(z.number()),
-      tiers: z.array(z.number()),
-      total: z.number(),
-      multiplierSum: z.number(),
-      shares: z.number().optional(),
-      lockedAscendant: z.number().optional(),
-      claimableRewards: z.number().optional(),
-      pendingDay8: z.number().optional(),
-      pendingDay28: z.number().optional(),
-      pendingDay90: z.number().optional(),
-      infernoRewards: z.number().optional(),
-      fluxRewards: z.number().optional(),
-      e280Rewards: z.number().optional(),
-      percentage: z.number().optional(),
-      displayMultiplierSum: z.number().optional(),
-      rank: z.number(),
-      tokens: z.array(
-        z.object({
-          tokenId: z.number(),
-          tier: z.number(),
-          rawTier: z.number().optional(),
-          rarityNumber: z.number(),
-          rarity: z.number()
-        })
-      ).optional()
+      tokenId: z.number().int().positive(),
+      transactionHash: z.string(),
+      timestamp: z.number().int().nonnegative(),
     })
   ),
-  totalPages: z.number(),
-  totalTokens: z.number(),
-  totalBurned: z.number().nullable(),
-  summary: z.object({
-    totalLive: z.number(),
-    totalBurned: z.number().nullable(),
-    totalMinted: z.number(),
-    tierDistribution: z.array(z.number()),
-    multiplierPool: z.number(),
-    rarityDistribution: z.array(z.number()).optional()
-  }),
-  globalMetrics: z.object({}).optional(),
-  contractKey: z.string().optional(),
-}).refine(
-  (data) => {
-    const contractKey = data.contractKey?.toLowerCase();
-    if (['stax', 'element280', 'element369'].includes(contractKey)) {
-      return typeof data.totalBurned === 'number' && data.totalBurned >= 0 && data.summary != null;
+  soldNfts: z.array(
+    z.object({
+      tokenId: z.number().int().positive(),
+      transactionHash: z.string(),
+      timestamp: z.number().int().nonnegative(),
+    })
+  ),
+  burnedNfts: z.array(
+    z.object({
+      tokenId: z.number().int().positive(),
+      transactionHash: z.string(),
+      timestamp: z.number().int().nonnegative(),
+    })
+  ),
+  tokenIds: z.array(z.number().int().positive()).optional(),
+  shares: z.number().nonnegative().optional(),
+  lockedAscendant: z.number().nonnegative().optional(),
+  pendingDay8: z.number().nonnegative().optional(),
+  pendingDay28: z.number().nonnegative().optional(),
+  pendingDay90: z.number().nonnegative().optional(),
+  infernoRewards: z.number().nonnegative().optional(),
+  fluxRewards: z.number().nonnegative().optional(),
+  e280Rewards: z.number().nonnegative().optional(),
+  tokens: z
+    .array(
+      z.object({
+        tokenId: z.number().int().positive(),
+        tier: z.number().int().positive(),
+        rarityNumber: z.number().nonnegative(),
+        rarity: z.number().int().positive(),
+      })
+    )
+    .optional(),
+});
+
+export const HoldersResponseSchema = z
+  .object({
+    status: z.enum(['success', 'pending']),
+    holders: z.array(HolderSchema),
+    totalPages: z.number().int().positive(),
+    totalTokens: z.number().int().nonnegative(),
+    totalBurned: z.number().int().nonnegative(),
+    lastBlock: z.number().int().nonnegative(),
+    errorLog: z.array(
+      z.object({
+        timestamp: z.string(),
+        phase: z.string(),
+        error: z.string(),
+        fromBlock: z.number().int().nonnegative().optional(),
+        toBlock: z.number().int().nonnegative().optional(),
+        tokenId: z.number().int().positive().optional(),
+        wallet: z.string().optional(),
+        chunk: z.number().int().positive().optional(),
+      })
+    ),
+    contractKey: z.string(),
+    summary: z.object({
+      totalLive: z.number().int().nonnegative(),
+      totalBurned: z.number().int().nonnegative(),
+      totalMinted: z.number().int().nonnegative(),
+      totalE280Burned: z.number().nonnegative().optional(),
+      totalRewardsPaid: z.number().nonnegative().optional(),
+      totalRewardPool: z.number().nonnegative().optional(),
+      tierDistribution: z.array(z.number().int().nonnegative()),
+      multiplierPool: z.number().nonnegative(),
+      rarityDistribution: z.array(z.number().int().nonnegative()).optional(),
+    }),
+    transferSummary: z
+      .object({
+        buyCount: z.number().int().nonnegative(),
+        sellCount: z.number().int().nonnegative(),
+        burnCount: z.number().int().nonnegative(),
+      })
+      .optional(),
+    globalMetrics: z
+      .object({
+        totalMinted: z.number().int().nonnegative(),
+        totalLive: z.number().int().nonnegative(),
+        totalBurned: z.number().int().nonnegative(),
+        tierDistribution: z.array(z.number().int().nonnegative()),
+      })
+      .optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.contractKey.toLowerCase() === 'element280') {
+        return data.totalBurned >= 0 && data.summary.totalBurned >= 0;
+      }
+      return true;
+    },
+    {
+      message: 'totalBurned and summary.totalBurned must be non-negative for element280',
+      path: ['totalBurned', 'summary.totalBurned'],
     }
-    return true;
-  },
-  {
-    message: 'totalBurned must be a non-negative number and summary must exist for stax, element280, and element369',
-    path: ['totalBurned', 'summary'],
-  }
-);
+  );
 
 export const ProgressResponseSchema = z.object({
   isPopulating: z.boolean(),
-  totalLiveHolders: z.number(),
-  totalOwners: z.number(),
-  phase: z.string(),
-  progressPercentage: z.string(),
-  lastProcessedBlock: z.number().nullable(),
-  lastUpdated: z.string().datetime().nullable(),
-  error: z.string().nullable(),
-  errorLog: z.array(z.any()),
-  globalMetrics: z.object({}).optional(),
-  isErrorLogTruncated: z.boolean().optional(),
-  status: z.enum(['idle', 'pending', 'success', 'error']), // Added status field
+  totalOwners: z.number().int().nonnegative(),
+  totalLiveHolders: z.number().int().nonnegative(),
+  progressState: z.object({
+    step: z.string(),
+    processedNfts: z.number().int().nonnegative(),
+    totalNfts: z.number().int().nonnegative(),
+    processedTiers: z.number().int().nonnegative(),
+    totalTiers: z.number().int().nonnegative(),
+    error: z.string().nullable(),
+    errorLog: z.array(
+      z.object({
+        timestamp: z.string(),
+        phase: z.string(),
+        error: z.string(),
+        fromBlock: z.number().int().nonnegative().optional(),
+        toBlock: z.number().int().nonnegative().optional(),
+        tokenId: z.number().int().positive().optional(),
+        wallet: z.string().optional(),
+        chunk: z.number().int().positive().optional(),
+      })
+    ),
+    progressPercentage: z.string().regex(/^\d{1,3}%$/, 'Invalid percentage format'),
+    totalLiveHolders: z.number().int().nonnegative(),
+    totalOwners: z.number().int().nonnegative(),
+    lastProcessedBlock: z.number().int().nonnegative().nullable(),
+    lastUpdated: z.number().int().nonnegative().nullable(),
+    isPopulating: z.boolean().optional(),
+    status: z.string(),
+  }),
+  lastUpdated: z.number().int().nonnegative().nullable(),
+  lastProcessedBlock: z.number().int().nonnegative().nullable(),
+  globalMetrics: z.object({
+    totalMinted: z.number().int().nonnegative().optional(),
+    totalLive: z.number().int().nonnegative().optional(),
+    totalBurned: z.number().int().nonnegative().optional(),
+    tierDistribution: z.array(z.number().int().nonnegative()).optional(),
+  }),
 });

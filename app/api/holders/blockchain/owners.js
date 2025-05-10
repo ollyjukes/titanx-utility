@@ -1,86 +1,56 @@
-import { Alchemy } from 'alchemy-sdk';
+import { alchemy } from '@/app/api/utils/client';
 import { logger } from '@/app/lib/logger';
-import config from '@/contracts/config';
+import { retry } from '@/app/api/utils/retry';
 
-const alchemy = new Alchemy({
-  apiKey: config.alchemy.apiKey,
-  network: 'eth-mainnet',
-});
-
-export async function getOwnersForContract(contractAddress, abi, options = {}) {
-  let owners = [];
-  let pageKey = options.pageKey || null;
-  const maxPages = options.maxPages || 10;
-  let pageCount = 0;
-
+export async function fetchOwnersAlchemy(contractAddress, contractKey, chain = 'eth') {
   logger.debug(
-    'utils',
-    `Fetching owners for contract: ${contractAddress} with options: ${JSON.stringify(options)}`,
-    'eth',
-    'general'
+    'owners',
+    `Fetching owners for contract: ${contractAddress} (contractKey: ${contractKey})`,
+    chain,
+    contractKey
   );
 
-  do {
-    try {
-      const response = await alchemy.nft.getOwnersForContract(contractAddress, {
-        withTokenBalances: options.withTokenBalances || false,
-        pageKey,
-      });
+  try {
+    const response = await retry(() =>
+      alchemy.nft.getOwnersForContract(contractAddress, {
+        withTokenBalances: true,
+        pageSize: 1000,
+      })
+    );
 
-      logger.debug(
-        'utils',
-        `Raw Alchemy response: ownersExists=${!!response.owners}, isArray=${Array.isArray(response.owners)}, ownersLength=${
-          response.owners?.length || 0
-        }, pageKey=${response.pageKey || null}, responseKeys=${Object.keys(response)}, sampleOwners=${JSON.stringify(
-          response.owners?.slice(0, 2) || []
-        )}`,
-        'eth',
-        'general'
-      );
+    logger.debug(
+      'owners',
+      `Raw Alchemy response: ownersExists=${!!response.owners}, isArray=${Array.isArray(response.owners)}, ownersLength=${
+        response.owners?.length || 0
+      }, pageKey=${response.pageKey || null}, responseKeys=${Object.keys(response)}, sampleOwners=${JSON.stringify(
+        response.owners?.slice(0, 2) || []
+      )}`,
+      chain,
+      contractKey
+    );
 
-      if (!response.owners || !Array.isArray(response.owners)) {
-        logger.error('utils', `Invalid Alchemy response for ${contractAddress}: ${JSON.stringify(response)}`, {}, 'eth', 'general');
-        throw new Error('Invalid owners response from Alchemy API');
-      }
-
-      for (const owner of response.owners) {
-        const tokenBalances = owner.tokenBalances || [];
-        logger.debug(
-          'utils',
-          `Processing owner: ${owner.ownerAddress}, tokenBalancesCount=${tokenBalances.length}`,
-          'eth',
-          'general'
-        );
-
-        if (tokenBalances.length > 0) {
-          const validBalances = tokenBalances.filter(tb => tb.tokenId && Number(tb.balance) > 0);
-          if (validBalances.length > 0) {
-            owners.push({
-              ownerAddress: owner.ownerAddress.toLowerCase(),
-              tokenBalances: validBalances.map(tb => ({
-                tokenId: Number(tb.tokenId),
-                balance: Number(tb.balance),
-              })),
-            });
-          }
-        }
-      }
-
-      pageKey = response.pageKey || null;
-      pageCount++;
-      logger.debug('utils', `Fetched page ${pageCount}, owners: ${owners.length}, pageKey: ${pageKey}`, 'eth', 'general');
-
-      if (pageCount >= maxPages) {
-        logger.warn('utils', `Reached max pages (${maxPages}) for owner fetching`, 'eth', 'general');
-        break;
-      }
-    } catch (error) {
-      logger.error('utils', `Failed to fetch owners for ${contractAddress}: ${error.message}`, { stack: error.stack }, 'eth', 'general');
-      throw error;
+    if (!response.owners || !Array.isArray(response.owners)) {
+      logger.error('owners', `Invalid Alchemy response for ${contractAddress}: ${JSON.stringify(response)}`, {}, chain, contractKey);
+      throw new Error('Invalid owners response from Alchemy API');
     }
-  } while (pageKey);
 
-  logger.debug('utils', `Processed owners: count=${owners.length}, sample=${JSON.stringify(owners.slice(0, 2))}`, 'eth', 'general');
-  logger.info('utils', `Fetched ${owners.length} owners for contract: ${contractAddress}`, 'eth', 'general');
-  return owners;
+    const owners = response.owners
+      .filter(owner => owner?.ownerAddress && owner.tokenBalances?.length > 0)
+      .map(owner => ({
+        ownerAddress: owner.ownerAddress.toLowerCase(),
+        tokenBalances: owner.tokenBalances
+          .filter(tb => tb.tokenId && Number(tb.balance) > 0)
+          .map(tb => ({
+            tokenId: Number(tb.tokenId),
+            balance: Number(tb.balance),
+          })),
+      }));
+
+    logger.debug('owners', `Processed owners: count=${owners.length}, sample=${JSON.stringify(owners.slice(0, 2))}`, chain, contractKey);
+    logger.info('owners', `Fetched ${owners.length} owners for contract: ${contractAddress}`, chain, contractKey);
+    return owners;
+  } catch (error) {
+    logger.error('owners', `Failed to fetch owners for ${contractAddress}: ${error.message}`, { stack: error.stack }, chain, contractKey);
+    throw error;
+  }
 }

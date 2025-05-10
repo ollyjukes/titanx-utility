@@ -1,0 +1,3538 @@
+================= Includes the following JS files for e280 integration =================
+app/api/holders/Element280/route.js
+app/api/holders/Element280/validate-burned/route.js
+app/lib/chartOptions.js
+app/lib/fetchCollectionData.js
+app/lib/logger.js
+app/lib/schemas.js
+app/lib/serverInit.js
+app/lib/useNFTData.js
+contracts/abi.js
+contracts/config.js
+contracts/contracts.js
+scripts/test_E280_nft_holders.js
+
+
+================= Contents of above files =================
+
+
+----- app/api/holders/Element280/route.js -----
+
+// app/api/holders/Element280/route.js
+import { NextResponse } from 'next/server';
+import { alchemy, client, nftAbi, element280VaultAbi, CACHE_TTL, log, batchMulticall } from '../../utils';
+import { contractAddresses, contractTiers, vaultAddresses } from '@/app/nft-contracts';
+
+let cache = {};
+let tokenCache = new Map();
+
+async function getAllHolders(contractAddress, tiers, page = 0, pageSize = 1000) {
+  const contractName = 'element280';
+  const cacheKey = `${contractAddress}-all-${page}-${pageSize}`;
+  const now = Date.now();
+
+  if (cache[cacheKey] && (now - cache[cacheKey].timestamp) < CACHE_TTL) {
+    log(`getAllHolders: Returning cached data for ${cacheKey}`);
+    return cache[cacheKey].data;
+  }
+
+  log(`getAllHolders start: ${contractName} at ${contractAddress}, page=${page}, pageSize=${pageSize}`);
+  const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, { withTokenBalances: true });
+  log(`${contractName} - Raw owners count: ${ownersResponse.owners.length}`);
+
+  const burnAddress = '0x0000000000000000000000000000000000000000';
+  const filteredOwners = ownersResponse.owners.filter(
+    owner => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
+  );
+  log(`${contractName} - Filtered live owners count: ${filteredOwners.length}`);
+
+  const tokenOwnerMap = new Map();
+  let totalTokens = 0;
+  filteredOwners.forEach(owner => {
+    const wallet = owner.ownerAddress.toLowerCase();
+    owner.tokenBalances.forEach(tb => {
+      const tokenId = BigInt(tb.tokenId);
+      tokenOwnerMap.set(tokenId, wallet);
+      totalTokens++;
+    });
+  });
+  log(`${contractName} - Total tokens checked: ${totalTokens}`);
+
+  const allTokenIds = Array.from(tokenOwnerMap.keys());
+  const start = page * pageSize;
+  const end = Math.min(start + pageSize, allTokenIds.length);
+  const paginatedTokenIds = allTokenIds.slice(start, end);
+  log(`${contractName} - Paginated token IDs: ${paginatedTokenIds.length} (start=${start}, end=${end})`);
+
+  const ownerOfCalls = paginatedTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
+    functionName: 'ownerOf',
+    args: [tokenId],
+  }));
+
+  const ownerOfResults = await batchMulticall(ownerOfCalls);
+  const validTokenIds = [];
+  paginatedTokenIds.forEach((tokenId, i) => {
+    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const cacheKey = `${contractAddress}-${tokenId}-owner`;
+    if (owner && owner !== burnAddress) {
+      validTokenIds.push(tokenId);
+      tokenCache.set(cacheKey, owner);
+    } else {
+      tokenCache.set(cacheKey, null);
+    }
+  });
+  log(`${contractName} - Valid token IDs after ownerOf: ${validTokenIds.length}`);
+
+  if (validTokenIds.length === 0) {
+    log(`${contractName} - No valid tokens found in this page`);
+    return { holders: [], totalTokens, page, pageSize, totalPages: Math.ceil(allTokenIds.length / pageSize) };
+  }
+
+  const tierCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
+    functionName: 'getNftTier',
+    args: [tokenId],
+  }));
+
+  log(`${contractName} - Starting tier multicall for ${tierCalls.length} tokens`);
+  const tierResults = await batchMulticall(tierCalls);
+  log(`${contractName} - Tier results length: ${tierResults.length}`);
+  const maxTier = Math.max(...Object.keys(tiers).map(Number));
+  const holdersMap = new Map();
+  let totalNftsHeld = 0;
+
+  tierResults.forEach((result, i) => {
+    if (!result) {
+      log(`${contractName} - Undefined tier result at index ${i}, tokenId: ${validTokenIds[i]}`);
+      return;
+    }
+    if (result.status === 'success') {
+      const tokenId = validTokenIds[i];
+      const wallet = tokenOwnerMap.get(tokenId);
+      const tier = Number(result.result);
+      const cacheKey = `${contractAddress}-${tokenId}-tier`;
+      tokenCache.set(cacheKey, tier);
+
+      if (tier >= 1 && tier <= maxTier) {
+        if (!holdersMap.has(wallet)) {
+          holdersMap.set(wallet, {
+            wallet,
+            total: 0,
+            multiplierSum: 0,
+            tiers: Array(maxTier + 1).fill(0),
+            claimableRewards: 0,
+          });
+        }
+
+        const holder = holdersMap.get(wallet);
+        holder.total += 1;
+        holder.multiplierSum += tiers[tier]?.multiplier || 0;
+        holder.tiers[tier] += 1;
+        totalNftsHeld += 1;
+      } else {
+        log(`${contractName} - Invalid tier ${tier} for token ${tokenId}`);
+      }
+    } else {
+      log(`${contractName} - Failed tier fetch at index ${i}, tokenId: ${validTokenIds[i]}`);
+    }
+  });
+  log(`${contractName} - Total NFTs held after tier check: ${totalNftsHeld}`);
+
+  // Fetch claimable rewards from vault
+  const holders = Array.from(holdersMap.values());
+  const rewardCalls = holders.map(holder => ({
+    address: vaultAddresses.element280,
+    abi: element280VaultAbi,
+    functionName: 'claimableReward',
+    args: [holder.wallet],
+  }));
+
+  const rewardResults = await batchMulticall(rewardCalls);
+  holders.forEach((holder, i) => {
+    if (rewardResults[i]?.status === 'success') {
+      holder.claimableRewards = Number(rewardResults[i].result);
+    } else {
+      holder.claimableRewards = 0;
+      log(`${contractName} - Failed to fetch rewards for ${holder.wallet}`);
+    }
+  });
+
+  const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+  holders.forEach(holder => {
+    holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+    holder.rank = 0;
+    holder.displayMultiplierSum = holder.multiplierSum / 10;
+  });
+
+  const sortFn = (a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total;
+  holders.sort(sortFn);
+  holders.forEach((holder, index) => (holder.rank = index + 1));
+
+  const result = {
+    holders,
+    totalTokens,
+    page,
+    pageSize,
+    totalPages: Math.ceil(allTokenIds.length / pageSize),
+  };
+
+  cache[cacheKey] = { timestamp: now, data: result };
+  log(`${contractName} - Final holders count: ${holders.length}`);
+  return result;
+}
+
+async function getHolderData(contractAddress, wallet, tiers) {
+  const contractName = 'element280';
+  const cacheKey = `${contractAddress}-${wallet}`;
+  const now = Date.now();
+
+  if (cache[cacheKey] && (now - cache[cacheKey].timestamp) < CACHE_TTL) {
+    log(`getHolderData: Returning cached data for ${cacheKey}`);
+    return cache[cacheKey].data;
+  }
+
+  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    throw new Error('Invalid wallet address');
+  }
+
+  log(`getHolderData start: wallet=${wallet}, contract=${contractAddress}`);
+  const nfts = await alchemy.nft.getNftsForOwner(wallet, { contractAddresses: [contractAddress] });
+  log(`${contractAddress} - Initial NFTs for ${wallet}: ${nfts.totalCount}`);
+
+  if (nfts.totalCount === 0) return null;
+
+  const walletLower = wallet.toLowerCase();
+  const tokenIds = nfts.ownedNfts.map(nft => BigInt(nft.tokenId));
+  const ownerOfCalls = tokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
+    functionName: 'ownerOf',
+    args: [tokenId],
+  }));
+
+  const ownerOfResults = await batchMulticall(ownerOfCalls);
+  const validTokenIds = tokenIds.filter((tokenId, i) => {
+    const owner = ownerOfResults[i]?.status === 'success' && ownerOfResults[i].result.toLowerCase();
+    const cacheKey = `${contractAddress}-${tokenId}-owner`;
+    tokenCache.set(cacheKey, owner);
+    return owner === walletLower;
+  });
+  log(`${contractAddress} - Valid token IDs for ${wallet}: ${validTokenIds.length}`);
+
+  if (validTokenIds.length === 0) return null;
+
+  const tierCalls = validTokenIds.map(tokenId => ({
+    address: contractAddress,
+    abi: nftAbi,
+    functionName: 'getNftTier',
+    args: [tokenId],
+  }));
+
+  const tierResults = await batchMulticall(tierCalls);
+  const maxTier = Math.max(...Object.keys(tiers).map(Number));
+  const tiersArray = Array(maxTier + 1).fill(0);
+  let total = 0;
+  let multiplierSum = 0;
+
+  tierResults.forEach((result, i) => {
+    if (!result) {
+      log(`${contractAddress} - Undefined tier result for wallet ${wallet} at index ${i}, tokenId: ${validTokenIds[i]}`);
+      return;
+    }
+    if (result.status === 'success') {
+      const tier = Number(result.result);
+      const tokenId = validTokenIds[i];
+      const cacheKey = `${contractAddress}-${tokenId}-tier`;
+      tokenCache.set(cacheKey, tier);
+      if (tier >= 1 && tier <= maxTier) {
+        tiersArray[tier] += 1;
+        total += 1;
+        multiplierSum += tiers[tier]?.multiplier || 0;
+      }
+    }
+  });
+  log(`${contractAddress} - Total NFTs for ${wallet} after tier check: ${total}`);
+
+  const rewardResult = await client.readContract({
+    address: vaultAddresses.element280,
+    abi: element280VaultAbi,
+    functionName: 'claimableReward',
+    args: [walletLower],
+  });
+  const claimableRewards = Number(rewardResult) || 0;
+
+  const allHolders = await getAllHolders(contractAddress, tiers, 0, 1000);
+  const totalMultiplierSum = allHolders.holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+  const percentage = totalMultiplierSum > 0 ? (multiplierSum / totalMultiplierSum) * 100 : 0;
+  const holder = allHolders.holders.find(h => h.wallet === walletLower) || { rank: allHolders.holders.length + 1 };
+
+  const result = {
+    wallet: walletLower,
+    rank: holder.rank,
+    total,
+    multiplierSum,
+    displayMultiplierSum: multiplierSum / 10,
+    percentage,
+    tiers: tiersArray,
+    claimableRewards,
+  };
+
+  cache[cacheKey] = { timestamp: now, data: result };
+  log(`${contractAddress} - Final data for ${wallet}: total=${total}, multiplierSum=${multiplierSum}, claimableRewards=${claimableRewards}`);
+  return result;
+}
+
+export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const wallet = searchParams.get('wallet');
+  const page = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
+  const pageSize = Math.max(1, Math.min(1000, parseInt(searchParams.get('pageSize') || '1000', 10)));
+
+  const address = contractAddresses['element280'];
+  if (!address) {
+    return NextResponse.json({ error: 'Element280 contract address not found' }, { status: 400 });
+  }
+
+  try {
+    if (wallet) {
+      const holderData = await getHolderData(address, wallet, contractTiers['element280']);
+      return NextResponse.json({ holders: holderData ? [holderData] : [] });
+    }
+
+    const result = await getAllHolders(address, contractTiers['element280'], page, pageSize);
+    return NextResponse.json(result);
+  } catch (error) {
+    log(`Error in GET /api/holders/Element280: ${error.message}`);
+    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
+  }
+}
+----- app/api/holders/Element280/validate-burned/route.js -----
+
+// app/api/holders/Element280/validate-burned/route.js
+import { NextResponse } from 'next/server';
+import config from '@/contracts/config';
+import { getTransactionReceipt, getCache, setCache } from '@/app/api/utils/cache';
+import { log } from '@/app/api/utils/logging';
+import { client } from '@/app/api/utils/client';
+import { parseAbiItem } from 'viem';
+
+export async function POST(request) {
+  if (process.env.DEBUG === 'true') {
+    log(`[Element280-Validate-Burned] [DEBUG] Processing POST request for validate-burned`);
+  }
+
+  try {
+    const { transactionHash } = await request.json();
+    if (!transactionHash || typeof transactionHash !== 'string' || !transactionHash.match(/^0x[a-fA-F0-9]{64}$/)) {
+      log(`[Element280-Validate-Burned] [VALIDATION] Invalid transaction hash: ${transactionHash || 'undefined'}`);
+      return NextResponse.json({ error: 'Invalid transaction hash' }, { status: 400 });
+    }
+
+    const contractAddress = config.contractAddresses?.element280?.address;
+    if (!contractAddress) {
+      log(`[Element280-Validate-Burned] [VALIDATION] Element280 contract address not configured in config.js`);
+      return NextResponse.json({ error: 'Contract address not configured' }, { status: 500 });
+    }
+
+    const cacheKey = `element280_burn_validation_${transactionHash}`;
+    const cachedResult = await getCache(cacheKey, 'element280');
+    if (cachedResult) {
+      if (process.env.DEBUG === 'true') {
+        log(`[Element280-Validate-Burned] [DEBUG] Cache hit for burn validation: ${transactionHash}`);
+      }
+      return NextResponse.json(cachedResult);
+    }
+
+    if (process.env.DEBUG === 'true') {
+      log(`[Element280-Validate-Burned] [DEBUG] Fetching transaction receipt for hash: ${transactionHash}`);
+    }
+    const receipt = await getTransactionReceipt(transactionHash);
+    if (!receipt) {
+      log(`[Element280-Validate-Burned] [VALIDATION] Transaction receipt not found for hash: ${transactionHash}`);
+      return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
+    }
+
+    const burnAddress = '0x0000000000000000000000000000000000000000';
+    const transferEvent = parseAbiItem('event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)');
+    const burnedTokenIds = [];
+
+    for (const logEntry of receipt.logs) {
+      if (
+        logEntry.address.toLowerCase() === contractAddress.toLowerCase() &&
+        logEntry.topics[0] === transferEvent.topics[0]
+      ) {
+        try {
+          const decodedLog = client.decodeEventLog({
+            abi: [transferEvent],
+            data: logEntry.data,
+            topics: logEntry.topics,
+          });
+          if (decodedLog.args.to.toLowerCase() === burnAddress) {
+            burnedTokenIds.push(decodedLog.args.tokenId.toString());
+          }
+        } catch (_decodeError) {
+          log(`[Element280-Validate-Burned] [ERROR] Failed to decode log entry for transaction ${transactionHash}: ${_decodeError.message}`);
+        }
+      }
+    }
+
+    if (burnedTokenIds.length === 0) {
+      log(`[Element280-Validate-Burned] [VALIDATION] No burn events found in transaction: ${transactionHash}`);
+      return NextResponse.json({ error: 'No burn events found in transaction' }, { status: 400 });
+    }
+
+    const result = {
+      transactionHash,
+      burnedTokenIds,
+      blockNumber: receipt.blockNumber.toString(),
+    };
+
+    await setCache(cacheKey, result, config.cache.nodeCache.stdTTL, 'element280');
+    if (process.env.DEBUG === 'true') {
+      log(`[Element280-Validate-Burned] [DEBUG] Found ${burnedTokenIds.length} burned tokens in transaction: ${transactionHash}`);
+    }
+    return NextResponse.json(result);
+  } catch (error) {
+    log(`[Element280-Validate-Burned] [ERROR] Error processing transaction: ${error.message}, stack: ${error.stack}`);
+    return NextResponse.json({ error: 'Failed to validate transaction', details: error.message }, { status: 500 });
+  }
+}
+----- app/lib/chartOptions.js -----
+
+export const barChartOptions = {
+    responsive: true,
+    plugins: {
+      legend: { position: 'top', labels: { color: '#e5e7eb' } }, // Gray-200
+      title: {
+        display: true,
+        text: 'NFT Tier Distribution',
+        color: '#e5e7eb',
+        font: { size: 16, weight: 'bold' },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        title: { display: true, text: 'Number of NFTs', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' }, // Gray-300
+      },
+      x: {
+        title: { display: true, text: 'Tiers', color: '#e5e7eb' },
+        ticks: { color: '#d1d5db' },
+      },
+    },
+  };
+----- app/lib/fetchCollectionData.js -----
+
+import config from '@/contracts/config';
+import { HoldersResponseSchema, ProgressResponseSchema } from '@/app/lib/schemas';
+
+// Debounce utility to prevent concurrent POST requests
+const debounce = (func, wait) => {
+  let timeout;
+  return (...args) => {
+    clearTimeout(timeout);
+    return new Promise(resolve => {
+      timeout = setTimeout(() => resolve(func(...args)), wait);
+    });
+  };
+};
+
+export async function fetchCollectionData(apiKey, apiEndpoint, pageSize) {
+  console.log(`[FetchCollectionData] [INFO] Fetching ${apiKey} from ${apiEndpoint}`);
+  try {
+    if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+      console.log(`[FetchCollectionData] [INFO] ${apiKey} is disabled`);
+      return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: 'Contract not deployed' };
+    }
+
+    const endpoint = apiEndpoint.startsWith('http')
+      ? apiEndpoint
+      : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${apiEndpoint}`;
+
+    const pollProgress = async () => {
+      const res = await fetch(`${endpoint}/progress`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(config.alchemy.timeoutMs),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Progress fetch failed: ${res.status} ${errorText}`);
+      }
+      const progress = await res.json();
+      console.log(`[FetchCollectionData] [DEBUG] Progress: ${JSON.stringify(progress)}`);
+      const validation = ProgressResponseSchema.safeParse(progress);
+      if (!validation.success) {
+        console.error(`[FetchCollectionData] [ERROR] Invalid progress data: ${JSON.stringify(validation.error.errors)}`);
+        throw new Error('Invalid progress data');
+      }
+      return validation.data;
+    };
+
+    let allHolders = [];
+    let totalTokens = 0;
+    let totalShares = 0;
+    let totalBurned = 0;
+    let summary = {};
+    let page = 0;
+    let totalPages = Infinity;
+    let postAttempts = 0;
+    const maxPostAttempts = 5;
+    let pollAttempts = 0;
+    const maxPollAttempts = 600; // 300 seconds / 500ms = 600 attempts
+    const maxPollTime = 300000; // 300 seconds
+    const startTime = Date.now();
+
+    // Debounced POST request
+    const triggerPost = debounce(async () => {
+      console.log(`[FetchCollectionData] [INFO] Triggering POST for ${apiKey}, attempt ${postAttempts + 1}/${maxPostAttempts}`);
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceUpdate: false }), // Never force update automatically
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FetchCollectionData] [ERROR] POST failed: ${res.status} ${errorText}`);
+        throw new Error(`POST request failed: ${res.status} ${errorText}`);
+      }
+      const response = await res.json();
+      if (response.error) {
+        throw new Error(`POST response error: ${response.error}`);
+      }
+      console.log(`[FetchCollectionData] [INFO] POST successful: ${JSON.stringify(response)}`);
+      return response;
+    }, 2000);
+
+    let progress = await pollProgress();
+    // Only trigger POST for element280 if phase is Idle and no valid data exists
+    if (apiKey === 'element280' && progress.phase === 'Idle' && progress.totalOwners === 0 && progress.lastProcessedBlock === null) {
+      if (postAttempts >= maxPostAttempts) {
+        console.error(`[FetchCollectionData] [ERROR] Max POST attempts (${maxPostAttempts}) reached for ${apiKey}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: 'Max POST attempts reached for cache population' };
+      }
+      try {
+        console.log(`[FetchCollectionData] [DEBUG] Sending POST request, attempt ${postAttempts + 1}/${maxPostAttempts}`);
+        await triggerPost();
+        postAttempts++;
+      } catch (error) {
+        console.error(`[FetchCollectionData] [ERROR] POST attempt failed: ${error.message}`);
+        postAttempts++;
+        if (postAttempts >= maxPostAttempts) {
+          console.error(`[FetchCollectionData] [ERROR] Max POST attempts (${maxPostAttempts}) reached after error`);
+          return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: `Max POST attempts reached: ${error.message}` };
+        }
+      }
+    } else if (apiKey !== 'element280' && (progress.phase === 'Idle' || progress.totalOwners === 0)) {
+      // Original POST triggering logic for other contracts
+      if (postAttempts >= maxPostAttempts) {
+        console.error(`[FetchCollectionData] [ERROR] Max POST attempts (${maxPostAttempts}) reached for ${apiKey}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: 'Max POST attempts reached for cache population' };
+      }
+      try {
+        console.log(`[FetchCollectionData] [DEBUG] Sending POST request, attempt ${postAttempts + 1}/${maxPostAttempts}`);
+        await triggerPost();
+        postAttempts++;
+      } catch (error) {
+        console.error(`[FetchCollectionData] [ERROR] POST attempt failed: ${error.message}`);
+        postAttempts++;
+        if (postAttempts >= maxPostAttempts) {
+          console.error(`[FetchCollectionData] [ERROR] Max POST attempts (${maxPostAttempts}) reached after error`);
+          return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: `Max POST attempts reached: ${error.message}` };
+        }
+      }
+    }
+
+    while (progress.phase !== 'Completed' && progress.phase !== 'Error') {
+      if (Date.now() - startTime > maxPollTime) {
+        console.error(`[FetchCollectionData] [ERROR] Cache population timeout for ${apiKey}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: 'Cache population timed out' };
+      }
+      if (pollAttempts >= maxPollAttempts) {
+        console.error(`[FetchCollectionData] [ERROR] Max poll attempts (${maxPollAttempts}) reached for ${apiKey}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: 'Max poll attempts reached' };
+      }
+      console.log(`[FetchCollectionData] [INFO] Waiting for ${apiKey} cache: ${progress.phase} (${progress.progressPercentage}%), poll attempt ${pollAttempts + 1}/${maxPollAttempts}`);
+      await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+      try {
+        progress = await pollProgress();
+      } catch (error) {
+        console.error(`[FetchCollectionData] [ERROR] Poll attempt failed: ${error.message}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: `Polling failed: ${error.message}` };
+      }
+      pollAttempts++;
+    }
+
+    if (progress.phase === 'Error') {
+      console.error(`[FetchCollectionData] [ERROR] Cache population failed for ${apiKey}: ${progress.error || 'Unknown error'}`);
+      return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: `Cache population failed: ${progress.error || 'Unknown error'}` };
+    }
+
+    while (page < totalPages) {
+      const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+      console.log(`[FetchCollectionData] [DEBUG] Fetching ${url}`);
+      const res = await fetch(url, { cache: 'force-cache' });
+      console.log(`[FetchCollectionData] [DEBUG] Status: ${res.status}, headers: ${JSON.stringify([...res.headers])}`);
+
+      if (res.status === 202) {
+        console.log(`[FetchCollectionData] [INFO] Cache still populating for ${apiKey}, retrying...`);
+        await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+        continue;
+      }
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FetchCollectionData] [ERROR] Failed: ${res.status} ${errorText}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: `API request failed: ${res.status} ${errorText}` };
+      }
+
+      const json = await res.json();
+      console.log(`[FetchCollectionData] [DEBUG] Response: ${JSON.stringify(json, (k, v) => typeof v === 'bigint' ? v.toString() : v)}`);
+
+      if (json.error) {
+        console.error(`[FetchCollectionData] [ERROR] API error for ${apiKey}: ${json.error}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: json.error };
+      }
+
+      const validation = HoldersResponseSchema.safeParse(json);
+      if (!validation.success) {
+        console.error(`[FetchCollectionData] [ERROR] Invalid holders data: ${JSON.stringify(validation.error.errors)}`);
+        return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: 'Invalid holders data' };
+      }
+
+      allHolders = allHolders.concat(json.holders);
+      totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+      totalShares = json.totalShares || json.summary?.multiplierPool || totalTokens;
+      totalBurned = json.totalBurned || totalBurned;
+      summary = json.summary || summary;
+      totalPages = json.totalPages || 1;
+      page++;
+      console.log(`[FetchCollectionData] [INFO] Fetched page ${page}: ${json.holders.length} holders`);
+    }
+
+    return { holders: allHolders, totalTokens, totalShares, totalBurned, summary };
+  } catch (error) {
+    console.error(`[FetchCollectionData] [ERROR] ${apiKey}: ${error.message}, stack: ${error.stack}`);
+    return { holders: [], totalTokens: 0, totalShares: 0, totalBurned: 0, error: error.message };
+  }
+}
+----- app/lib/logger.js -----
+
+import fs from 'fs/promises';
+import path from 'path';
+import chalk from 'chalk';
+
+// Use process.cwd() to reference the project root
+const logDir = path.join(process.cwd(), 'logs');
+
+console.log(chalk.cyan('[Logger] Initializing logger...'));
+console.log(chalk.cyan('[Logger] process.env.DEBUG:'), process.env.DEBUG);
+console.log(chalk.cyan('[Logger] process.env.NODE_ENV:'), process.env.NODE_ENV);
+console.log(chalk.cyan('[Logger] Log directory:'), logDir);
+
+const isDebug = process.env.DEBUG === 'true';
+console.log(chalk.cyan('[Logger] isDebug:'), isDebug);
+
+async function ensureLogDir() {
+  try {
+    await fs.mkdir(logDir, { recursive: true });
+    await fs.chmod(logDir, 0o755);
+    console.log(chalk.cyan('[Logger] Created or verified log directory:'), logDir);
+  } catch (error) {
+    console.error(chalk.red('[Logger] Failed to create log directory:'), error.message);
+  }
+}
+
+ensureLogDir().catch(error => {
+  console.error(chalk.red('[Logger] ensureLogDir error:'), error.message);
+});
+
+export const logger = {
+  info: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [INFO] ${message}`;
+    console.log(chalk.green(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote INFO log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write INFO log:'), error.message);
+      }
+    }
+  },
+  warn: async (scope, message, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [WARN] ${message}`;
+    console.log(chalk.yellow(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote WARN log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write WARN log:'), error.message);
+      }
+    }
+  },
+  error: async (scope, message, details = {}, chain = 'eth', collection = 'general') => {
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [ERROR] ${message} ${JSON.stringify(details)}`;
+    console.error(chalk.red(log));
+    if (isDebug) {
+      try {
+        const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+        await fs.appendFile(logFile, `${log}\n`);
+        console.log(chalk.cyan('[Logger] Wrote ERROR log to:'), logFile);
+      } catch (error) {
+        console.error(chalk.red('[Logger] Failed to write ERROR log:'), error.message);
+      }
+    }
+  },
+  debug: async (scope, message, chain = 'eth', collection = 'general') => {
+    if (!isDebug) return;
+    const timestamp = new Date().toISOString();
+    const log = `[${timestamp}] [${scope}] [DEBUG] ${message}`;
+    console.log(chalk.blue(log));
+    try {
+      const logFile = path.join(logDir, `cache-${chain}-${collection.toLowerCase()}-${timestamp.split('T')[0]}.log`);
+      await fs.appendFile(logFile, `${log}\n`);
+      console.log(chalk.cyan('[Logger] Wrote DEBUG log to:'), logFile);
+    } catch (error) {
+      console.error(chalk.red('[Logger] Failed to write DEBUG log:'), error.message);
+    }
+  },
+};
+
+try {
+  logger.info('startup', 'Logger module loaded').catch(error => {
+    console.error(chalk.red('[Logger] Startup log error:'), error.message);
+  });
+} catch (error) {
+  console.error(chalk.red('[Logger] Immediate log error:'), error.message);
+}
+----- app/lib/schemas.js -----
+
+import { z } from 'zod';
+
+export const HoldersResponseSchema = z.object({
+  holders: z.array(
+    z.object({
+      wallet: z.string(),
+      tokenIds: z.array(z.number()),
+      tiers: z.array(z.number()),
+      total: z.number(),
+      multiplierSum: z.number(),
+      shares: z.number().optional(),
+      lockedAscendant: z.number().optional(),
+      claimableRewards: z.number().optional(),
+      pendingDay8: z.number().optional(),
+      pendingDay28: z.number().optional(),
+      pendingDay90: z.number().optional(),
+      infernoRewards: z.number().optional(),
+      fluxRewards: z.number().optional(),
+      e280Rewards: z.number().optional(),
+      percentage: z.number().optional(),
+      displayMultiplierSum: z.number().optional(),
+      rank: z.number(),
+      tokens: z.array(
+        z.object({
+          tokenId: z.number(),
+          tier: z.number(),
+          rawTier: z.number().optional(),
+          rarityNumber: z.number(),
+          rarity: z.number()
+        })
+      ).optional()
+    })
+  ),
+  totalPages: z.number(),
+  totalTokens: z.number(),
+  totalBurned: z.number().nullable(),
+  summary: z.object({
+    totalLive: z.number(),
+    totalBurned: z.number().nullable(),
+    totalMinted: z.number(),
+    tierDistribution: z.array(z.number()),
+    multiplierPool: z.number(),
+    rarityDistribution: z.array(z.number()).optional()
+  }),
+  globalMetrics: z.object({}).optional(),
+  contractKey: z.string().optional(),
+}).refine(
+  (data) => {
+    const contractKey = data.contractKey?.toLowerCase();
+    if (['stax', 'element280', 'element369'].includes(contractKey)) {
+      return typeof data.totalBurned === 'number' && data.totalBurned >= 0 && data.summary != null;
+    }
+    return true;
+  },
+  {
+    message: 'totalBurned must be a non-negative number and summary must exist for stax, element280, and element369',
+    path: ['totalBurned', 'summary'],
+  }
+);
+
+export const ProgressResponseSchema = z.object({
+  isPopulating: z.boolean(),
+  totalLiveHolders: z.number(),
+  totalOwners: z.number(),
+  phase: z.string(),
+  progressPercentage: z.string(),
+  lastProcessedBlock: z.number().nullable(),
+  lastUpdated: z.string().datetime().nullable(),
+  error: z.string().nullable(),
+  errorLog: z.array(z.any()),
+  globalMetrics: z.object({}).optional(),
+  isErrorLogTruncated: z.boolean().optional(),
+  status: z.enum(['idle', 'pending', 'success', 'error']), // Added status field
+});
+----- app/lib/serverInit.js -----
+
+// File: server/lib/serverInit.js
+import { logger } from '@/app/lib/logger';
+import { initializeCache } from '@/app/api new code/utils';
+import chalk from 'chalk';
+
+console.log(chalk.cyan('[ServerInit] Initializing server...'));
+
+try {
+  logger.info('serverInit', 'Server initialization started');
+  await initializeCache();
+} catch (error) {
+  logger.error('serverInit', `Initialize cache error: ${error.message}`, { stack: error.stack });
+  console.error(chalk.red('[ServerInit] Initialization error:'), error.message);
+}
+
+export const serverInit = true;
+----- app/lib/useNFTData.js -----
+
+// app/lib/useNFTData.js
+'use client';
+import { useQuery } from '@tanstack/react-query';
+import { useNFTStore } from '@/app/store';
+import config from '@/contracts/config';
+import { HoldersResponseSchema } from '@/app/lib/schemas';
+
+async function fetchNFTData(apiKey, apiEndpoint, pageSize) {
+  if (apiKey === 'e280' || config.contractDetails[apiKey]?.disabled) {
+    return { holders: [], totalTokens: 0, totalBurned: 0, error: 'Contract not deployed' };
+  }
+
+  const endpoint = apiEndpoint.startsWith('http')
+    ? apiEndpoint
+    : `${process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3000'}${apiEndpoint}`;
+
+  // Trigger cache update
+  const postRes = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ forceUpdate: false }),
+  });
+  if (!postRes.ok) throw new Error(`POST failed: ${postRes.status}`);
+
+  // Poll progress endpoint
+  const maxPollAttempts = 600;
+  const maxPollTime = 300000;
+  const startTime = Date.now();
+  let pollAttempts = 0;
+
+  while (pollAttempts < maxPollAttempts && Date.now() - startTime < maxPollTime) {
+    const progressRes = await fetch(`${endpoint}/progress`, { cache: 'no-store' });
+    if (!progressRes.ok) throw new Error(`Progress fetch failed: ${progressRes.status}`);
+    const progress = await progressRes.json();
+    const validation = HoldersResponseSchema.safeParse(progress);
+    if (!validation.success) throw new Error(`Invalid progress data: ${JSON.stringify(validation.error.errors)}`);
+
+    if (progress.phase === 'Completed') break;
+    if (progress.phase === 'Error') throw new Error(`Cache population failed: ${progress.error || 'Unknown error'}`);
+
+    await new Promise(resolve => setTimeout(resolve, config.alchemy.batchDelayMs));
+    pollAttempts++;
+  }
+
+  if (pollAttempts >= maxPollAttempts || Date.now() - startTime >= maxPollTime) {
+    throw new Error('Cache population timed out');
+  }
+
+  // Fetch data
+  let allHolders = [];
+  let totalTokens = 0;
+  let totalBurned = 0;
+  let summary = {};
+  let page = 0;
+  let totalPages = Infinity;
+
+  while (page < totalPages) {
+    const url = `${endpoint}?page=${page}&pageSize=${pageSize}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`API request failed: ${res.status}`);
+    const json = await res.json();
+
+    const validation = HoldersResponseSchema.safeParse(json);
+    if (!validation.success) {
+      throw new Error(`Invalid holders schema: ${JSON.stringify(validation.error.errors)}`);
+    }
+
+    allHolders = allHolders.concat(json.holders);
+    totalTokens = json.totalTokens || json.summary?.totalLive || totalTokens;
+    totalBurned = json.totalBurned || totalBurned;
+    summary = json.summary || summary;
+    totalPages = json.totalPages || 1;
+    page++;
+  }
+
+  return { holders: allHolders, totalTokens, totalBurned, summary };
+}
+
+export function useNFTData(apiKey) {
+  const { getCache, setCache } = useNFTStore();
+
+  return useQuery({
+    queryKey: ['nft', apiKey],
+    queryFn: async () => {
+      const cachedData = getCache(apiKey);
+      if (cachedData) return cachedData;
+
+      try {
+        const { apiEndpoint, pageSize } = config.contractDetails[apiKey];
+        const data = await fetchNFTData(apiKey, apiEndpoint, pageSize);
+        setCache(apiKey, data);
+        return data;
+      } catch (error) {
+        return { holders: [], totalTokens: 0, totalBurned: 0, error: error.message };
+      }
+    },
+    enabled: !!apiKey && !!config.contractDetails[apiKey],
+    retry: config.alchemy.maxRetries,
+    retryDelay: attempt => config.alchemy.batchDelayMs * (attempt + 1),
+    staleTime: 5 * 60 * 1000,
+    onError: error => console.error(`[useNFTData] [ERROR] ${apiKey}: ${error.message}`),
+  });
+}
+----- contracts/abi.js -----
+
+// ./contracts/abi.js
+import staxNFT from '@/abi/staxNFT.json';
+import staxVault from '@/abi/staxVault.json';
+import element280NFT from '@/abi/element280.json';
+import element280Vault from '@/abi/element280Vault.json';
+import element369NFT from '@/abi/element369.json';
+import element369Vault from '@/abi/element369Vault.json';
+import ascendantNFT from '@/abi/ascendantNFT.json';
+
+// ABI function mappings for each collection
+const abiFunctions = {
+  stax: {
+    nft: staxNFT,
+    vault: staxVault,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account'],
+      outputs: ['availability', 'totalPayout'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'batchGetTokenData',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
+    },
+  },
+  element280: {
+    nft: element280NFT,
+    vault: element280Vault,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account'],
+      outputs: ['availability', 'totalReward'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'getBatchedTokensData',
+      contract: 'nft',
+      inputs: ['tokenIds', 'nftOwner'],
+      outputs: ['timestamps', 'multipliers'],
+    },
+  },
+  element369: {
+    nft: element369NFT,
+    vault: element369Vault,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account', 'isBacking'],
+      outputs: ['availability', 'burned', 'infernoPool', 'fluxPool', 'e280Pool'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'batchGetTokenData',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
+    },
+  },
+  ascendant: {
+    nft: ascendantNFT,
+    vault: null,
+    rewardFunction: {
+      name: 'batchClaimableAmount',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['toClaim'],
+    },
+    tierFunction: {
+      name: 'getNFTAttribute',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['attributes'], // Extract tier from attributes[1]
+    },
+    batchTokenData: null, // Ascendant doesn't support batch token data
+  },
+  e280: {
+    nft: null,
+    vault: null,
+    rewardFunction: null,
+    tierFunction: null,
+    batchTokenData: null,
+  },
+};
+
+// Common ABI functions
+export const commonFunctions = {
+  totalSupply: {
+    name: 'totalSupply',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+  totalBurned: {
+    name: 'totalBurned',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+  ownerOf: {
+    name: 'ownerOf',
+    contract: 'nft',
+    inputs: ['tokenId'],
+    outputs: ['owner'],
+  },
+  tokenId: {
+    name: 'tokenId',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+};
+
+// Validate ABIs at startup
+Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFunction }]) => {
+  if (key === 'e280') return; // Skip disabled
+  if (!nft) throw new Error(`Missing NFT ABI for ${key}`);
+  if (key !== 'ascendant' && !vault) throw new Error(`Missing vault ABI for ${key}`);
+  if (!rewardFunction) throw new Error(`Missing reward function for ${key}`);
+  if (!tierFunction) throw new Error(`Missing tier function for ${key}`);
+  if (key !== 'ascendant' && !nft.find(f => f.name === commonFunctions.totalSupply.name)) {
+    throw new Error(`Missing totalSupply for ${key}`);
+  }
+  if (key === 'ascendant' && !nft.find(f => f.name === commonFunctions.tokenId.name)) {
+    throw new Error(`Missing tokenId for ${key}`);
+  }
+  if (!nft.find(f => f.name === commonFunctions.ownerOf.name)) {
+    throw new Error(`Missing ownerOf for ${key}`);
+  }
+});
+
+// Utility functions
+export function getContractAbi(contractKey, contractType = 'nft') {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection[contractType] || null;
+}
+
+export function getRewardFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.rewardFunction || null;
+}
+
+export function getTierFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.tierFunction || null;
+}
+
+export function getBatchTokenDataFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.batchTokenData || null;
+}
+
+export const abis = {
+  stax: { nft: staxNFT, vault: staxVault },
+  element280: { nft: element280NFT, vault: element280Vault },
+  element369: { nft: element369NFT, vault: element369Vault },
+  ascendant: { nft: ascendantNFT, vault: null },
+  e280: { nft: null, vault: null },
+};
+----- contracts/config.js -----
+
+// ./contracts/config.js
+import { abis } from './abi.js';
+
+// Centralized contract configurations
+const nftContracts = {
+  element280: {
+    name: 'Element 280',
+    symbol: 'ELMNT',
+    chain: 'ETH',
+    contractAddress: '0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9',
+    vaultAddress: '0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97',
+    deploymentBlock: '20945304',
+    totalMinted: 16883,
+    abi: abis.element280.nft,
+    tiers: {
+      1: { name: 'Common', multiplier: 10, allocation: '100000000000000000000000000' },
+      2: { name: 'Common Amped', multiplier: 12, allocation: '100000000000000000000000000' },
+      3: { name: 'Rare', multiplier: 100, allocation: '1000000000000000000000000000' },
+      4: { name: 'Rare Amped', multiplier: 120, allocation: '1000000000000000000000000000' },
+      5: { name: 'Legendary', multiplier: 1000, allocation: '10000000000000000000000000000' },
+      6: { name: 'Legendary Amped', multiplier: 1200, allocation: '10000000000000000000000000000' },
+    },
+    description: 'Element 280 NFTs can be minted with TitanX or ETH during a presale and redeemed for Element 280 tokens after a cooldown period. Multipliers contribute to a pool used for reward calculations.',
+    maxTokensPerOwnerQuery: 100,
+  },
+  element369: {
+    name: 'Element 369',
+    symbol: 'E369',
+    chain: 'ETH',
+    contractAddress: '0x024D64E2F65747d8bB02dFb852702D588A062575',
+    vaultAddress: '0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5',
+    deploymentBlock: '21224418',
+    abi: abis.element369.nft,
+    tiers: {
+      1: { name: 'Common', multiplier: 1, price: '100000000000000000000000000' },
+      2: { name: 'Rare', multiplier: 10, price: '1000000000000000000000000000' },
+      3: { name: 'Legendary', multiplier: 100, price: '10000000000000000000000000000' },
+    },
+    description: 'Element 369 NFTs are minted with TitanX or ETH during specific sale cycles. Burning NFTs updates a multiplier pool and tracks burn cycles for reward distribution in the Holder Vault.',
+  },
+  stax: {
+    name: 'Stax',
+    symbol: 'STAX',
+    chain: 'ETH',
+    contractAddress: '0x74270Ca3a274B4dbf26be319A55188690CACE6E1',
+    vaultAddress: '0x5D27813C32dD705404d1A78c9444dAb523331717',
+    deploymentBlock: '21452667',
+    totalMinted: 503,
+    abi: abis.stax.nft,
+    tiers: {
+      1: { name: 'Common', multiplier: 1, price: '100000000000000000000000000' },
+      2: { name: 'Common Amped', multiplier: 1.2, price: '100000000000000000000000000', amplifier: '10000000000000000000000000' },
+      3: { name: 'Common Super', multiplier: 1.4, price: '100000000000000000000000000', amplifier: '20000000000000000000000000' },
+      4: { name: 'Common LFG', multiplier: 2, price: '100000000000000000000000000', amplifier: '50000000000000000000000000' },
+      5: { name: 'Rare', multiplier: 10, price: '1000000000000000000000000000' },
+      6: { name: 'Rare Amped', multiplier: 12, price: '1000000000000000000000000000', amplifier: '100000000000000000000000000' },
+      7: { name: 'Rare Super', multiplier: 14, price: '1000000000000000000000000000', amplifier: '200000000000000000000000000' },
+      8: { name: 'Rare LFG', multiplier: 20, price: '1000000000000000000000000000', amplifier: '500000000000000000000000000' },
+      9: { name: 'Legendary', multiplier: 100, price: '10000000000000000000000000000' },
+      10: { name: 'Legendary Amped', multiplier: 120, price: '10000000000000000000000000000', amplifier: '1000000000000000000000000000' },
+      11: { name: 'Legendary Super', multiplier: 140, price: '10000000000000000000000000000', amplifier: '2000000000000000000000000000' },
+      12: { name: 'Legendary LFG', multiplier: 200, price: '10000000000000000000000000000', amplifier: '5000000000000000000000000000' },
+    },
+    description: 'Stax NFTs are minted with TitanX or ETH during a presale. Burning NFTs after a cooldown period claims backing rewards, with multipliers contributing to a pool for cycle-based reward calculations.',
+  },
+  ascendant: {
+    name: 'Ascendant',
+    symbol: 'ASCNFT',
+    chain: 'ETH',
+    contractAddress: '0x9da95c32c5869c84ba2c020b5e87329ec0adc97f',
+    vaultAddress: null,
+    deploymentBlock: '21112535',
+    abi: abis.ascendant.nft,
+    tiers: {
+      1: { name: 'Tier 1', price: '7812500000000000000000', multiplier: 1.01 },
+      2: { name: 'Tier 2', price: '15625000000000000000000', multiplier: 1.02 },
+      3: { name: 'Tier 3', price: '31250000000000000000000', multiplier: 1.03 },
+      4: { name: 'Tier 4', price: '62500000000000000000000', multiplier: 1.04 },
+      5: { name: 'Tier 5', price: '125000000000000000000000', multiplier: 1.05 },
+      6: { name: 'Tier 6', price: '250000000000000000000000', multiplier: 1.06 },
+      7: { name: 'Tier 7', price: '500000000000000000000000', multiplier: 1.07 },
+      8: { name: 'Tier 8', price: '1000000000000000000000000', multiplier: 1.08 },
+    },
+    description: 'Ascendant NFTs are minted with ASCENDANT tokens and offer staking rewards from DragonX pools over 8, 28, and 90-day periods. Features fusion mechanics to combine same-tier NFTs into higher tiers.',
+    maxTokensPerOwnerQuery: 1000,
+  },
+  e280: {
+    name: 'E280',
+    symbol: 'E280',
+    chain: 'BASE',
+    contractAddress: null,
+    vaultAddress: null,
+    deploymentBlock: null,
+    abi: null,
+    tiers: {},
+    description: 'E280 NFTs on BASE chain. Contract not yet deployed.',
+    disabled: true,
+  },
+};
+
+// Tier order configurations
+const contractTiers = {
+  element280: {
+    tierOrder: [
+      { tierId: '6', name: 'Legendary Amped' },
+      { tierId: '5', name: 'Legendary' },
+      { tierId: '4', name: 'Rare Amped' },
+      { tierId: '3', name: 'Rare' },
+      { tierId: '2', name: 'Common Amped' },
+      { tierId: '1', name: 'Common' },
+    ],
+  },
+  element369: {
+    tierOrder: [
+      { tierId: '3', name: 'Legendary' },
+      { tierId: '2', name: 'Rare' },
+      { tierId: '1', name: 'Common' },
+    ],
+  },
+  stax: {
+    tierOrder: [
+      { tierId: '12', name: 'Legendary LFG' },
+      { tierId: '11', name: 'Legendary Super' },
+      { tierId: '10', name: 'Legendary Amped' },
+      { tierId: '9', name: 'Legendary' },
+      { tierId: '8', name: 'Rare LFG' },
+      { tierId: '7', name: 'Rare Super' },
+      { tierId: '6', name: 'Rare Amped' },
+      { tierId: '5', name: 'Rare' },
+      { tierId: '4', name: 'Common LFG' },
+      { tierId: '3', name: 'Common Super' },
+      { tierId: '2', name: 'Common Amped' },
+      { tierId: '1', name: 'Common' },
+    ],
+  },
+  ascendant: {
+    tierOrder: [
+      { tierId: '8', name: 'Tier 8' },
+      { tierId: '7', name: 'Tier 7' },
+      { tierId: '6', name: 'Tier 6' },
+      { tierId: '5', name: 'Tier 5' },
+      { tierId: '4', name: 'Tier 4' },
+      { tierId: '3', name: 'Tier 3' },
+      { tierId: '2', name: 'Tier 2' },
+      { tierId: '1', name: 'Tier 1' },
+    ],
+  },
+  e280: { tierOrder: [] },
+};
+
+// Contract details for API endpoints
+const contractDetails = {
+  element280: {
+    name: 'Element 280',
+    chain: 'ETH',
+    pageSize: 100,
+    apiEndpoint: '/api/holders/Element280',
+    rewardToken: 'ELMNT',
+  },
+  element369: {
+    name: 'Element 369',
+    chain: 'ETH',
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Element369',
+    rewardToken: 'INFERNO/FLUX/E280',
+  },
+  stax: {
+    name: 'Stax',
+    chain: 'ETH',
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Stax',
+    rewardToken: 'X28',
+  },
+  ascendant: {
+    name: 'Ascendant',
+    chain: 'ETH',
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/Ascendant',
+    rewardToken: 'DRAGONX',
+  },
+  e280: {
+    name: 'E280',
+    chain: 'BASE',
+    pageSize: 1000,
+    apiEndpoint: '/api/holders/E280',
+    rewardToken: 'E280',
+    disabled: true,
+  },
+};
+
+// Main configuration object
+const config = {
+  // Supported blockchain networks
+  supportedChains: ['ETH', 'BASE'],
+
+  // ABI definitions for contracts
+  abis,
+
+  // Contract configurations
+  nftContracts,
+
+  // Derived contract addresses (avoids duplication)
+  getContractAddresses: () => Object.keys(nftContracts).reduce((acc, key) => ({
+    ...acc,
+    [key]: { chain: nftContracts[key].chain, address: nftContracts[key].contractAddress },
+  }), {}),
+
+  // Derived vault addresses
+  getVaultAddresses: () => Object.keys(nftContracts).reduce((acc, key) => ({
+    ...acc,
+    [key]: { chain: nftContracts[key].chain, address: nftContracts[key].vaultAddress },
+  }), {}),
+
+  // Derived deployment blocks
+  getDeploymentBlocks: () => Object.keys(nftContracts).reduce((acc, key) => ({
+    ...acc,
+    [key]: { chain: nftContracts[key].chain, block: nftContracts[key].deploymentBlock },
+  }), {}),
+
+  // Tier order configurations
+  contractTiers,
+
+  // Contract details for API endpoints
+  contractDetails,
+
+  // Utility to get contract details by name
+  getContractDetails: (contractName) => contractDetails[contractName.toLowerCase()] || null,
+
+  // Alchemy API settings
+  alchemy: {
+    apiKey: process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
+    network: process.env.ALCHEMY_NETWORK || 'eth-mainnet',
+    batchSize: 50,
+    batchDelayMs: 1000, // Increased to avoid rate limits
+    retryMaxDelayMs: 10000,
+    maxRetries: 3, // Increased for reliability
+    timeoutMs: 30000,
+  },
+
+  // Cache settings for Redis and NodeCache
+  cache: {
+    redis: {
+      disableElement280: process.env.DISABLE_ELEMENT280_REDIS === 'true',
+      disableElement369: process.env.DISABLE_ELEMENT369_REDIS === 'true',
+      disableStax: process.env.DISABLE_STAX_REDIS === 'true',
+      disableAscendant: process.env.DISABLE_ASCENDANT_REDIS === 'true',
+      disableE280: process.env.DISABLE_E280_REDIS === 'true' || true,
+    },
+    nodeCache: {
+      stdTTL: 86400, // 24 hours for tier cache persistence
+      checkperiod: 120,
+    },
+    blockThreshold: 1000, 
+  },
+
+  // Debug settings
+  debug: {
+    enabled: process.env.DEBUG === 'true',
+    logLevel: 'info',
+    suppressDebug: false, // Enable debug logs for troubleshooting
+  },
+
+  // Fallback data settings
+  fallbackData: {
+    element280: process.env.USE_FALLBACK_DATA === 'true' ? null : null,
+  },
+
+  // Burn address for NFTs
+  burnAddress: '0x0000000000000000000000000000000000000000',
+
+  // Validate contract configurations at startup
+  validateContracts: () => {
+    Object.entries(nftContracts).forEach(([key, contract]) => {
+      if (!contract.disabled) {
+        if (!contract.contractAddress) {
+          throw new Error(`Missing contractAddress for ${key}`);
+        }
+        if (!Array.isArray(contract.abi)) {
+          console.error(`ABI for ${key}:`, contract.abi);
+          throw new Error(`Invalid or missing ABI for ${key}: expected array, got ${typeof contract.abi}`);
+        }
+        // Match route.js requiredFunctions
+        const requiredFunctions = key === 'ascendant'
+          ? ['getNFTAttribute', 'userRecords', 'totalShares', 'toDistribute', 'batchClaimableAmount']
+          : ['totalSupply', 'totalBurned', 'ownerOf', 'getNftTier'];
+        const missingFunctions = requiredFunctions.filter(fn => 
+          !contract.abi.some(item => item.name === fn && item.type === 'function')
+        );
+        if (missingFunctions.length > 0) {
+          throw new Error(`ABI for ${key} missing required functions: ${missingFunctions.join(', ')}`);
+        }
+      }
+    });
+  },
+};
+
+// Validate config at startup
+try {
+  config.validateContracts();
+  console.log('Config validation passed:', {
+    contracts: Object.keys(config.nftContracts),
+    element280TotalMinted: config.nftContracts.element280.totalMinted,
+    staxTotalMinted: config.nftContracts.stax.totalMinted,
+    element280Abi: Array.isArray(config.nftContracts.element280.abi) ? `array (${config.nftContracts.element280.abi.length} items)` : 'invalid',
+    staxAbi: Array.isArray(config.nftContracts.stax.abi) ? `array (${config.nftContracts.stax.abi.length} items)` : 'invalid',
+  });
+} catch (error) {
+  console.error('Config validation failed:', error.message);
+  throw error;
+}
+
+export default config;
+----- contracts/contracts.js -----
+
+// All contracts should reside in here
+// app/token_contracts.js
+import { getAddress } from 'viem';
+
+// Import ABIs from abi directory
+import ascendantAuctionABI from '../abi/ascendantAuction.json' with { type: 'json' };
+import blazeAuctionABI from '../abi/blazeAuction.json' with { type: 'json' };
+import flareAuctionABI from '../abi/flareAuction.json' with { type: 'json' };;
+import flareMintingABI from '../abi/flareMinting.json' with { type: 'json' };;
+import fluxAuctionABI from '../abi/fluxAuction.json' with { type: 'json' };;
+import goatXAuctionABI from '../abi/goatXAuction.json' with { type: 'json' };;
+import matrixAuctionABI from '../abi/matrixAuction.json' with { type: 'json' };;
+import phoenixAuctionABI from '../abi/phoenixAuction.json' with { type: 'json' };;
+import shogunAuctionABI from '../abi/shogunAuction.json' with { type: 'json' };;
+import voltAuctionABI from '../abi/voltAuction.json' with { type: 'json' };;
+import vyperBoostAuctionABI from '../abi/vyperBoostAuction.json' with { type: 'json' };;
+import vyperClassicAuctionABI from '../abi/vyperClassicAuction.json' with { type: 'json' };;
+
+// Define raw contracts with validated addresses
+const rawContracts = {
+  // Ascendant
+  ASCENDANT: {
+    name: 'Ascendant Token',
+    address: getAddress('0x0943D06A5Ff3B25ddC51642717680c105AD63c01'),
+    chainId: 1,
+    type: 'token',
+  },
+  ASCENDANT_AUCTION: {
+    name: 'Ascendant Auction',
+    address: getAddress('0x592daEb53eB1cef8aa96305588310E997ec58c0c'),
+    chainId: 1,
+    type: 'auction',
+    abi: ascendantAuctionABI,
+  },
+  ASCENDANT_BUY_AND_BURN: {
+    name: 'Ascendant Buy and Burn',
+    address: getAddress('0x27D21C4Fa62F063B5f005c5BD87cffEa62e348D1'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  ASCENDANT_DRAGONX: {
+    name: 'ASCENDANT/DRAGONX Pool',
+    address: getAddress('0xe8cC60F526bec8C663C6eEc5A65eFAe9d89Ee6aD'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  ASCENDANT_NFT_MARKETPLACE: {
+    name: 'Ascendant NFT Marketplace',
+    address: getAddress('0x2a7156295E85991A3861e2FAB09Eef6AcAC94717'),
+    chainId: 1,
+    type: 'marketplace',
+  },
+  ASCENDANT_NFT_MINTING: {
+    name: 'Ascendant NFT Minting',
+    address: getAddress('0x9dA95C32C5869c84Ba2C020B5e87329eC0aDC97f'),
+    chainId: 1,
+    type: 'minting',
+  },
+  ASCENDANT_PRIDE: {
+    name: 'Ascendant Pride',
+    address: getAddress('0x1B7C257ee2D1f30E1be2F90968258F13eD961c82'),
+    chainId: 1,
+    type: 'special',
+  },
+
+  // Blaze
+  BLAZE: {
+    name: 'Blaze Token',
+    address: getAddress('0xfcd7cceE4071aA4ecFAC1683b7CC0aFeCAF42A36'),
+    chainId: 1,
+    type: 'token',
+  },
+  BLAZE_AUCTION: {
+    name: 'Blaze Auction',
+    address: getAddress('0x200ed69de20Fe522d08dF5d7CE3d69aba4e02e74'),
+    chainId: 1,
+    type: 'auction',
+    abi: blazeAuctionABI,
+  },
+  BLAZE_BONFIRE: {
+    name: 'Blaze Bonfire',
+    address: getAddress('0x72AB9dcAc1BE635e83D0E458D2aA1FbF439B44f7'),
+    chainId: 1,
+    type: 'bonfire',
+  },
+  BLAZE_BUY_AND_BURN: {
+    name: 'Blaze Buy and Burn',
+    address: getAddress('0x27D80441831252950C528343a4F5CcC6b1E0EA95'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  BLAZE_STAKING: {
+    name: 'Blaze Staking',
+    address: getAddress('0xBc0043bc5b0c394D9d05d49768f9548F8CF9587b'),
+    chainId: 1,
+    type: 'staking',
+  },
+  BLAZE_TITANX: {
+    name: 'BLAZE/TITANX Pool',
+    address: getAddress('0x4D3A10d4792Dd12ececc5F3034C8e264B28485d1'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+
+  // Bonfire
+  BONFIRE: {
+    name: 'Bonfire Token',
+    address: getAddress('0x7d51174B02b6242D7b4510Cd988d24bC39d026c3'),
+    chainId: 1,
+    type: 'token',
+  },
+  BONFIRE_BUY_AND_BURN: {
+    name: 'Bonfire Buy and Burn',
+    address: getAddress('0xe871fEB86093809F1c9555a83B292419BB23F699'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  BONFIRE_X28: {
+    name: 'BONFIRE/X28 Pool',
+    address: getAddress('0x2DF1230D9Bd024A9d4EdB53336165Eb27AaBc7Fd'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // DragonX
+  DRAGONX: {
+    name: 'DragonX Token',
+    address: getAddress('0x96a5399D07896f757Bd4c6eF56461F58DB951862'),
+    chainId: 1,
+    type: 'token',
+  },
+  DRAGONX_BURN_PROXY: {
+    name: 'DragonX Burn Proxy',
+    address: getAddress('0x1d59429571d8Fde785F45bf593E94F2Da6072Edb'),
+    chainId: 1,
+    type: 'proxy',
+  },
+  DRAGONX_BUY_AND_BURN: {
+    name: 'DragonX Buy and Burn',
+    address: getAddress('0x1A4330EAf13869D15014abcA69516FC6AB36E54D'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  DRAGONX_BUY_TITANS: {
+    name: 'DragonX Buy Titans',
+    address: getAddress('0x1A4330EAf13869D15014abcA69516FC6AB36E54D'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  DRAGONX_HYBRID: {
+    name: 'DragonX Hybrid',
+    address: getAddress('0x619321771d67d9D8e69A3503683FcBa0678D2eF3'),
+    chainId: 1,
+    type: 'hybrid',
+  },
+  DRAGONX_TITANX: {
+    name: 'DRAGONX/TITANX Pool',
+    address: getAddress('0x25215d9ba4403b3DA77ce50606b54577a71b7895'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // E280
+  E280_BASE: {
+    name: 'E280 Token (Base)',
+    address: getAddress('0x058E7b30200d001130232e8fBfDF900590E0bAA9'),
+    chainId: 8453,
+    type: 'token',
+  },
+  E280_ETH: {
+    name: 'E280 Token (Ethereum)',
+    address: getAddress('0x058E7b30200d001130232e8fBfDF900590E0bAA9'),
+    chainId: 1,
+    type: 'token',
+  },
+  E280_BUY_AND_BURN: {
+    name: 'E280 Buy and Burn',
+    address: getAddress('0x6E83D86841C70CCA0f16bf653A22899d06935Ee2'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  E280_LP_DEPOSITOR: {
+    name: 'E280 LP Depositor',
+    address: getAddress('0xB302fbF6c9836557371a79012b540303Cc758BB3'),
+    chainId: 1,
+    type: 'depositor',
+  },
+  E280_REWARD_DEPOSITOR: {
+    name: 'E280 Reward Depositor',
+    address: getAddress('0xD8f842150511e8F501050E8a4c6878104312d82C'),
+    chainId: 1,
+    type: 'depositor',
+  },
+  E280_TAX_DEPOSITOR: {
+    name: 'E280 Tax Depositor',
+    address: getAddress('0x55F643B0B7b8d8B824c2b33eC392023AbefF0a52'),
+    chainId: 1,
+    type: 'depositor',
+  },
+  E280_TAX_DISTRIBUTOR: {
+    name: 'E280 Tax Distributor',
+    address: getAddress('0x1b25cc7461a9EE4a4c8f9dA82c828D8a39ea73e4'),
+    chainId: 1,
+    type: 'distributor',
+  },
+  STAX_ELEMENT280: {
+    name: 'STAX/ELEMENT280 Pool',
+    address: getAddress('0x190BD81780e46124245d39774776be939bB8595B'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+
+  // Eden
+  EDEN: {
+    name: 'Eden Token',
+    address: getAddress('0x31b2c59d760058cfe57e59472E7542f776d987FB'),
+    chainId: 1,
+    type: 'token',
+  },
+  EDEN_BLOOM_POOL: {
+    name: 'Eden Bloom Pool',
+    address: getAddress('0xe5Da018596D0e60d704b09d0E43734266e280e05'),
+    chainId: 1,
+    type: 'pool',
+  },
+  EDEN_BUY_AND_BURN: {
+    name: 'Eden Buy and Burn',
+    address: getAddress('0x1681EB21026104Fa63121fD517e065cEc21A4b4C'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  EDEN_MINING: {
+    name: 'Eden Mining',
+    address: getAddress('0x890B015ECA83a6CA03b436a748969976502B7c0c'),
+    chainId: 1,
+    type: 'mining',
+  },
+  EDEN_STAKING: {
+    name: 'Eden Staking',
+    address: getAddress('0x32C611b0a96789BaA3d6bF9F0867b7E1b9d049Be'),
+    chainId: 1,
+    type: 'staking',
+  },
+
+  // Element
+  ELEMENT: {
+    name: 'Element Token',
+    address: getAddress('0xe9A53C43a0B58706e67341C4055de861e29Ee943'),
+    chainId: 1,
+    type: 'token',
+  },
+  ELEMENT_BUY_AND_BURN: {
+    name: 'Element Buy and Burn',
+    address: getAddress('0x3F2b113d180ecb1457e450b9EfcAC3df1Dd29AD3'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  ELEMENT_BUY_AND_BURN_V2: {
+    name: 'Element Buy and Burn V2',
+    address: getAddress('0x88BB363b333a6291Cf7CF5931eFe7a1E2D978325'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  ELEMENT_HOLDER_VAULT: {
+    name: 'Element Holder Vault',
+    address: getAddress('0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97'),
+    chainId: 1,
+    type: 'vault',
+  },
+  ELEMENT_NFT: {
+    name: 'Element NFT',
+    address: getAddress('0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9'),
+    chainId: 1,
+    type: 'nft',
+  },
+
+  // Element369
+  ELEMENT369_FLUX_HUB: {
+    name: 'Element369 Flux Hub',
+    address: getAddress('0x6067487ee98B6A830cc3E5E7F57Dc194044D1F1D'),
+    chainId: 1,
+    type: 'hub',
+  },
+  ELEMENT369_HOLDER_VAULT: {
+    name: 'Element369 Holder Vault',
+    address: getAddress('0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5'),
+    chainId: 1,
+    type: 'vault',
+  },
+  ELEMENT369_NFT: {
+    name: 'Element369 NFT',
+    address: getAddress('0x024D64E2F65747d8bB02dFB852702D588A062575'),
+    chainId: 1,
+    type: 'nft',
+  },
+
+  // Flare
+  FLARE: {
+    name: 'Flare Token',
+    address: getAddress('0x34a4FE5397bf2768189EDe14FE4adAD374B993B8'),
+    chainId: 1,
+    type: 'token',
+  },
+  FLARE_AUCTION: {
+    name: 'Flare Auction',
+    address: getAddress('0x58ad6EF28bFB092635454d02303aBBd4D87b503c'),
+    chainId: 1,
+    type: 'auction',
+    abi: flareAuctionABI,
+  },
+  FLARE_AUCTION_BUY_AND_BURN: {
+    name: 'Flare Auction Buy and Burn',
+    address: getAddress('0x17d8258eC7fA1EfC9CA4c6C15f3417bF30564048'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  FLARE_AUCTION_TREASURY: {
+    name: 'Flare Auction Treasury',
+    address: getAddress('0x744D402674006f2711a3D6E4a80cc749C7915545'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  FLARE_BUY_AND_BURN: {
+    name: 'Flare Buy and Burn',
+    address: getAddress('0x6A12392C7dc5ddAA7d59007B329BFED35af092E6'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  FLARE_MINTING: {
+    name: 'Flare Minting',
+    address: getAddress('0x9983eF6Af4DE8fE58C45f6DC54Cf5Ad349431A82'),
+    chainId: 1,
+    type: 'minting',
+    abi: flareMintingABI,
+  },
+  FLARE_X28: {
+    name: 'FLARE/X28 Pool',
+    address: getAddress('0x05b7Cc21A11354778Cf0D7faf159f1a99724ccFd'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+
+  // Flux
+  FLUX: {
+    name: 'Flux Token',
+    address: getAddress('0xBFDE5ac4f5Adb419A931a5bF64B0f3BB5a623d06'),
+    chainId: 1,
+    type: 'token',
+  },
+  FLUX_777: {
+    name: 'Flux 777',
+    address: getAddress('0x52ca28e311f200d1CD47C06996063e14eC2d6aB1'),
+    chainId: 1,
+    type: 'special',
+  },
+  FLUX_AUCTION: {
+    name: 'Flux Auction',
+    address: getAddress('0x36e5a8105f000029d4B3B99d0C3D0e24aaA52adF'),
+    chainId: 1,
+    type: 'auction',
+    abi: fluxAuctionABI,
+  },
+  FLUX_BUY_AND_BURN: {
+    name: 'Flux Buy and Burn',
+    address: getAddress('0xaE14148F726E7C3AA5C0c992D044bE113b32292C'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  FLUX_STAKING: {
+    name: 'Flux Staking',
+    address: getAddress('0xd605a87187563C94c577a6E57e4a36eC8433B9aE'),
+    chainId: 1,
+    type: 'staking',
+  },
+  FLUX_TITANX: {
+    name: 'FLUX/TITANX Pool',
+    address: getAddress('0x2278012E61c0fB38DaE1579bD41a87A59A5954c2'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // GoatX
+  GOATX: {
+    name: 'GoatX Token',
+    address: getAddress('0x4Eca7761a516F8300711cbF920C0b85555261993'),
+    chainId: 1,
+    type: 'token',
+  },
+  GOATX_AUCTION: {
+    name: 'GoatX Auction',
+    address: getAddress('0x059511B0BED706276Fa98877bd00ee0dD7303D32'),
+    chainId: 1,
+    type: 'auction',
+    abi: goatXAuctionABI,
+  },
+  GOATX_BUY_AND_BURN: {
+    name: 'GoatX Buy and Burn',
+    address: getAddress('0xE6Cf4Cb42A6c37729c4546b4B9E83b97a05cE950'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  GOATX_MINING: {
+    name: 'GoatX Mining',
+    address: getAddress('0x4E83d6911bc1E191Bd207920737149B8FC060c8D'),
+    chainId: 1,
+    type: 'mining',
+  },
+
+  // Helios
+  HELIOS: {
+    name: 'Helios Token',
+    address: getAddress('0x2614f29C39dE46468A921Fd0b41fdd99A01f2EDf'),
+    chainId: 1,
+    type: 'token',
+  },
+  HELIOS_BUY_AND_BURN: {
+    name: 'Helios Buy and Burn',
+    address: getAddress('0x9bff9f810d19cdb4bf7701c9d5ad101e91cda08d'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  HELIOS_TITANX: {
+    name: 'HELIOS/TITANX Pool',
+    address: getAddress('0x2C83C54C5612BfD62a78124D4A0eA001278a689c'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // Hyper
+  HYPER: {
+    name: 'Hyper Token',
+    address: getAddress('0xE2cfD7a01ec63875cd9Da6C7c1B7025166c2fA2F'),
+    chainId: 1,
+    type: 'token',
+  },
+  HYPER_BUY_AND_BURN: {
+    name: 'Hyper Buy and Burn',
+    address: getAddress('0x15Bec83b642217814dDAeB6F8A74ba7E0D6D157E'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  HYPER_TITANX: {
+    name: 'HYPER/TITANX Pool',
+    address: getAddress('0x14d725edB1299fF560d96f42462f0234B65B00AF'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // Hydra
+  HYDRA: {
+    name: 'Hydra Token',
+    address: getAddress('0xCC7ed2ab6c3396DdBc4316D2d7C1b59ff9d2091F'),
+    chainId: 1,
+    type: 'token',
+  },
+  HYDRA_BUY_AND_BURN: {
+    name: 'Hydra Buy and Burn',
+    address: getAddress('0xfEF10De0823F58DF4f5F24856aB4274EdeDa6A5c'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  HYDRA_DRAGONX: {
+    name: 'HYDRA/DRAGONX Pool',
+    address: getAddress('0xF8F0Ef9f6A12336A1e035adDDbD634F3B0962F54'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // Matrix
+  MATRIX: {
+    name: 'Matrix Token',
+    address: getAddress('0xF2Fc894381792Ded27a7f08D9F0F246363cBe1ea'),
+    chainId: 1,
+    type: 'token',
+  },
+  MATRIX_AUCTION: {
+    name: 'Matrix Auction',
+    address: getAddress('0x9f29E5b2d67C4a7315c5D6AbD448C45f9dD51CAF'),
+    chainId: 1,
+    type: 'auction',
+    abi: matrixAuctionABI,
+  },
+  MATRIX_BUY_AND_BURN: {
+    name: 'Matrix Buy and Burn',
+    address: getAddress('0x50371D550e1eaB5aeC08d2D79B77B14b79dCC57E'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  MATRIX_HYPER: {
+    name: 'MATRIX/HYPER Pool',
+    address: getAddress('0x9dA4aCd7d87e7396901d92671173296bf9845c53'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // ORX
+  ORX: {
+    name: 'ORX Token',
+    address: getAddress('0xd536e7a9543cf9867a580b45cec7f748a1fe11ec'),
+    chainId: 1,
+    type: 'token',
+  },
+  ORX_MINTER: {
+    name: 'ORX Minter',
+    address: getAddress('0x4C93D6380D22C44850Bdfa569Df5dD96e278622B'),
+    chainId: 1,
+    type: 'minter',
+  },
+  ORX_MULTISIG: {
+    name: 'ORX Multisig',
+    address: getAddress('0x54FDAcea0af4026306A665E9dAB635Ef5fF2963f'),
+    chainId: 1,
+    type: 'multisig',
+  },
+  ORX_STAKING: {
+    name: 'ORX Staking',
+    address: getAddress('0xE293DFD4720308c048B63AfE885F5971E135Eb1e'),
+    chainId: 1,
+    type: 'staking',
+  },
+  ORX_TITANX: {
+    name: 'ORX/TITANX Pool',
+    address: getAddress('0x2A216495584E406C39582d3ee583aEDA937beba6'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  USDX: {
+    name: 'USDx Stable',
+    address: getAddress('0xDDF73eAcB2218377FC38679aD14dfce51B651Dd1'),
+    chainId: 1,
+    type: 'stablecoin',
+  },
+
+  // Phoenix
+  PHOENIX: {
+    name: 'Phoenix Token',
+    address: getAddress('0xfe3F988a90dEa3eE537BB43eC1aCa7337A15D002'),
+    chainId: 1,
+    type: 'token',
+  },
+  PHOENIX_AUCTION: {
+    name: 'Phoenix Auction',
+    address: getAddress('0xF41b5c99b8B6b88cF1Bd0320cB57e562EaF17DE1'),
+    chainId: 1,
+    type: 'auction',
+    abi: phoenixAuctionABI,
+  },
+  PHOENIX_BLAZE_STAKING_VAULT: {
+    name: 'Phoenix Blaze Staking Vault',
+    address: getAddress('0xBbe51Ee30422cb9a92D93363d2921A330813b598'),
+    chainId: 1,
+    type: 'stakingVault',
+  },
+  PHOENIX_BUY_AND_BURN: {
+    name: 'Phoenix Buy and Burn',
+    address: getAddress('0x97eBd4f9FfCFE0cBC8F63A4e0B296FbB54f0a185'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  PHOENIX_FLUX_STAKING_VAULT: {
+    name: 'Phoenix Flux Staking Vault',
+    address: getAddress('0x3F1BFcd2a04a829ff4106217F8EB8eFa1C31e89b'),
+    chainId: 1,
+    type: 'stakingVault',
+  },
+  PHOENIX_MINTING: {
+    name: 'Phoenix Minting',
+    address: getAddress('0xAaE97688F2c28c3E391dFddC7B26276D8445B199'),
+    chainId: 1,
+    type: 'minting',
+  },
+  PHOENIX_TITANX_STAKING_VAULT: {
+    name: 'Phoenix TitanX Staking Vault',
+    address: getAddress('0x6B59b8E9635909B7f0FF2C577BB15c936f32619A'),
+    chainId: 1,
+    type: 'stakingVault',
+  },
+
+  // Shogun
+  SHOGUN: {
+    name: 'Shogun Token',
+    address: getAddress('0xfD4cB1294dF23920e683e046963117cAe6C807D9'),
+    chainId: 1,
+    type: 'token',
+  },
+  SHOGUN_AUCTION: {
+    name: 'Shogun Auction',
+    address: getAddress('0x79bd712f876c364Aa5e775A1eD40dE1fDfdB2a50'),
+    chainId: 1,
+    type: 'auction',
+    abi: shogunAuctionABI,
+  },
+  SHOGUN_BUY_AND_BURN: {
+    name: 'Shogun Buy and Burn',
+    address: getAddress('0xF53D4f2E79d66605aE7c2CAdc0A40A1e7CbE973A'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  SHOGUN_TITANX: {
+    name: 'SHOGUN/TITANX Pool',
+    address: getAddress('0x79bd712f876c364Aa5e775A1eD40dE1fDfdB2a50'),
+    chainId: 1,
+    type: 'uniswapV2Pool',
+  },
+
+  // Stax
+  STAX: {
+    name: 'Stax Token',
+    address: getAddress('0x4bd0F1886010253a18BBb401a788d8972c155b9d'),
+    chainId: 1,
+    type: 'token',
+  },
+  STAX_BANK: {
+    name: 'Stax Bank',
+    address: getAddress('0x1b15e269D07986F0b8751872C16D9F47e1582402'),
+    chainId: 1,
+    type: 'bank',
+  },
+  STAX_BLAZE: {
+    name: 'Stax Blaze',
+    address: getAddress('0x03a48BaadAe6A0474aDc6F39111428BaDbfb54D1'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_BUY_AND_BURN: {
+    name: 'Stax Buy and Burn',
+    address: getAddress('0x1698a3e248FF7F0f1f91FE82Eedaa3F1212D1F7F'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  STAX_EDEN: {
+    name: 'Stax Eden',
+    address: getAddress('0x5d91C1180f063c66DC0a08CE136AeC92B97f8F87'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_FLUX: {
+    name: 'Stax Flux',
+    address: getAddress('0xC3379750B254977f195BA60D096BBcCfe6b81ce8'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_HELIOS: {
+    name: 'Stax Helios',
+    address: getAddress('0xCd5fd72664f5A4dB62E44e9c778E9dAeB01F2bB2'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_HELIOS_V2: {
+    name: 'Stax Helios V2',
+    address: getAddress('0x3A50Cc9740DE6143c8d53Df44ece96Eeb07318E8'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_HOLDER_VAULT: {
+    name: 'Stax Holder Vault',
+    address: getAddress('0x5D27813C32dD705404d1A78c9444dAb523331717'),
+    chainId: 1,
+    type: 'vault',
+  },
+  STAX_HYPER: {
+    name: 'Stax Hyper',
+    address: getAddress('0xa23f149f10f415c56b1629Fe07bf94278c808271'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_NFT: {
+    name: 'Stax NFT',
+    address: getAddress('0x74270Ca3a274B4dbf26be319A55188690CACE6E1'),
+    chainId: 1,
+    type: 'nft',
+  },
+  STAX_ORX: {
+    name: 'Stax ORX',
+    address: getAddress('0xF1b7081Cab015ADB3c1B8D3A8732763dBc87B744'),
+    chainId: 1,
+    type: 'staking',
+  },
+  STAX_TITANX: {
+    name: 'Stax TitanX',
+    address: getAddress('0x802974Ea9362b46a6eeAb4431E030D17dF6613E8'),
+    chainId: 1,
+    type: 'staking',
+  },
+
+  // TitanX
+  TITANX: {
+    name: 'TitanX Token',
+    address: getAddress('0xF19308F923582A6f7c465e5CE7a9Dc1BEC6665B1'),
+    chainId: 1,
+    type: 'token',
+  },
+  TITANX_BUY_AND_BURN_V1: {
+    name: 'TitanX Buy and Burn V1',
+    address: getAddress('0x1393ad734EA3c52865b4B541cf049dafd25c23a5'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  TITANX_BUY_AND_BURN_V2: {
+    name: 'TitanX Buy and Burn V2',
+    address: getAddress('0x410e10C33a49279f78CB99c8d816F18D5e7D5404'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  TITANX_TREASURY: {
+    name: 'TitanX Treasury',
+    address: getAddress('0xA2d21205Aa7273BadDFC8E9551e05E23bB49ce46'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  TITANX_WETH: {
+    name: 'TITANX/WETH Pool',
+    address: getAddress('0xc45A81BC23A64eA556ab4CdF08A86B61cdcEEA8b'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // USDC
+  USDC: {
+    name: 'USDC Token',
+    address: getAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'),
+    chainId: 1,
+    type: 'stablecoin',
+  },
+
+  // Volt
+  VOLT: {
+    name: 'Volt Token',
+    address: getAddress('0x66b5228CfD34d9f4d9F03188d67816286C7c0b74'),
+    chainId: 1,
+    type: 'token',
+  },
+  VOLT_AUCTION: {
+    name: 'Volt Auction',
+    address: getAddress('0xb3f2bE29BA969588E07bF7512e07008D6fdeB17B'),
+    chainId: 1,
+    type: 'auction',
+    abi: voltAuctionABI,
+  },
+  VOLT_BUY_AND_BURN: {
+    name: 'Volt Buy and Burn',
+    address: getAddress('0x2801592e5Cdd85aC4e462DB2abC80951705cf601'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  VOLT_TITANX: {
+    name: 'VOLT/TITANX Pool',
+    address: getAddress('0x3F1A36B6C946E406f4295A89fF06a5c7d62F2fe2'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+  VOLT_TREASURY: {
+    name: 'Volt Treasury',
+    address: getAddress('0xb638BFB7BC3B8398bee48569CFDAA6B3Bb004224'),
+    chainId: 1,
+    type: 'treasury',
+  },
+
+  // Vyper
+  VYPER: {
+    name: 'Vyper Token',
+    address: getAddress('0xd7fa4cFC22eA07DfCeD53033fbE59d8b62B8Ee9E'),
+    chainId: 1,
+    type: 'token',
+  },
+  VYPER_BOOST_AUCTION: {
+    name: 'Vyper Boost Auction',
+    address: getAddress('0x4D994F53FE2d8BdBbF64dC2e53C58Df00b84e713'),
+    chainId: 1,
+    type: 'auction',
+    abi: vyperBoostAuctionABI,
+  },
+  VYPER_BOOST_TREASURY: {
+    name: 'Vyper Boost Treasury',
+    address: getAddress('0x637dfBB5db0cf7B4062cb577E24cfB43c67d72BA'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  VYPER_CLASSIC_AUCTION: {
+    name: 'Vyper Classic Auction',
+    address: getAddress('0xC1da113c983b26aa2c3f4fFD5f10b47457FC3397'),
+    chainId: 1,
+    type: 'auction',
+    abi: vyperClassicAuctionABI,
+  },
+  VYPER_CLASSIC_TREASURY: {
+    name: 'Vyper Classic Treasury',
+    address: getAddress('0xeb103eb39375077c5Afaa04150B4D334df69128A'),
+    chainId: 1,
+    type: 'treasury',
+  },
+  VYPER_DRAGONX: {
+    name: 'VYPER/DRAGONX Pool',
+    address: getAddress('0x214CAD3f7FbBe66919968Fa3a1b16E84cFcd457F'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // WETH
+  WETH: {
+    name: 'Wrapped Ether',
+    address: getAddress('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
+    chainId: 1,
+    type: 'token',
+  },
+
+  // WETH/USDC Pool
+  WETH_USDC: {
+    name: 'WETH/USDC Pool',
+    address: getAddress('0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+
+  // X28
+  X28: {
+    name: 'X28 Omnichain Token',
+    address: getAddress('0x5c47902c8C80779CB99235E42C354E53F38C3B0d'),
+    chainId: 1,
+    type: 'token',
+  },
+  X28_BUY_AND_BURN: {
+    name: 'X28 Buy and Burn',
+    address: getAddress('0xa3144E7FCceD79Ce6ff6E14AE9d8DF229417A7a2'),
+    chainId: 1,
+    type: 'buyAndBurn',
+  },
+  X28_TITANX: {
+    name: 'X28/TITANX Pool',
+    address: getAddress('0x99f60479da6A49D55eBA34893958cdAACc710eE9'),
+    chainId: 1,
+    type: 'uniswapV3Pool',
+  },
+};
+
+export const tokenContracts = rawContracts;
+
+export const flareTokenABI = [
+  {
+    type: 'function',
+    name: 'x28FlarePool',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+
+export const uniswapPoolABI = [
+  {
+    type: 'function',
+    name: 'slot0',
+    inputs: [],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'tick', type: 'int24' },
+      { name: 'observationIndex', type: 'uint16' },
+      { name: 'observationCardinality', type: 'uint16' },
+      { name: 'observationCardinalityNext', type: 'uint16' },
+      { name: 'feeProtocol', type: 'uint8' },
+      { name: 'unlocked', type: 'bool' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token0',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token1',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+
+export const uniswapV2PoolABI = [
+  {
+    type: 'function',
+    name: 'getReserves',
+    inputs: [],
+    outputs: [
+      { name: '_reserve0', type: 'uint112' },
+      { name: '_reserve1', type: 'uint112' },
+      { name: '_blockTimestampLast', type: 'uint32' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token0',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'token1',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+];
+----- scripts/test_E280_nft_holders.js -----
+
+#!/usr/bin/env node
+
+import { createPublicClient, http, getAddress, isAddress } from 'viem';
+import { mainnet } from 'viem/chains';
+import { Alchemy, Network } from 'alchemy-sdk';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs/promises';
+import pino from 'pino';
+
+// Resolve project root directory
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+
+// Load environment variables
+dotenv.config({ path: path.join(projectRoot, '.env.local') });
+
+// Pino logger configuration
+const logger = pino({
+  level: 'info',
+  transport: {
+    target: 'pino-pretty',
+    options: {
+      colorize: true,
+      translateTime: 'SYS:yyyy-mm-dd HH:MM:ss',
+      ignore: 'pid,hostname',
+    },
+  },
+});
+
+// Alchemy configuration
+const alchemyApiKey = process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+if (!alchemyApiKey) {
+  logger.error('[test] ALCHEMY_API_KEY is not set');
+  process.exit(1);
+}
+
+const alchemy = new Alchemy({
+  apiKey: alchemyApiKey,
+  network: Network.ETH_MAINNET,
+});
+
+// Multicall3 contract address
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+
+// Provider configuration
+const providers = [
+  {
+    name: 'Alchemy',
+    url: `https://eth-mainnet.g.alchemy.com/v2/${alchemyApiKey}`,
+    rateLimit: 10000,
+    requestCount: 0,
+    lastRequestTime: 0,
+  },
+];
+
+// Initialize client
+const clients = [
+  {
+    client: createPublicClient({
+      chain: mainnet,
+      transport: http(providers[0].url, { timeout: 60000 }),
+    }),
+    providerIndex: 0,
+  },
+];
+
+// Cache configuration
+const burnAddress = '0x0000000000000000000000000000000000000000';
+const CACHE_FILE = path.join(projectRoot, 'tier_cache.json');
+const CACHE_TTL = 1000 * 60 * 60;
+let inMemoryCache = {};
+
+// Select provider with rate limit checks
+async function selectProvider(context, operationType) {
+  const now = Date.now();
+  const provider = providers[0];
+  const client = clients[0].client;
+  const requestCost = operationType === 'batch' ? 25 : operationType === 'multicall' ? 26 : 1;
+
+  const timeSinceLast = (now - provider.lastRequestTime) / 1000;
+  if (timeSinceLast >= 1) {
+    provider.requestCount = 0;
+  }
+
+  if (provider.requestCount + requestCost > provider.rateLimit) {
+    logger.info(`[${context}] Rate limit near (${provider.requestCount}/${provider.rateLimit} CUs), waiting 300ms...`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return selectProvider(context, operationType);
+  }
+
+  provider.requestCount += requestCost;
+  provider.lastRequestTime = now;
+  return { provider, client };
+}
+
+// Retry function
+async function retry(operation, { retries = 5, delay = 500, backoff = true, timeout = 60000 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), timeout)),
+      ]);
+    } catch (error) {
+      lastError = error;
+      if (error.message.includes('429') && attempt === retries) {
+        logger.error(`[test/retry] Rate limit exceeded after ${retries} attempts`);
+        throw new Error('Rate limit exceeded');
+      }
+      logger.info(`[test/retry] Retry ${attempt}/${retries} failed: ${error.message}`);
+      const waitTime = backoff ? delay * Math.pow(2, attempt - 1) : delay;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(waitTime, 5000)));
+    }
+  }
+  throw lastError;
+}
+
+// Fetch burned and transferred tokens
+async function fetchDispositionEvents(context, client, contractAddress, startBlock, endBlock, batchSize = 10000) {
+  const cacheKey = `${contractAddress}-dispositions`;
+  const now = Date.now();
+  const cache = await loadCache();
+  let burnedAddresses = new Set(cache[cacheKey]?.burnedAddresses || []);
+  let transferredAddresses = new Set(cache[cacheKey]?.transferredAddresses || []);
+  const lastBlock = cache[cacheKey]?.lastBlock || startBlock - 1;
+
+  if (lastBlock >= endBlock && inMemoryCache[cacheKey] && now - inMemoryCache[cacheKey].timestamp < CACHE_TTL) {
+    logger.info(`[${context}] Returning cached disposition data for ${cacheKey}`);
+    return inMemoryCache[cacheKey].data;
+  }
+
+  const fromBlock = lastBlock + 1;
+  if (fromBlock > endBlock) {
+    logger.info(`[${context}] No new blocks to process (last: ${lastBlock}, end: ${endBlock})`);
+    return { burnedAddresses, transferredAddresses };
+  }
+
+  logger.info(`[${context}] Fetching disposition events from block ${fromBlock} to ${endBlock}`);
+  const endBlockNumber = Number(endBlock);
+  if (Number.isNaN(endBlockNumber) || endBlockNumber < fromBlock) {
+    throw new Error(`Invalid endBlock: ${endBlock}`);
+  }
+
+  const blockRanges = [];
+  for (let block = fromBlock; block <= endBlockNumber; block += batchSize) {
+    const toBlock = Math.min(block + batchSize - 1, endBlockNumber);
+    blockRanges.push({ fromBlock: block, toBlock });
+  }
+
+  const concurrencyLimit = 8;
+  for (let i = 0; i < blockRanges.length; i += concurrencyLimit) {
+    const batch = blockRanges.slice(i, i + concurrencyLimit);
+    await Promise.all(
+      batch.map(async ({ fromBlock, toBlock }) => {
+        try {
+          const logs = await retry(() =>
+            client.getLogs({
+              address: contractAddress,
+              event: {
+                type: 'event',
+                name: 'Transfer',
+                inputs: [
+                  { type: 'address', indexed: true, name: 'from' },
+                  { type: 'address', indexed: true, name: 'to' },
+                  { type: 'uint256', indexed: true, name: 'tokenId' },
+                ],
+              },
+              fromBlock: BigInt(fromBlock),
+              toBlock: BigInt(toBlock),
+            })
+          );
+          logs.forEach((log) => {
+            const fromAddr = log.args.from.toLowerCase();
+            const toAddr = log.args.to.toLowerCase();
+            if (toAddr === burnAddress.toLowerCase()) {
+              burnedAddresses.add(fromAddr);
+            } else if (fromAddr !== '0x0000000000000000000000000000000000000000') {
+              transferredAddresses.add(fromAddr);
+            }
+          });
+        } catch (error) {
+          logger.error(`[${context}] Failed to fetch transfers for blocks ${fromBlock}-${toBlock}: ${error.message}`);
+          if (error.message.includes('Log response size exceeded')) {
+            const smallerBatchSize = Math.floor(batchSize / 2);
+            if (smallerBatchSize < 1000) {
+              logger.error(`[${context}] Block range too small: ${smallerBatchSize}`);
+              return;
+            }
+            const subResult = await fetchDispositionEvents(
+              context,
+              client,
+              contractAddress,
+              fromBlock,
+              BigInt(Math.min(fromBlock + smallerBatchSize - 1, endBlockNumber)),
+              smallerBatchSize
+            );
+            subResult.burnedAddresses.forEach((addr) => burnedAddresses.add(addr));
+            subResult.transferredAddresses.forEach((addr) => transferredAddresses.add(addr));
+          }
+        }
+      })
+    );
+    const progress = Math.min(((i + batch.length) / blockRanges.length * 100), 100).toFixed(2);
+    logger.info(`[${context}] Disposition progress: ${progress}%`);
+    if (i + concurrencyLimit < blockRanges.length) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  const result = { burnedAddresses, transferredAddresses };
+  inMemoryCache[cacheKey] = { timestamp: now, data: result };
+  cache[cacheKey] = {
+    timestamp: now,
+    lastBlock: endBlock,
+    burnedAddresses: Array.from(burnedAddresses),
+    transferredAddresses: Array.from(transferredAddresses),
+    burnedCount: burnedAddresses.size,
+    transferredCount: transferredAddresses.size,
+  };
+  await saveCache(cache);
+  return result;
+}
+
+// Fetch owners using Alchemy SDK
+async function fetchOwnersAlchemy(contractAddress, contractKey) {
+  const context = `test/${contractKey}`;
+  try {
+    logger.info(`[${context}] Fetching owners for ${contractAddress} using Alchemy SDK`);
+    const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, { withTokenBalances: true });
+    logger.info(`[${context}] Owners progress: 100.00% (raw count: ${ownersResponse.owners.length})`);
+
+    const owners = [];
+    const tokenBalancesMap = new Map();
+    let burnedTokens = 0;
+    const nonExistentTokens = 0;
+    const nonExistentTokenIds = [];
+
+    const filteredOwners = ownersResponse.owners.filter(
+      (owner) => owner.ownerAddress.toLowerCase() !== burnAddress && owner.tokenBalances.length > 0
+    );
+    logger.info(`[${context}] Filtered live owners count: ${filteredOwners.length}`);
+
+    filteredOwners.forEach((owner) => {
+      const ownerAddress = owner.ownerAddress.toLowerCase();
+      const tokenBalances = owner.tokenBalances.map((tb) => ({
+        tokenId: tb.tokenId.toString(),
+      }));
+      if (ownerAddress === burnAddress.toLowerCase()) {
+        burnedTokens += tokenBalances.length;
+      }
+      tokenBalancesMap.set(ownerAddress, tokenBalances);
+      owners.push({ ownerAddress, tokenBalances });
+    });
+
+    logger.info(`[${context}] Owners completed: ${owners.length} owners, ${burnedTokens} burned, ${nonExistentTokens} non-existent`);
+    return { owners, burnedTokens, nonExistentTokens, nonExistentTokenIds, lastProcessedBlock: null };
+  } catch (error) {
+    logger.error(`[${context}] Failed to fetch owners: ${error.message}`, { stack: error.stack });
+    throw error;
+  }
+}
+
+// Cache functions
+async function resetCache() {
+  try {
+    await fs.unlink(CACHE_FILE).catch(() => {});
+    await fs.writeFile(CACHE_FILE, JSON.stringify({}));
+    inMemoryCache = {};
+    logger.info('[test] Initialized cache');
+  } catch (error) {
+    logger.error(`[test] Failed to reset cache: ${error.message}`);
+    throw error;
+  }
+}
+
+async function loadCache() {
+  try {
+    const data = await fs.readFile(CACHE_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+async function saveCache(cache) {
+  const serializeBigInt = (obj) => {
+    if (typeof obj === 'bigint') return obj.toString();
+    if (Array.isArray(obj)) return obj.map(serializeBigInt);
+    if (typeof obj === 'object' && obj !== null) {
+      return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, serializeBigInt(value)]));
+    }
+    return obj;
+  };
+  await fs.writeFile(CACHE_FILE, JSON.stringify(serializeBigInt(cache), null, 2));
+}
+
+// NFT contract configuration
+const nftContracts = {
+  element280: {
+    name: 'Element 280',
+    symbol: 'ELMNT',
+    chain: 'ETH',
+    contractAddress: '0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9',
+    deploymentBlock: 20945304,
+    totalMinted: 16883,
+    tiers: {
+      1: { name: 'Common', multiplier: 10 },
+      2: { name: 'Common Amped', multiplier: 12 },
+      3: { name: 'Rare', multiplier: 100 },
+      4: { name: 'Rare Amped', multiplier: 120 },
+      5: { name: 'Legendary', multiplier: 1000 },
+      6: { name: 'Legendary Amped', multiplier: 1200 },
+    },
+  },
+};
+
+// Contract ABI
+const contractAbis = {
+  element280: [
+    {
+      type: 'function',
+      name: 'totalSupply',
+      inputs: [],
+      outputs: [{ name: 'result', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'totalBurned',
+      inputs: [],
+      outputs: [{ name: 'result', type: 'uint256' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'ownerOf',
+      inputs: [{ name: 'tokenId', type: 'uint256' }],
+      outputs: [{ name: 'owner', type: 'address' }],
+      stateMutability: 'view',
+    },
+    {
+      type: 'function',
+      name: 'getNftTier',
+      inputs: [{ name: 'tokenId', type: 'uint256' }],
+      outputs: [{ name: 'tier', type: 'uint8' }],
+      stateMutability: 'view',
+    },
+  ],
+};
+
+// Vault ABI
+const element280VaultAbi = [
+  {
+    inputs: [
+      { internalType: 'address', name: '_E280', type: 'address' },
+      { internalType: 'address', name: '_E280_NFT', type: 'address' },
+      { internalType: 'address', name: '_owner', type: 'address' },
+      { internalType: 'address', name: '_devWallet', type: 'address' },
+      { internalType: 'address', name: '_treasury', type: 'address' },
+      { internalType: 'uint256', name: '_minCyclePool', type: 'uint256' },
+    ],
+    stateMutability: 'nonpayable',
+    type: 'constructor',
+  },
+  { inputs: [{ internalType: 'address', name: 'target', type: 'address' }], name: 'AddressEmptyCode', type: 'error' },
+  {
+    inputs: [{ internalType: 'address', name: 'account', type: 'address' }],
+    name: 'AddressInsufficientBalance',
+    type: 'error',
+  },
+  { inputs: [], name: 'FailedInnerCall', type: 'error' },
+  { inputs: [{ internalType: 'address', name: 'owner', type: 'address' }], name: 'OwnableInvalidOwner', type: 'error' },
+  {
+    inputs: [{ internalType: 'address', name: 'account', type: 'address' }],
+    name: 'OwnableUnauthorizedAccount',
+    type: 'error',
+  },
+  { inputs: [{ internalType: 'address', name: 'token', type: 'address' }], name: 'SafeERC20FailedOperation', type: 'error' },
+  { anonymous: false, inputs: [], name: 'CycleUpdated', type: 'event' },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: 'address', name: 'previousOwner', type: 'address' },
+      { indexed: true, internalType: 'address', name: 'newOwner', type: 'address' },
+    ],
+    name: 'OwnershipTransferStarted',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: 'address', name: 'previousOwner', type: 'address' },
+      { indexed: true, internalType: 'address', name: 'newOwner', type: 'address' },
+    ],
+    name: 'OwnershipTransferred',
+    type: 'event',
+  },
+  {
+    inputs: [],
+    name: 'E280',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'E280_NFT',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  { inputs: [], name: 'acceptOwnership', outputs: [], stateMutability: 'nonpayable', type: 'function' },
+  {
+    inputs: [{ internalType: 'uint256[]', name: 'tokenIds', type: 'uint256[]' }],
+    name: 'claimRewards',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'address', name: 'user', type: 'address' }],
+    name: 'claimed',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'uint256', name: 'tokenId', type: 'uint256' }],
+    name: 'claimedCycles',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'currentCycle',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'uint256', name: 'id', type: 'uint256' }],
+    name: 'cycles',
+    outputs: [
+      { internalType: 'uint256', name: 'timestamp', type: 'uint256' },
+      { internalType: 'uint256', name: 'tokensPerMultiplier', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'devWallet',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'getNextCyclePool',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'getNextCycleTime',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'uint256[]', name: 'tokenIds', type: 'uint256[]' },
+      { internalType: 'address', name: 'account', type: 'address' },
+    ],
+    name: 'getRewards',
+    outputs: [
+      { internalType: 'bool[]', name: 'availability', type: 'bool[]' },
+      { internalType: 'uint256', name: 'totalReward', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'minCyclePool',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'owner',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'pendingOwner',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  { inputs: [], name: 'renounceOwnership', outputs: [], stateMutability: 'nonpayable', type: 'function' },
+  {
+    inputs: [{ internalType: 'uint256', name: 'limit', type: 'uint256' }],
+    name: 'setMinCyclePool',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'address', name: '_address', type: 'address' }],
+    name: 'setTreasury',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'totalE280Burned',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'totalRewadsPaid',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'totalRewardPool',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'address', name: 'newOwner', type: 'address' }],
+    name: 'transferOwnership',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'treasury',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  { inputs: [], name: 'updateCycle', outputs: [], stateMutability: 'nonpayable', type: 'function' },
+];
+
+// ERC-20 ABI for decimals
+const erc20Abi = [
+  {
+    inputs: [],
+    name: 'decimals',
+    outputs: [{ internalType: 'uint8', name: '', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'totalSupply',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+];
+
+// Vault address
+const vaultAddresses = {
+  element280: '0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97',
+};
+
+// Tier function definition
+const tierFunctions = {
+  element280: { name: 'getNftTier', contract: 'nft', inputs: ['tokenId'], outputs: ['tier'] },
+};
+
+// Test function
+async function testNFTHolders() {
+  const contractKey = 'element280';
+  const contractConfig = nftContracts[contractKey];
+  const contractAddress = contractConfig.contractAddress;
+  const contractName = contractConfig.name;
+  const context = `test/${contractKey}`;
+  const abi = contractAbis[contractKey];
+
+  if (!isAddress(contractAddress)) {
+    logger.error(`[${context}] ${contractName}: Invalid contract address`);
+    return null;
+  }
+
+  let summary = {
+    contractKey,
+    contractName,
+    totalLiveSupply: 0,
+    totalBurned: 0,
+    totalMinted: 0,
+    totalE280Burned: 0,
+    totalRewardsPaid: 0,
+    totalRewardPool: 0,
+    uniqueHolders: 0,
+    liveTokens: 0,
+    burnedTokens: 0,
+    nonExistentTokens: 0,
+    nonExistentTokenIds: [],
+    burnedAddresses: [],
+    transferredAddresses: [],
+    beginningBlock: BigInt(contractConfig.deploymentBlock),
+    lastProcessedBlock: null,
+    tierCounts: {},
+    status: 'Failed',
+    mismatch: null,
+    timings: {
+      totalSupply: 0,
+      fetchOwners: 0,
+      buildHolders: 0,
+      fetchTiers: 0,
+      fetchRewards: 0,
+      logResults: 0,
+      totalExecution: 0,
+    },
+  };
+
+  const totalStart = process.hrtime.bigint();
+
+  try {
+    // Step 1: Fetch totalSupply, totalBurned, vault totals, and ELMNT decimals
+    let stepStart = process.hrtime.bigint();
+    logger.info(`[${context}] Fetching state for ${contractName}`);
+    const { client } = await selectProvider(context, 'multicall');
+
+    const vaultCalls = [
+      { address: vaultAddresses.element280, abi: element280VaultAbi, functionName: 'E280' },
+      { address: vaultAddresses.element280, abi: element280VaultAbi, functionName: 'totalE280Burned' },
+      { address: vaultAddresses.element280, abi: element280VaultAbi, functionName: 'totalRewadsPaid' },
+      { address: vaultAddresses.element280, abi: element280VaultAbi, functionName: 'totalRewardPool' },
+    ];
+    const nftCalls = [
+      { address: contractAddress, abi, functionName: 'totalSupply' },
+      { address: contractAddress, abi, functionName: 'totalBurned' },
+    ];
+
+    let vaultResults, nftResults;
+    try {
+      [vaultResults, nftResults] = await Promise.all([
+        retry(() =>
+          client.multicall({
+            contracts: vaultCalls,
+            multicallAddress: MULTICALL3_ADDRESS,
+            allowFailure: true,
+          })
+        ),
+        retry(() =>
+          client.multicall({
+            contracts: nftCalls,
+            multicallAddress: MULTICALL3_ADDRESS,
+            allowFailure: true,
+          })
+        ),
+      ]);
+      const serializeBigInt = (obj) => JSON.stringify(obj, (key, value) => (typeof value === 'bigint' ? value.toString() : value));
+      logger.info(`[${context}] Raw multicall results: vault=${serializeBigInt(vaultResults)}, nft=${serializeBigInt(nftResults)}`);
+    } catch (error) {
+      logger.error(`[${context}] Multicall failed: ${error.message}`);
+      throw new Error(`Multicall failed: ${error.message}`);
+    }
+
+    // Validate results
+    if (!Array.isArray(vaultResults) || vaultResults.length !== vaultCalls.length) {
+      throw new Error(`Invalid vault multicall response: ${JSON.stringify(vaultResults)}`);
+    }
+    if (!Array.isArray(nftResults) || nftResults.length !== nftCalls.length) {
+      throw new Error(`Invalid NFT multicall response: ${JSON.stringify(nftResults)}`);
+    }
+
+    // Safely access results
+    const elmntAddress = vaultResults[0]?.status === 'success' ? vaultResults[0].result : null;
+    const totalE280Burned = vaultResults[1]?.status === 'success' ? vaultResults[1].result : 0n;
+    const totalRewardsPaid = vaultResults[2]?.status === 'success' ? vaultResults[2].result : 0n;
+    const totalRewardPool = vaultResults[3]?.status === 'success' ? vaultResults[3].result : 0n;
+    const totalSupply = nftResults[0]?.status === 'success' ? nftResults[0].result : 0n;
+    const totalBurned = nftResults[1]?.status === 'success' ? nftResults[1].result : 0n;
+
+    // Log individual call failures
+    vaultCalls.forEach((call, i) => {
+      if (!vaultResults[i]?.status || vaultResults[i].status !== 'success') {
+        logger.warn(`[${context}] Vault call ${call.functionName} failed: ${vaultResults[i]?.error || 'Unknown error'}`);
+      }
+    });
+    nftCalls.forEach((call, i) => {
+      if (!nftResults[i]?.status || nftResults[i].status !== 'success') {
+        logger.warn(`[${context}] NFT call ${call.functionName} failed: ${nftResults[i]?.error || 'Unknown error'}`);
+      }
+    });
+
+    // Fetch ELMNT decimals and total supply
+    let decimals = 18; // Default
+    let elmntTotalSupply = 0n;
+    if (elmntAddress && isAddress(elmntAddress)) {
+      const elmntResults = await retry(() =>
+        client.multicall({
+          contracts: [
+            { address: elmntAddress, abi: erc20Abi, functionName: 'decimals' },
+            { address: elmntAddress, abi: erc20Abi, functionName: 'totalSupply' },
+          ],
+          multicallAddress: MULTICALL3_ADDRESS,
+          allowFailure: true,
+        })
+      );
+      decimals = elmntResults[0]?.status === 'success' ? Number(elmntResults[0].result) : 18;
+      elmntTotalSupply = elmntResults[1]?.status === 'success' ? elmntResults[1].result : 0n;
+      logger.info(
+        `[${context}] ELMNT token address: ${elmntAddress}, decimals: ${decimals}, totalSupply: ${Number(elmntTotalSupply) / 10 ** decimals}`
+      );
+    } else {
+      logger.warn(`[${context}] Failed to fetch ELMNT token address, using default decimals: ${decimals}`);
+    }
+
+    const totalTokens = Number(totalSupply);
+    summary.totalLiveSupply = totalTokens;
+    summary.totalBurned = Number(totalBurned);
+    summary.totalMinted = totalTokens + summary.totalBurned;
+    summary.totalE280Burned = Number(totalE280Burned) / 10 ** decimals;
+    summary.totalRewardsPaid = Number(totalRewardsPaid) / 10 ** decimals;
+    summary.totalRewardPool = Number(totalRewardPool) / 10 ** decimals;
+    logger.info(
+      `[${context}] State: live=${totalTokens}, burned=${summary.totalBurned}, minted=${summary.totalMinted}, e280Burned=${summary.totalE280Burned.toFixed(2)} ELMNT, rewardsPaid=${summary.totalRewardsPaid.toFixed(2)} ELMNT, rewardPool=${summary.totalRewardPool.toFixed(2)} ELMNT`
+    );
+    logger.info(
+      `[${context}] Raw vault totals: e280Burned=${totalE280Burned}, rewardsPaid=${totalRewardsPaid}, rewardPool=${totalRewardPool}`
+    );
+
+    // Fetch disposition events
+    const { burnedAddresses, transferredAddresses } = await fetchDispositionEvents(
+      context,
+      client,
+      contractAddress,
+      contractConfig.deploymentBlock,
+      await client.getBlockNumber()
+    );
+    summary.burnedTokens = totalBurned;
+    summary.burnedAddresses = Array.from(burnedAddresses);
+    summary.transferredAddresses = Array.from(transferredAddresses);
+    logger.info(`[${context}] Disposition completed: ${summary.burnedAddresses.length} burn addresses, ${summary.transferredAddresses.length} transfer addresses`);
+
+    // Validate burned tokens
+    if (Number(totalBurned) !== summary.totalBurned) {
+      summary.mismatch = `Burned tokens mismatch: ${totalBurned} (events) vs ${summary.totalBurned} (contract)`;
+      logger.info(`[${context}] ${summary.mismatch}`);
+    }
+
+    // Validate totalLiveSupply
+    const expectedLiveSupply = 8079;
+    if (totalTokens !== expectedLiveSupply) {
+      summary.mismatch = summary.mismatch
+        ? `${summary.mismatch}; Live supply mismatch: ${totalTokens} vs expected ${expectedLiveSupply}`
+        : `Live supply mismatch: ${totalTokens} vs expected ${expectedLiveSupply}`;
+      logger.info(`[${context}] Live supply mismatch: ${totalTokens} vs expected ${expectedLiveSupply}`);
+    }
+
+    summary.timings.totalSupply = Number(process.hrtime.bigint() - stepStart) / 1_000_000;
+
+    // Step 2: Fetch owners
+    stepStart = process.hrtime.bigint();
+    const cacheKey = `${contractAddress}-owners`;
+    const now = Date.now();
+    let ownersData;
+
+    if (inMemoryCache[cacheKey] && now - inMemoryCache[cacheKey].timestamp < CACHE_TTL) {
+      logger.info(`[${context}] Returning cached owners data for ${cacheKey}`);
+      ownersData = inMemoryCache[cacheKey].data;
+    } else {
+      ownersData = await fetchOwnersAlchemy(contractAddress, contractKey);
+      inMemoryCache[cacheKey] = { timestamp: now, data: ownersData };
+    }
+
+    const { owners, burnedTokens, nonExistentTokens, nonExistentTokenIds, lastProcessedBlock } = ownersData;
+    summary.nonExistentTokens = nonExistentTokens;
+    summary.nonExistentTokenIds = nonExistentTokenIds;
+    summary.lastProcessedBlock = lastProcessedBlock || (await client.getBlockNumber());
+    summary.timings.fetchOwners = Number(process.hrtime.bigint() - stepStart) / 1_000_000;
+
+    // Step 3: Build holders
+    stepStart = process.hrtime.bigint();
+    const filteredOwners = owners.filter(
+      (owner) =>
+        owner?.ownerAddress &&
+        owner.ownerAddress.toLowerCase() !== burnAddress.toLowerCase() &&
+        owner.tokenBalances?.length > 0
+    );
+
+    const holdersMap = new Map();
+    const tokenOwnerMap = new Map();
+    let tokenCount = 0;
+    const seenTokenIds = new Set();
+    const maxTier = Math.max(...Object.keys(contractConfig.tiers).map(Number));
+
+    for (let i = 0; i < filteredOwners.length; i++) {
+      const owner = filteredOwners[i];
+      if (!owner.ownerAddress) continue;
+      let wallet;
+      try {
+        wallet = getAddress(owner.ownerAddress).toLowerCase();
+      } catch {
+        continue;
+      }
+
+      const tokenIds = [];
+      const tiers = Array(maxTier + 1).fill(0);
+      let total = 0;
+      let multiplierSum = 0;
+
+      for (const tb of owner.tokenBalances) {
+        if (!tb.tokenId) continue;
+        const tokenId = Number(tb.tokenId);
+        if (seenTokenIds.has(tokenId)) continue;
+        seenTokenIds.add(tokenId);
+        tokenIds.push(tokenId);
+        tokenOwnerMap.set(tokenId, wallet);
+        total++;
+        tokenCount++;
+      }
+
+      if (total > 0) {
+        holdersMap.set(wallet, {
+          wallet,
+          tokenIds,
+          tiers,
+          total,
+          multiplierSum,
+          percentage: 0,
+          rank: 0,
+          claimableRewards: 0,
+        });
+      }
+
+      const progress = ((i + 1) / filteredOwners.length * 100).toFixed(2);
+      if (i % 200 === 0 || i === filteredOwners.length - 1) {
+        logger.info(`[${context}] Holders progress: ${progress}% (${holdersMap.size} holders, ${tokenCount} tokens)`);
+      }
+    }
+
+    summary.uniqueHolders = holdersMap.size;
+    summary.liveTokens = tokenCount;
+    summary.timings.buildHolders = Number(process.hrtime.bigint() - stepStart) / 1_000_000;
+
+    // Step 4: Fetch tiers
+    stepStart = process.hrtime.bigint();
+    const tokenIds = Array.from(tokenOwnerMap.keys()).filter((id) => !nonExistentTokenIds.includes(id));
+    if (tokenIds.length > 0) {
+      logger.info(`[${context}] Fetching tiers for ${tokenIds.length} tokens`);
+
+      const cache = await loadCache();
+      const contractCache = cache[contractAddress] || { owners: {}, tiers: {}, nonExistent: [] };
+      const tierResults = [];
+      const processedTokenIds = new Set();
+      const uncachedTokenIds = tokenIds.filter((id) => !contractCache.tiers[id]);
+
+      if (uncachedTokenIds.length > 0) {
+        const tierCalls = uncachedTokenIds.map((tokenId) => ({
+          address: contractAddress,
+          abi,
+          functionName: tierFunctions[contractKey].name,
+          args: [BigInt(tokenId)],
+        }));
+
+        const chunkSize = 400;
+        const concurrencyLimit = 10;
+        for (let i = 0; i < tierCalls.length; i += chunkSize * concurrencyLimit) {
+          const batch = [];
+          for (let j = 0; j < concurrencyLimit && i + j * chunkSize < tierCalls.length; j++) {
+            const start = i + j * chunkSize;
+            const chunk = tierCalls.slice(start, start + chunkSize);
+            const tokenIdsChunk = uncachedTokenIds.slice(start, start + chunkSize);
+            batch.push({ chunk, tokenIdsChunk });
+          }
+          await Promise.all(
+            batch.map(async ({ chunk, tokenIdsChunk }, batchIdx) => {
+              const { client } = await selectProvider(context, 'multicall');
+              try {
+                const results = await retry(
+                  async () => {
+                    const multicallResult = await client.multicall({
+                      contracts: chunk,
+                      multicallAddress: MULTICALL3_ADDRESS,
+                      allowFailure: true,
+                      blockNumber: null,
+                    });
+                    const blockNumber = await client.getBlockNumber();
+                    summary.lastProcessedBlock = blockNumber;
+                    return multicallResult.map((result, idx) => ({
+                      status: result.status,
+                      result: result.status === 'success' ? result.result : null,
+                      tokenId: tokenIdsChunk[idx],
+                      error: result.error,
+                    }));
+                  },
+                  { retries: 5, delay: 500, timeout: 60000 }
+                );
+                const processed = Math.min(i + batchIdx * chunkSize + chunk.length, tierCalls.length);
+                const progress = (processed / tierCalls.length * 100).toFixed(2);
+                logger.info(`[${context}] Tiers progress: ${progress}%`);
+                return results;
+              } catch (error) {
+                logger.error(`[${context}] Failed tier chunk ${i / chunkSize + 1}: ${error.message}`);
+                return chunk.map((_, idx) => ({
+                  status: 'failure',
+                  tokenId: tokenIdsChunk[idx],
+                  error: error.message,
+                }));
+              }
+            })
+          ).then((results) => tierResults.push(...results.flat()));
+          if (i + chunkSize * concurrencyLimit < tierCalls.length) {
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+        }
+
+        tierResults.forEach((result) => {
+          if (result.status === 'success' && result.result !== null && !processedTokenIds.has(result.tokenId)) {
+            contractCache.tiers[result.tokenId] = result.result;
+            processedTokenIds.add(result.tokenId);
+          }
+        });
+        cache[contractAddress] = contractCache;
+        await saveCache(cache);
+      }
+
+      tokenIds.forEach((tokenId) => {
+        if (contractCache.tiers[tokenId] && !processedTokenIds.has(tokenId)) {
+          tierResults.push({
+            status: 'success',
+            result: contractCache.tiers[tokenId],
+            tokenId,
+          });
+          processedTokenIds.add(tokenId);
+        }
+      });
+
+      summary.tierCounts = Object.keys(contractConfig.tiers).reduce((acc, tier) => {
+        acc[tier] = { count: 0, name: contractConfig.tiers[tier].name };
+        return acc;
+      }, {});
+
+      tierResults.forEach((result) => {
+        if (result.status !== 'success' || result.result === null) {
+          logger.info(`[${context}] Failed tier for token ${result.tokenId}: ${result.error || 'Unknown error'}`);
+          return;
+        }
+
+        const tokenId = result.tokenId;
+        const tier = Number(result.result);
+        if (tier < 1 || tier > maxTier) {
+          logger.info(`[${context}] Invalid tier ${tier} for token ${tokenId}`);
+          return;
+        }
+        if (summary.tierCounts[tier]) {
+          summary.tierCounts[tier].count += 1;
+        }
+
+        const wallet = tokenOwnerMap.get(tokenId);
+        if (wallet) {
+          const holder = holdersMap.get(wallet);
+          if (holder) {
+            holder.tiers[tier] += 1;
+            holder.multiplierSum += contractConfig.tiers[tier]?.multiplier || 0;
+          }
+        }
+      });
+    }
+    logger.info(`[${context}] Tiers completed: ${tokenIds.length} tokens processed`);
+    summary.timings.fetchTiers = Number(process.hrtime.bigint() - stepStart) / 1_000_000;
+
+    // Step 5: Fetch claimable rewards
+    stepStart = process.hrtime.bigint();
+    const holders = Array.from(holdersMap.values());
+    if (holders.length > 0 && vaultAddresses.element280 && isAddress(vaultAddresses.element280)) {
+      logger.info(`[${context}] Fetching claimable rewards for ${holders.length} holders`);
+
+      const batchSize = 150;
+      const concurrencyLimit = 5;
+      for (let i = 0; i < holders.length; i += batchSize) {
+        const batchHolders = holders.slice(i, i + batchSize);
+        const progress = Math.min(((i + batchHolders.length) / holders.length * 100), 100).toFixed(2);
+        logger.info(`[${context}] Rewards progress: ${progress}% (${batchHolders.length} holders)`);
+
+        const rewardCalls = batchHolders.map((holder) => {
+          const tokenChunks = holder.tokenIds.reduce((chunks, id, idx) => {
+            if (idx % 50 === 0) chunks.push([]);
+            chunks[chunks.length - 1].push(BigInt(id));
+            return chunks;
+          }, []);
+          return tokenChunks.map((chunk) => ({
+            address: vaultAddresses.element280,
+            abi: element280VaultAbi,
+            functionName: 'getRewards',
+            args: [chunk, holder.wallet],
+          }));
+        }).flat();
+
+        const batchResults = await Promise.all(
+          rewardCalls.map(async (call, idx) => {
+            try {
+              const { client } = await selectProvider(context, 'multicall');
+              const result = await retry(
+                async () => {
+                  return await client.multicall({
+                    contracts: [call],
+                    multicallAddress: MULTICALL3_ADDRESS,
+                    allowFailure: true,
+                  });
+                },
+                { retries: 5, delay: 500, timeout: 60000 }
+              );
+              return {
+                holder: batchHolders[Math.floor(idx / (rewardCalls.length / batchHolders.length))],
+                result: result[0],
+                error: null,
+              };
+            } catch (error) {
+              return {
+                holder: batchHolders[Math.floor(idx / (rewardCalls.length / batchHolders.length))],
+                result: null,
+                error: error.message,
+              };
+            }
+          })
+        );
+
+        const holderRewards = new Map();
+        batchResults.forEach(({ holder, result, error }) => {
+          if (!holderRewards.has(holder.wallet)) {
+            holderRewards.set(holder.wallet, { totalReward: 0, errors: [] });
+          }
+          const data = holderRewards.get(holder.wallet);
+          if (error) {
+            data.errors.push(error);
+          } else if (result?.status === 'success' && result.result) {
+            const [, totalReward] = result.result;
+            data.totalReward += Number(totalReward) / 10 ** decimals;
+          }
+        });
+
+        holderRewards.forEach((data, wallet) => {
+          const holder = holders.find((h) => h.wallet === wallet);
+          if (holder) {
+            holder.claimableRewards = data.totalReward;
+            if (data.errors.length > 0) {
+              logger.info(`[${context}] Failed to fetch rewards for ${holder.wallet}: ${data.errors.join('; ')}`);
+            }
+          }
+        });
+
+        if (i + batchSize < holders.length) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+    } else {
+      logger.info(`[${context}] Vault address not set or invalid, skipping rewards`);
+    }
+    logger.info(`[${context}] Rewards completed: ${holders.length} holders processed`);
+    summary.timings.fetchRewards = Number(process.hrtime.bigint() - stepStart) / 1_000_000;
+
+    // Step 6: Calculate ranks and percentages
+    stepStart = process.hrtime.bigint();
+    const totalMultiplierSum = holders.reduce((sum, h) => sum + h.multiplierSum, 0);
+    holders.forEach((holder) => {
+      holder.percentage = totalMultiplierSum > 0 ? (holder.multiplierSum / totalMultiplierSum) * 100 : 0;
+      holder.displayMultiplierSum = holder.multiplierSum / 10;
+    });
+
+    holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
+    holders.forEach((holder, index) => (holder.rank = index + 1));
+    summary.timings.buildHolders += Number(process.hrtime.bigint() - stepStart) / 1_000_000;
+
+    // Step 7: Log results
+    stepStart = process.hrtime.bigint();
+    logger.info(`[${context}] === ${contractName} Holders ===`);
+    if (process.env.LOG_WALLETS === 'true') {
+      holders.forEach((holder) => {
+        logger.info(
+          `[${context}] Wallet: ${holder.wallet}, Tokens: ${holder.total}, Tiers: ${holder.tiers}, MultiplierSum: ${holder.multiplierSum}, Rank: ${holder.rank}, Percentage: ${holder.percentage.toFixed(2)}%, Rewards: ${holder.claimableRewards} ELMNT`
+        );
+      });
+    }
+
+    logger.info(
+      `[${context}] Summary: ${holdersMap.size} holders, ${tokenCount} tokens, live=${totalTokens}, minted=${summary.totalMinted}`
+    );
+
+    const expectedLiveTokens = totalTokens;
+    const missingTokens = expectedLiveTokens - tokenCount;
+    if (tokenCount < expectedLiveTokens) {
+      summary.mismatch = `Processed ${tokenCount} tokens, expected ${expectedLiveTokens}. Missing ${missingTokens} (likely ${summary.burnedTokens} burned, ${nonExistentTokens} non-existent).`;
+      logger.info(`[${context}] ${summary.mismatch}`);
+    } else if (tokenCount > expectedLiveTokens) {
+      summary.mismatch = `Processed ${tokenCount} tokens, exceeding ${expectedLiveTokens}.`;
+      logger.info(`[${context}] ${summary.mismatch}`);
+    } else {
+      summary.status = 'Success';
+    }
+    summary.timings.logResults = Number(process.hrtime.bigint() - stepStart) / 1_000_000;
+
+    summary.timings.totalExecution = Number(process.hrtime.bigint() - totalStart) / 1_000_000;
+    return summary;
+  } catch (error) {
+    logger.error(`[${context}] Test failed: ${error.message}`, { stack: error.stack });
+    summary.error = error.message;
+    summary.timings.totalExecution = Number(process.hrtime.bigint() - totalStart) / 1_000_000;
+    return summary;
+  }
+}
+
+// Main function
+async function main() {
+  try {
+    await resetCache();
+    const summary = await testNFTHolders();
+
+    // Log summary
+    logger.info('[test] === Element 280 Summary ===');
+    console.table({
+      Contract: summary.contractName,
+      TotalMinted: summary.totalMinted,
+      TotalLiveSupply: summary.totalLiveSupply,
+      TotalBurned: summary.totalBurned,
+      TotalE280Burned: `${summary.totalE280Burned.toFixed(2)} ELMNT`,
+      TotalRewardsPaid: `${summary.totalRewardsPaid.toFixed(2)} ELMNT`,
+      TotalRewardPool: `${summary.totalRewardPool.toFixed(2)} ELMNT`,
+      UniqueHolders: summary.uniqueHolders,
+      LiveTokens: summary.liveTokens,
+      BurnedTokens: Number(summary.burnedTokens),
+      BurnedAddresses: summary.burnedAddresses.length,
+      TransferredAddresses: summary.transferredAddresses.length,
+      BeginningBlock: summary.beginningBlock?.toString() || 'N/A',
+      LastProcessedBlock: summary.lastProcessedBlock?.toString() || 'N/A',
+      Status: summary.status,
+      Mismatch: summary.mismatch || 'None',
+      Error: summary.error || 'None',
+    });
+
+    // Log disposition addresses
+    logger.info('[test] === Disposition Addresses ===');
+    console.table({
+      BurnedAddresses: summary.burnedAddresses.length,
+      TransferredAddresses: summary.transferredAddresses.length,
+    });
+
+    // Log timings
+    logger.info('[test] === Timings (ms) ===');
+    console.table({
+      Contract: summary.contractName,
+      TotalSupply: summary.timings.totalSupply.toFixed(2),
+      FetchOwners: summary.timings.fetchOwners.toFixed(2),
+      BuildHolders: summary.timings.buildHolders.toFixed(2),
+      FetchTiers: summary.timings.fetchTiers.toFixed(2),
+      FetchRewards: summary.timings.fetchRewards.toFixed(2),
+      LogResults: summary.timings.logResults.toFixed(2),
+      TotalExecution: summary.timings.totalExecution.toFixed(2),
+    });
+
+    // Log tier counts
+    logger.info('[test] === Element 280 Tier Counts ===');
+    const tierTable = Object.entries(summary.tierCounts).map(([tier, data]) => ({
+      Tier: tier,
+      Name: data.name,
+      Count: data.count,
+    }));
+    console.table(tierTable);
+
+    if (summary.error) {
+      logger.error('[test] Test failed');
+      process.exit(1);
+    } else if (summary.mismatch) {
+      logger.info('[test] Test completed with mismatches');
+      process.exit(0);
+    } else {
+      logger.info('[test] Test completed successfully');
+      process.exit(0);
+    }
+  } catch (error) {
+    logger.error(`[test] Tests failed: ${error.message}`, { stack: error.stack });
+    process.exit(1);
+  }
+}
+
+main();
+
+================= Includes the following JS files for e280 integration  =================
+app/api/holders/Element280/route.js
+app/api/holders/Element280/validate-burned/route.js
+app/lib/chartOptions.js
+app/lib/fetchCollectionData.js
+app/lib/logger.js
+app/lib/schemas.js
+app/lib/serverInit.js
+app/lib/useNFTData.js
+contracts/abi.js
+contracts/config.js
+contracts/contracts.js
+scripts/test_E280_nft_holders.js

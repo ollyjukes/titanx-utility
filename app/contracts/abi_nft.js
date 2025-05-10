@@ -6,6 +6,7 @@ import element280Vault from '@/abi/element280Vault.json';
 import element369NFT from '@/abi/element369.json';
 import element369Vault from '@/abi/element369Vault.json';
 import ascendantNFT from '@/abi/ascendantNFT.json';
+import vaultAbiFunctions, { getVaultFunction } from './abi_nft_vault.js';
 
 // ABI function mappings for each collection
 const abiFunctions = {
@@ -30,6 +31,7 @@ const abiFunctions = {
       inputs: ['tokenIds'],
       outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
     },
+    vaultFunctions: vaultAbiFunctions.stax.functions,
   },
   element280: {
     nft: element280NFT,
@@ -52,6 +54,7 @@ const abiFunctions = {
       inputs: ['tokenIds', 'nftOwner'],
       outputs: ['timestamps', 'multipliers'],
     },
+    vaultFunctions: vaultAbiFunctions.element280.functions,
   },
   element369: {
     nft: element369NFT,
@@ -74,6 +77,7 @@ const abiFunctions = {
       inputs: ['tokenIds'],
       outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
     },
+    vaultFunctions: vaultAbiFunctions.element369.functions,
   },
   ascendant: {
     nft: ascendantNFT,
@@ -88,9 +92,10 @@ const abiFunctions = {
       name: 'getNFTAttribute',
       contract: 'nft',
       inputs: ['tokenId'],
-      outputs: ['attributes'], // Extract tier from attributes[1]
+      outputs: ['attributes'],
     },
-    batchTokenData: null, // Ascendant doesn't support batch token data
+    batchTokenData: null,
+    vaultFunctions: null,
   },
   e280: {
     nft: null,
@@ -98,6 +103,7 @@ const abiFunctions = {
     rewardFunction: null,
     tierFunction: null,
     batchTokenData: null,
+    vaultFunctions: null,
   },
 };
 
@@ -130,7 +136,7 @@ export const commonFunctions = {
 };
 
 // Validate ABIs at startup
-Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFunction }]) => {
+Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFunction, vaultFunctions }]) => {
   if (key === 'e280') return; // Skip disabled
   if (!nft) throw new Error(`Missing NFT ABI for ${key}`);
   if (key !== 'ascendant' && !vault) throw new Error(`Missing vault ABI for ${key}`);
@@ -144,6 +150,14 @@ Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFu
   }
   if (!nft.find(f => f.name === commonFunctions.ownerOf.name)) {
     throw new Error(`Missing ownerOf for ${key}`);
+  }
+  // Validate vault functions
+  if (vault && vaultFunctions) {
+    Object.entries(vaultFunctions).forEach(([fnName, fn]) => {
+      if (!vault.find(f => f.name === fn.name && f.type === 'function')) {
+        throw new Error(`Missing vault function ${fnName} for ${key}`);
+      }
+    });
   }
 });
 
@@ -170,6 +184,12 @@ export function getBatchTokenDataFunction(contractKey) {
   const collection = abiFunctions[contractKey.toLowerCase()];
   if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
   return collection.batchTokenData || null;
+}
+
+export function getVaultFunctionAbi(contractKey, functionName) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.vaultFunctions && collection.vaultFunctions[functionName] || getVaultFunction(contractKey, functionName);
 }
 
 export const abis = {

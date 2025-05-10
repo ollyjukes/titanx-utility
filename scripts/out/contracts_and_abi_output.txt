@@ -1,7 +1,8 @@
 ================= Includes the following files under ./contracts =================
-./contracts/abi.js
-./contracts/config.js
-./contracts/contracts.js
+app/contracts/abi_nft.js
+app/contracts/abi_nft_vault.js
+app/contracts/contracts_auct_mint.js
+app/contracts/contracts_nft.js
 
 
 ================= Includes the following files under ./abi =================
@@ -10,12 +11,14 @@
 ./abi/element280Vault.json
 ./abi/element369.json
 ./abi/element369Vault.json
+./abi/staxVault.json
+./abi/staxNFT.json
 
 
 ================= Contents of above files =================
 
 
------ ./contracts/abi.js -----
+----- app/contracts/abi_nft.js -----
 
 // ./contracts/abi.js
 import staxNFT from '@/abi/staxNFT.json';
@@ -25,6 +28,7 @@ import element280Vault from '@/abi/element280Vault.json';
 import element369NFT from '@/abi/element369.json';
 import element369Vault from '@/abi/element369Vault.json';
 import ascendantNFT from '@/abi/ascendantNFT.json';
+import vaultAbiFunctions, { getVaultFunction } from './abi_nft_vault.js';
 
 // ABI function mappings for each collection
 const abiFunctions = {
@@ -49,6 +53,7 @@ const abiFunctions = {
       inputs: ['tokenIds'],
       outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
     },
+    vaultFunctions: vaultAbiFunctions.stax.functions,
   },
   element280: {
     nft: element280NFT,
@@ -71,6 +76,7 @@ const abiFunctions = {
       inputs: ['tokenIds', 'nftOwner'],
       outputs: ['timestamps', 'multipliers'],
     },
+    vaultFunctions: vaultAbiFunctions.element280.functions,
   },
   element369: {
     nft: element369NFT,
@@ -93,6 +99,7 @@ const abiFunctions = {
       inputs: ['tokenIds'],
       outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
     },
+    vaultFunctions: vaultAbiFunctions.element369.functions,
   },
   ascendant: {
     nft: ascendantNFT,
@@ -107,9 +114,10 @@ const abiFunctions = {
       name: 'getNFTAttribute',
       contract: 'nft',
       inputs: ['tokenId'],
-      outputs: ['attributes'], // Extract tier from attributes[1]
+      outputs: ['attributes'],
     },
-    batchTokenData: null, // Ascendant doesn't support batch token data
+    batchTokenData: null,
+    vaultFunctions: null,
   },
   e280: {
     nft: null,
@@ -117,6 +125,7 @@ const abiFunctions = {
     rewardFunction: null,
     tierFunction: null,
     batchTokenData: null,
+    vaultFunctions: null,
   },
 };
 
@@ -149,7 +158,7 @@ export const commonFunctions = {
 };
 
 // Validate ABIs at startup
-Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFunction }]) => {
+Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFunction, vaultFunctions }]) => {
   if (key === 'e280') return; // Skip disabled
   if (!nft) throw new Error(`Missing NFT ABI for ${key}`);
   if (key !== 'ascendant' && !vault) throw new Error(`Missing vault ABI for ${key}`);
@@ -163,6 +172,14 @@ Object.entries(abiFunctions).forEach(([key, { nft, vault, rewardFunction, tierFu
   }
   if (!nft.find(f => f.name === commonFunctions.ownerOf.name)) {
     throw new Error(`Missing ownerOf for ${key}`);
+  }
+  // Validate vault functions
+  if (vault && vaultFunctions) {
+    Object.entries(vaultFunctions).forEach(([fnName, fn]) => {
+      if (!vault.find(f => f.name === fn.name && f.type === 'function')) {
+        throw new Error(`Missing vault function ${fnName} for ${key}`);
+      }
+    });
   }
 });
 
@@ -191,6 +208,12 @@ export function getBatchTokenDataFunction(contractKey) {
   return collection.batchTokenData || null;
 }
 
+export function getVaultFunctionAbi(contractKey, functionName) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.vaultFunctions && collection.vaultFunctions[functionName] || getVaultFunction(contractKey, functionName);
+}
+
 export const abis = {
   stax: { nft: staxNFT, vault: staxVault },
   element280: { nft: element280NFT, vault: element280Vault },
@@ -198,13 +221,946 @@ export const abis = {
   ascendant: { nft: ascendantNFT, vault: null },
   e280: { nft: null, vault: null },
 };
------ ./contracts/config.js -----
+----- app/contracts/abi_nft_vault.js -----
 
-// ./contracts/config.js
-import { abis } from './abi.js';
+// app/contracts/abi_vault.js
+import element280Vault from '@/abi/element280Vault.json';
+import element369Vault from '@/abi/element369Vault.json';
+import staxVault from '@/abi/staxVault.json';
 
-// Centralized contract configurations
-const nftContracts = {
+// Vault ABI function mappings for each collection
+const vaultAbiFunctions = {
+  element280: {
+    vault: element280Vault,
+    functions: {
+      E280: {
+        name: 'E280',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      E280_NFT: {
+        name: 'E280_NFT',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      claimed: {
+        name: 'claimed',
+        contract: 'vault',
+        inputs: ['user'],
+        outputs: ['result'],
+      },
+      claimedCycles: {
+        name: 'claimedCycles',
+        contract: 'vault',
+        inputs: ['tokenId'],
+        outputs: ['result'],
+      },
+      currentCycle: {
+        name: 'currentCycle',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      cycles: {
+        name: 'cycles',
+        contract: 'vault',
+        inputs: ['id'],
+        outputs: ['timestamp', 'tokensPerMultiplier'],
+      },
+      devWallet: {
+        name: 'devWallet',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      getNextCyclePool: {
+        name: 'getNextCyclePool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getNextCycleTime: {
+        name: 'getNextCycleTime',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getRewards: {
+        name: 'getRewards',
+        contract: 'vault',
+        inputs: ['tokenIds', 'account'],
+        outputs: ['availability', 'totalReward'],
+      },
+      minCyclePool: {
+        name: 'minCyclePool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      owner: {
+        name: 'owner',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      pendingOwner: {
+        name: 'pendingOwner',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      totalE280Burned: {
+        name: 'totalE280Burned',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      totalRewadsPaid: {
+        name: 'totalRewadsPaid',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      totalRewardPool: {
+        name: 'totalRewardPool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      treasury: {
+        name: 'treasury',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      acceptOwnership: {
+        name: 'acceptOwnership',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      claimRewards: {
+        name: 'claimRewards',
+        contract: 'vault',
+        inputs: ['tokenIds'],
+        outputs: [],
+      },
+      renounceOwnership: {
+        name: 'renounceOwnership',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      setMinCyclePool: {
+        name: 'setMinCyclePool',
+        contract: 'vault',
+        inputs: ['limit'],
+        outputs: [],
+      },
+      setTreasury: {
+        name: 'setTreasury',
+        contract: 'vault',
+        inputs: ['_address'],
+        outputs: [],
+      },
+      transferOwnership: {
+        name: 'transferOwnership',
+        contract: 'vault',
+        inputs: ['newOwner'],
+        outputs: [],
+      },
+      updateCycle: {
+        name: 'updateCycle',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+    },
+  },
+  element369: {
+    vault: element369Vault,
+    functions: {
+      E369_NFT: {
+        name: 'E369_NFT',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      FluxHub: {
+        name: 'FluxHub',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      _getEndCycleForCycle777: {
+        name: '_getEndCycleForCycle777',
+        contract: 'vault',
+        inputs: ['cycle777Id'],
+        outputs: ['result'],
+      },
+      _getNextCyclePool: {
+        name: '_getNextCyclePool',
+        contract: 'vault',
+        inputs: ['token'],
+        outputs: ['result'],
+      },
+      _getStartCycleForCycle777: {
+        name: '_getStartCycleForCycle777',
+        contract: 'vault',
+        inputs: ['cycle777Id'],
+        outputs: ['result'],
+      },
+      cycle777AmountClaimed: {
+        name: 'cycle777AmountClaimed',
+        contract: 'vault',
+        inputs: ['tokenId', 'token'],
+        outputs: ['result'],
+      },
+      cycle777BackingClaimed: {
+        name: 'cycle777BackingClaimed',
+        contract: 'vault',
+        inputs: ['tokenId', 'token'],
+        outputs: ['result'],
+      },
+      cycles: {
+        name: 'cycles',
+        contract: 'vault',
+        inputs: ['id'],
+        outputs: ['initialized', 'infernoPerMulitplier', 'fluxPerMultiplier', 'e280PerMultiplier'],
+      },
+      cycles777: {
+        name: 'cycles777',
+        contract: 'vault',
+        inputs: ['id'],
+        outputs: ['startCycleId', 'endCycleId', 'multiplierPool', 'infernoPool', 'e280Pool'],
+      },
+      devWallet: {
+        name: 'devWallet',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      get777Rewards: {
+        name: 'get777Rewards',
+        contract: 'vault',
+        inputs: ['tokenIds', 'account', 'isBacking'],
+        outputs: ['availability', 'burned', 'infernoPool', 'e280Pool'],
+      },
+      getCurrentCycle777: {
+        name: 'getCurrentCycle777',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getCurrentE369Cycle: {
+        name: 'getCurrentE369Cycle',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getNextCyclePools: {
+        name: 'getNextCyclePools',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['infernoPool', 'fluxPool', 'e280Pool'],
+      },
+      getRewards: {
+        name: 'getRewards',
+        contract: 'vault',
+        inputs: ['tokenIds', 'account', 'isBacking'],
+        outputs: ['availability', 'burned', 'infernoPool', 'fluxPool', 'e280Pool'],
+      },
+      lastUpdatedCycle: {
+        name: 'lastUpdatedCycle',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      minCyclePool: {
+        name: 'minCyclePool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      nftLastBacking: {
+        name: 'nftLastBacking',
+        contract: 'vault',
+        inputs: ['tokenId'],
+        outputs: ['result'],
+      },
+      nftLastClaim: {
+        name: 'nftLastClaim',
+        contract: 'vault',
+        inputs: ['tokenId'],
+        outputs: ['result'],
+      },
+      owner: {
+        name: 'owner',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      pendingOwner: {
+        name: 'pendingOwner',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      totalTokenPaid: {
+        name: 'totalTokenPaid',
+        contract: 'vault',
+        inputs: ['token'],
+        outputs: ['result'],
+      },
+      totalTokenPool: {
+        name: 'totalTokenPool',
+        contract: 'vault',
+        inputs: ['token'],
+        outputs: ['result'],
+      },
+      acceptOwnership: {
+        name: 'acceptOwnership',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      claim777Backing: {
+        name: 'claim777Backing',
+        contract: 'vault',
+        inputs: ['tokenIds'],
+        outputs: [],
+      },
+      claim777Rewards: {
+        name: 'claim777Rewards',
+        contract: 'vault',
+        inputs: ['tokenIds'],
+        outputs: [],
+      },
+      claimBacking: {
+        name: 'claimBacking',
+        contract: 'vault',
+        inputs: ['tokenIds'],
+        outputs: [],
+      },
+      claimRewards: {
+        name: 'claimRewards',
+        contract: 'vault',
+        inputs: ['tokenIds'],
+        outputs: [],
+      },
+      register777CycleTokens: {
+        name: 'register777CycleTokens',
+        contract: 'vault',
+        inputs: ['infernoAmount', 'e280Amount'],
+        outputs: [],
+      },
+      renounceOwnership: {
+        name: 'renounceOwnership',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      setFluxHub: {
+        name: 'setFluxHub',
+        contract: 'vault',
+        inputs: ['fluxHub'],
+        outputs: [],
+      },
+      setMinCyclePool: {
+        name: 'setMinCyclePool',
+        contract: 'vault',
+        inputs: ['limit'],
+        outputs: [],
+      },
+      transferOwnership: {
+        name: 'transferOwnership',
+        contract: 'vault',
+        inputs: ['newOwner'],
+        outputs: [],
+      },
+      updateCycle: {
+        name: 'updateCycle',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      updateStoredMultipliers: {
+        name: 'updateStoredMultipliers',
+        contract: 'vault',
+        inputs: ['cycleId', 'totalMultipliers'],
+        outputs: [],
+      },
+      updateStoredMultipliersOnBurn: {
+        name: 'updateStoredMultipliersOnBurn',
+        contract: 'vault',
+        inputs: ['cycleId', 'totalMultipliers', 'multiplierDeduction'],
+        outputs: [],
+      },
+    },
+  },
+  stax: {
+    vault: staxVault,
+    functions: {
+      STAX: {
+        name: 'STAX',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      STAX_BANK: {
+        name: 'STAX_BANK',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      STAX_BUY_BURN: {
+        name: 'STAX_BUY_BURN',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      STAX_DEV: {
+        name: 'STAX_DEV',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      STAX_NFT: {
+        name: 'STAX_NFT',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      diamondHandPool: {
+        name: 'diamondHandPool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getCycleDistribution: {
+        name: 'getCycleDistribution',
+        contract: 'vault',
+        inputs: ['cycleId'],
+        outputs: ['bankShare', 'buyBurnShare', 'genesisShare', 'nftHolderShare', 'diamondPoolShare'],
+      },
+      getNextCycleTime: {
+        name: 'getNextCycleTime',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getRewards: {
+        name: 'getRewards',
+        contract: 'vault',
+        inputs: ['tokenIds', 'account'],
+        outputs: ['availability', 'totalPayout'],
+      },
+      getTitanXPool: {
+        name: 'getTitanXPool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getX28Pool: {
+        name: 'getX28Pool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      getX28MintStatus: {
+        name: 'getX28MintStatus',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['isNativeMint'],
+      },
+      incentiveFeeBPS: {
+        name: 'incentiveFeeBPS',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      lastClaimed: {
+        name: 'lastClaimed',
+        contract: 'vault',
+        inputs: ['tokenId'],
+        outputs: ['result'],
+      },
+      lastCycleMultipliers: {
+        name: 'lastCycleMultipliers',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      lastCycleTs: {
+        name: 'lastCycleTs',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      maxSwapValue: {
+        name: 'maxSwapValue',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      minCyclePool: {
+        name: 'minCyclePool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      owner: {
+        name: 'owner',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      pendingOwner: {
+        name: 'pendingOwner',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['address'],
+      },
+      secondsAgo: {
+        name: 'secondsAgo',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      tokensPerMultiplier: {
+        name: 'tokensPerMultiplier',
+        contract: 'vault',
+        inputs: ['cycleId'],
+        outputs: ['result'],
+      },
+      totalClaimed: {
+        name: 'totalClaimed',
+        contract: 'vault',
+        inputs: ['user'],
+        outputs: ['result'],
+      },
+      totalRewadsPaid: {
+        name: 'totalRewadsPaid',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      totalRewardPool: {
+        name: 'totalRewardPool',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      twapDeviation: {
+        name: 'twapDeviation',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      x28Deviation: {
+        name: 'x28Deviation',
+        contract: 'vault',
+        inputs: [],
+        outputs: ['result'],
+      },
+      acceptOwnership: {
+        name: 'acceptOwnership',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      batchClaimRewards: {
+        name: 'batchClaimRewards',
+        contract: 'vault',
+        inputs: ['tokenIds'],
+        outputs: [],
+      },
+      claimRewards: {
+        name: 'claimRewards',
+        contract: 'vault',
+        inputs: ['tokenId'],
+        outputs: [],
+      },
+      handleStartPresale: {
+        name: 'handleStartPresale',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      renounceOwnership: {
+        name: 'renounceOwnership',
+        contract: 'vault',
+        inputs: [],
+        outputs: [],
+      },
+      setIncentiveFee: {
+        name: 'setIncentiveFee',
+        contract: 'vault',
+        inputs: ['bps'],
+        outputs: [],
+      },
+      setMaxSwapValue: {
+        name: 'setMaxSwapValue',
+        contract: 'vault',
+        inputs: ['limit'],
+        outputs: [],
+      },
+      setMinCyclePool: {
+        name: 'setMinCyclePool',
+        contract: 'vault',
+        inputs: ['limit'],
+        outputs: [],
+      },
+      setProtocolAddresses: {
+        name: 'setProtocolAddresses',
+        contract: 'vault',
+        inputs: ['_staxNft', '_staxBank'],
+        outputs: [],
+      },
+      setSecondsAgo: {
+        name: 'setSecondsAgo',
+        contract: 'vault',
+        inputs: ['limit'],
+        outputs: [],
+      },
+      setTwapDeviation: {
+        name: 'setTwapDeviation',
+        contract: 'vault',
+        inputs: ['limit'],
+        outputs: [],
+      },
+      setX28PriceDeviation: {
+        name: 'setX28PriceDeviation',
+        contract: 'vault',
+        inputs: ['limit'],
+        outputs: [],
+      },
+      transferOwnership: {
+        name: 'transferOwnership',
+        contract: 'vault',
+        inputs: ['newOwner'],
+        outputs: [],
+      },
+      updateCycle: {
+        name: 'updateCycle',
+        contract: 'vault',
+        inputs: ['minAmountOut', 'deadline'],
+        outputs: [],
+      },
+    },
+  },
+};
+
+// Validate vault ABIs at startup
+Object.entries(vaultAbiFunctions).forEach(([key, { vault, functions }]) => {
+  if (!vault) throw new Error(`Missing vault ABI for ${key}`);
+  Object.entries(functions).forEach(([fnName, fn]) => {
+    if (!vault.find(f => f.name === fn.name && f.type === 'function')) {
+      throw new Error(`Missing vault function ${fnName} for ${key}`);
+    }
+  });
+});
+
+// Utility function to get a specific vault function
+export function getVaultFunction(contractKey, functionName) {
+  const collection = vaultAbiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.functions[functionName] || null;
+}
+
+// Export vault ABI functions and vault ABIs
+export const vaultAbis = {
+  element280: element280Vault,
+  element369: element369Vault,
+  stax: staxVault,
+};
+
+export default vaultAbiFunctions;
+----- app/contracts/contracts_auct_mint.js -----
+
+// app/contracts/contracts_auct_mint.js
+import { getAddress } from 'viem';
+
+// Import ABIs from abi directory
+import ascendantAuctionABI from '@/abi/ascendantAuction.json';
+import blazeAuctionABI from '@/abi/blazeAuction.json';
+import flareAuctionABI from '@/abi/flareAuction.json';
+import flareMintingABI from '@/abi/flareMinting.json';
+import fluxAuctionABI from '@/abi/fluxAuction.json';
+import goatXAuctionABI from '@/abi/goatXAuction.json';
+import matrixAuctionABI from '@/abi/matrixAuction.json';
+import phoenixAuctionABI from '@/abi/phoenixAuction.json';
+import shogunAuctionABI from '@/abi/shogunAuction.json';
+import voltAuctionABI from '@/abi/voltAuction.json';
+import vyperBoostAuctionABI from '@/abi/vyperBoostAuction.json';
+import vyperClassicAuctionABI from '@/abi/vyperClassicAuction.json';
+
+export const auctionMintContracts = {
+  ascendantAuction: {
+    name: 'Ascendant Auction',
+    abi: ascendantAuctionABI,
+    address: getAddress('0x592daEb53eB1cef8aa96305588310E997ec58c0c'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Ascendant NFT minting.',
+  },
+  blazeAuction: {
+    name: 'Blaze Auction',
+    abi: blazeAuctionABI,
+    address: getAddress('0x200ed69de20Fe522d08dF5d7CE3d69aba4e02e74'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Blaze NFT minting.',
+  },
+  flareAuction: {
+    name: 'Flare Auction',
+    abi: flareAuctionABI,
+    address: getAddress('0x58ad6EF28bFB092635454d02303aBBd4D87b503c'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Flare NFT minting.',
+  },
+  flareMinting: {
+    name: 'Flare Minting',
+    abi: flareMintingABI,
+    address: getAddress('0x9983eF6Af4DE8fE58C45f6DC54Cf5Ad349431A82'),
+    chainId: 1,
+    type: 'minting',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Minting contract for Flare NFTs.',
+  },
+  fluxAuction: {
+    name: 'Flux Auction',
+    abi: fluxAuctionABI,
+    address: getAddress('0x36e5a8105f000029d4B3B99d0C3D0e24aaA52adF'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Flux NFT minting.',
+  },
+  goatXAuction: {
+    name: 'GoatX Auction',
+    abi: goatXAuctionABI,
+    address: getAddress('0x059511B0BED706276Fa98877bd00ee0dD7303D32'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for GoatX NFT minting.',
+  },
+  matrixAuction: {
+    name: 'Matrix Auction',
+    abi: matrixAuctionABI,
+    address: getAddress('0x9f29E5b2d67C4a7315c5D6AbD448C45f9dD51CAF'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Matrix NFT minting.',
+  },
+  phoenixAuction: {
+    name: 'Phoenix Auction',
+    abi: phoenixAuctionABI,
+    address: getAddress('0xF41b5c99b8B6b88cF1Bd0320cB57e562EaF17DE1'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Phoenix NFT minting.',
+  },
+  shogunAuction: {
+    name: 'Shogun Auction',
+    abi: shogunAuctionABI,
+    address: getAddress('0x79bd712f876c364Aa5e775A1eD40dE1fDfdB2a50'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Shogun NFT minting.',
+  },
+  voltAuction: {
+    name: 'Volt Auction',
+    abi: voltAuctionABI,
+    address: getAddress('0xb3f2bE29BA969588E07bF7512e07008D6fdeB17B'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Volt NFT minting.',
+  },
+  vyperBoostAuction: {
+    name: 'Vyper Boost Auction',
+    abi: vyperBoostAuctionABI,
+    address: getAddress('0x4D994F53FE2d8BdBbF64dC2e53C58Df00b84e713'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Vyper Boost NFT minting.',
+  },
+  vyperClassicAuction: {
+    name: 'Vyper Classic Auction',
+    abi: vyperClassicAuctionABI,
+    address: getAddress('0xC1da113c983b26aa2c3f4fFD5f10b47457FC3397'),
+    chainId: 1,
+    type: 'auction',
+    deploymentBlock: 'TBD', // Replace with actual deployment block if available
+    description: 'Auction contract for Vyper Classic NFT minting.',
+  },
+};
+
+// Export ABIs for backward compatibility
+export const abis = {
+  ascendantAuction: auctionMintContracts.ascendantAuction.abi,
+  blazeAuction: auctionMintContracts.blazeAuction.abi,
+  flareAuction: auctionMintContracts.flareAuction.abi,
+  flareMinting: auctionMintContracts.flareMinting.abi,
+  fluxAuction: auctionMintContracts.fluxAuction.abi,
+  goatXAuction: auctionMintContracts.goatXAuction.abi,
+  matrixAuction: auctionMintContracts.matrixAuction.abi,
+  phoenixAuction: auctionMintContracts.phoenixAuction.abi,
+  shogunAuction: auctionMintContracts.shogunAuction.abi,
+  voltAuction: auctionMintContracts.voltAuction.abi,
+  vyperBoostAuction: auctionMintContracts.vyperBoostAuction.abi,
+  vyperClassicAuction: auctionMintContracts.vyperClassicAuction.abi,
+};
+----- app/contracts/contracts_nft.js -----
+
+// app/contracts/contract_nft.js
+import staxNFT from '@/abi/staxNFT.json';
+import element280NFT from '@/abi/element280.json';
+import element369NFT from '@/abi/element369.json';
+import ascendantNFT from '@/abi/ascendantNFT.json';
+import { vaultAbiFunctions, vaultAbis, getVaultFunction } from './abi_nft_vault.js';
+
+// ABI function mappings for each NFT collection
+const abiFunctions = {
+  stax: {
+    nft: staxNFT,
+    vault: vaultAbis.stax,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account'],
+      outputs: ['availability', 'totalPayout'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'batchGetTokenData',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
+    },
+    vaultFunctions: vaultAbiFunctions.stax.functions,
+  },
+  element280: {
+    nft: element280NFT,
+    vault: vaultAbis.element280,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account'],
+      outputs: ['availability', 'totalReward'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'getBatchedTokensData',
+      contract: 'nft',
+      inputs: ['tokenIds', 'nftOwner'],
+      outputs: ['timestamps', 'multipliers'],
+    },
+    vaultFunctions: vaultAbiFunctions.element280.functions,
+  },
+  element369: {
+    nft: element369NFT,
+    vault: vaultAbis.element369,
+    rewardFunction: {
+      name: 'getRewards',
+      contract: 'vault',
+      inputs: ['tokenIds', 'account', 'isBacking'],
+      outputs: ['availability', 'burned', 'infernoPool', 'fluxPool', 'e280Pool'],
+    },
+    tierFunction: {
+      name: 'getNftTier',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['tier'],
+    },
+    batchTokenData: {
+      name: 'batchGetTokenData',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['tiers', 'multipliers', 'mintCycles', 'burnCycles', 'burnAddresses'],
+    },
+    vaultFunctions: vaultAbiFunctions.element369.functions,
+  },
+  ascendant: {
+    nft: ascendantNFT,
+    vault: null,
+    rewardFunction: {
+      name: 'batchClaimableAmount',
+      contract: 'nft',
+      inputs: ['tokenIds'],
+      outputs: ['toClaim'],
+    },
+    tierFunction: {
+      name: 'getNFTAttribute',
+      contract: 'nft',
+      inputs: ['tokenId'],
+      outputs: ['attributes'],
+    },
+    batchTokenData: null,
+    vaultFunctions: null,
+  },
+  e280: {
+    nft: null,
+    vault: null,
+    rewardFunction: null,
+    tierFunction: null,
+    batchTokenData: null,
+    vaultFunctions: null,
+  },
+};
+
+// Common ABI functions for NFTs
+export const commonFunctions = {
+  totalSupply: {
+    name: 'totalSupply',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+  totalBurned: {
+    name: 'totalBurned',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+  ownerOf: {
+    name: 'ownerOf',
+    contract: 'nft',
+    inputs: ['tokenId'],
+    outputs: ['owner'],
+  },
+  tokenId: {
+    name: 'tokenId',
+    contract: 'nft',
+    inputs: [],
+    outputs: ['result'],
+  },
+};
+
+// NFT collection configurations
+export const nftContracts = {
   element280: {
     name: 'Element 280',
     symbol: 'ELMNT',
@@ -213,7 +1169,8 @@ const nftContracts = {
     vaultAddress: '0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97',
     deploymentBlock: '20945304',
     totalMinted: 16883,
-    abi: abis.element280.nft,
+    abi: element280NFT,
+    vaultAbi: vaultAbis.element280,
     tiers: {
       1: { name: 'Common', multiplier: 10, allocation: '100000000000000000000000000' },
       2: { name: 'Common Amped', multiplier: 12, allocation: '100000000000000000000000000' },
@@ -224,21 +1181,30 @@ const nftContracts = {
     },
     description: 'Element 280 NFTs can be minted with TitanX or ETH during a presale and redeemed for Element 280 tokens after a cooldown period. Multipliers contribute to a pool used for reward calculations.',
     maxTokensPerOwnerQuery: 100,
+    availableVaultFunctions: Object.keys(vaultAbiFunctions.element280.functions),
+    rewardToken: 'ELMNT',
+    apiEndpoint: '/api/holders/element280',
+    pageSize: 100,
   },
   element369: {
     name: 'Element 369',
     symbol: 'E369',
     chain: 'ETH',
-    contractAddress: '0x024D64E2F65747d8bB02dFb852702D588A062575',
+    contractAddress: '0x024D64E2F65747d8bB02dFB852702D588A062575',
     vaultAddress: '0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5',
     deploymentBlock: '21224418',
-    abi: abis.element369.nft,
+    abi: element369NFT,
+    vaultAbi: vaultAbis.element369,
     tiers: {
       1: { name: 'Common', multiplier: 1, price: '100000000000000000000000000' },
       2: { name: 'Rare', multiplier: 10, price: '1000000000000000000000000000' },
       3: { name: 'Legendary', multiplier: 100, price: '10000000000000000000000000000' },
     },
     description: 'Element 369 NFTs are minted with TitanX or ETH during specific sale cycles. Burning NFTs updates a multiplier pool and tracks burn cycles for reward distribution in the Holder Vault.',
+    availableVaultFunctions: Object.keys(vaultAbiFunctions.element369.functions),
+    rewardToken: 'INFERNO/FLUX/E280',
+    apiEndpoint: '/api/holders/element369',
+    pageSize: 1000,
   },
   stax: {
     name: 'Stax',
@@ -248,7 +1214,8 @@ const nftContracts = {
     vaultAddress: '0x5D27813C32dD705404d1A78c9444dAb523331717',
     deploymentBlock: '21452667',
     totalMinted: 503,
-    abi: abis.stax.nft,
+    abi: staxNFT,
+    vaultAbi: vaultAbis.stax,
     tiers: {
       1: { name: 'Common', multiplier: 1, price: '100000000000000000000000000' },
       2: { name: 'Common Amped', multiplier: 1.2, price: '100000000000000000000000000', amplifier: '10000000000000000000000000' },
@@ -264,6 +1231,10 @@ const nftContracts = {
       12: { name: 'Legendary LFG', multiplier: 200, price: '10000000000000000000000000000', amplifier: '5000000000000000000000000000' },
     },
     description: 'Stax NFTs are minted with TitanX or ETH during a presale. Burning NFTs after a cooldown period claims backing rewards, with multipliers contributing to a pool for cycle-based reward calculations.',
+    availableVaultFunctions: Object.keys(vaultAbiFunctions.stax.functions),
+    rewardToken: 'X28',
+    apiEndpoint: '/api/holders/stax',
+    pageSize: 1000,
   },
   ascendant: {
     name: 'Ascendant',
@@ -272,7 +1243,8 @@ const nftContracts = {
     contractAddress: '0x9da95c32c5869c84ba2c020b5e87329ec0adc97f',
     vaultAddress: null,
     deploymentBlock: '21112535',
-    abi: abis.ascendant.nft,
+    abi: ascendantNFT,
+    vaultAbi: null,
     tiers: {
       1: { name: 'Tier 1', price: '7812500000000000000000', multiplier: 1.01 },
       2: { name: 'Tier 2', price: '15625000000000000000000', multiplier: 1.02 },
@@ -285,6 +1257,10 @@ const nftContracts = {
     },
     description: 'Ascendant NFTs are minted with ASCENDANT tokens and offer staking rewards from DragonX pools over 8, 28, and 90-day periods. Features fusion mechanics to combine same-tier NFTs into higher tiers.',
     maxTokensPerOwnerQuery: 1000,
+    availableVaultFunctions: null,
+    rewardToken: 'DRAGONX',
+    apiEndpoint: '/api/holders/ascendant',
+    pageSize: 1000,
   },
   e280: {
     name: 'E280',
@@ -294,14 +1270,19 @@ const nftContracts = {
     vaultAddress: null,
     deploymentBlock: null,
     abi: null,
+    vaultAbi: null,
     tiers: {},
     description: 'E280 NFTs on BASE chain. Contract not yet deployed.',
     disabled: true,
+    availableVaultFunctions: null,
+    rewardToken: 'E280',
+    apiEndpoint: '/api/holders/e280',
+    pageSize: 1000,
   },
 };
 
 // Tier order configurations
-const contractTiers = {
+export const contractTiers = {
   element280: {
     tierOrder: [
       { tierId: '6', name: 'Legendary Amped' },
@@ -350,58 +1331,40 @@ const contractTiers = {
   e280: { tierOrder: [] },
 };
 
-// Contract details for API endpoints
-const contractDetails = {
-  element280: {
-    name: 'Element 280',
-    chain: 'ETH',
-    pageSize: 100,
-    apiEndpoint: '/api/holders/Element280',
-    rewardToken: 'ELMNT',
-  },
-  element369: {
-    name: 'Element 369',
-    chain: 'ETH',
-    pageSize: 1000,
-    apiEndpoint: '/api/holders/Element369',
-    rewardToken: 'INFERNO/FLUX/E280',
-  },
-  stax: {
-    name: 'Stax',
-    chain: 'ETH',
-    pageSize: 1000,
-    apiEndpoint: '/api/holders/Stax',
-    rewardToken: 'X28',
-  },
-  ascendant: {
-    name: 'Ascendant',
-    chain: 'ETH',
-    pageSize: 1000,
-    apiEndpoint: '/api/holders/Ascendant',
-    rewardToken: 'DRAGONX',
-  },
-  e280: {
-    name: 'E280',
-    chain: 'BASE',
-    pageSize: 1000,
-    apiEndpoint: '/api/holders/E280',
-    rewardToken: 'E280',
-    disabled: true,
-  },
-};
+// Utility functions
+export function getContractAbi(contractKey, contractType = 'nft') {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection[contractType] || null;
+}
+
+export function getRewardFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.rewardFunction || null;
+}
+
+export function getTierFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.tierFunction || null;
+}
+
+export function getBatchTokenDataFunction(contractKey) {
+  const collection = abiFunctions[contractKey.toLowerCase()];
+  if (!collection) throw new Error(`Unknown contract key: ${contractKey}`);
+  return collection.batchTokenData || null;
+}
 
 // Main configuration object
 const config = {
   // Supported blockchain networks
   supportedChains: ['ETH', 'BASE'],
 
-  // ABI definitions for contracts
-  abis,
-
   // Contract configurations
   nftContracts,
 
-  // Derived contract addresses (avoids duplication)
+  // Derived contract addresses
   getContractAddresses: () => Object.keys(nftContracts).reduce((acc, key) => ({
     ...acc,
     [key]: { chain: nftContracts[key].chain, address: nftContracts[key].contractAddress },
@@ -422,51 +1385,6 @@ const config = {
   // Tier order configurations
   contractTiers,
 
-  // Contract details for API endpoints
-  contractDetails,
-
-  // Utility to get contract details by name
-  getContractDetails: (contractName) => contractDetails[contractName.toLowerCase()] || null,
-
-  // Alchemy API settings
-  alchemy: {
-    apiKey: process.env.ALCHEMY_API_KEY || process.env.NEXT_PUBLIC_ALCHEMY_API_KEY,
-    network: process.env.ALCHEMY_NETWORK || 'eth-mainnet',
-    batchSize: 50,
-    batchDelayMs: 1000, // Increased to avoid rate limits
-    retryMaxDelayMs: 10000,
-    maxRetries: 3, // Increased for reliability
-    timeoutMs: 30000,
-  },
-
-  // Cache settings for Redis and NodeCache
-  cache: {
-    redis: {
-      disableElement280: process.env.DISABLE_ELEMENT280_REDIS === 'true',
-      disableElement369: process.env.DISABLE_ELEMENT369_REDIS === 'true',
-      disableStax: process.env.DISABLE_STAX_REDIS === 'true',
-      disableAscendant: process.env.DISABLE_ASCENDANT_REDIS === 'true',
-      disableE280: process.env.DISABLE_E280_REDIS === 'true' || true,
-    },
-    nodeCache: {
-      stdTTL: 86400, // 24 hours for tier cache persistence
-      checkperiod: 120,
-    },
-    blockThreshold: 1000, 
-  },
-
-  // Debug settings
-  debug: {
-    enabled: process.env.DEBUG === 'true',
-    logLevel: 'info',
-    suppressDebug: false, // Enable debug logs for troubleshooting
-  },
-
-  // Fallback data settings
-  fallbackData: {
-    element280: process.env.USE_FALLBACK_DATA === 'true' ? null : null,
-  },
-
   // Burn address for NFTs
   burnAddress: '0x0000000000000000000000000000000000000000',
 
@@ -481,11 +1399,10 @@ const config = {
           console.error(`ABI for ${key}:`, contract.abi);
           throw new Error(`Invalid or missing ABI for ${key}: expected array, got ${typeof contract.abi}`);
         }
-        // Match route.js requiredFunctions
         const requiredFunctions = key === 'ascendant'
           ? ['getNFTAttribute', 'userRecords', 'totalShares', 'toDistribute', 'batchClaimableAmount']
           : ['totalSupply', 'totalBurned', 'ownerOf', 'getNftTier'];
-        const missingFunctions = requiredFunctions.filter(fn => 
+        const missingFunctions = requiredFunctions.filter(fn =>
           !contract.abi.some(item => item.name === fn && item.type === 'function')
         );
         if (missingFunctions.length > 0) {
@@ -499,7 +1416,7 @@ const config = {
 // Validate config at startup
 try {
   config.validateContracts();
-  console.log('Config validation passed:', {
+  console.log('NFT config validation passed:', {
     contracts: Object.keys(config.nftContracts),
     element280TotalMinted: config.nftContracts.element280.totalMinted,
     staxTotalMinted: config.nftContracts.stax.totalMinted,
@@ -507,919 +1424,12 @@ try {
     staxAbi: Array.isArray(config.nftContracts.stax.abi) ? `array (${config.nftContracts.stax.abi.length} items)` : 'invalid',
   });
 } catch (error) {
-  console.error('Config validation failed:', error.message);
+  console.error('NFT config validation failed:', error.message);
   throw error;
 }
 
+export { abiFunctions, vaultAbis, getVaultFunction }; // Explicitly export abiFunctions, vaultAbis, and getVaultFunction
 export default config;
------ ./contracts/contracts.js -----
-
-// All contracts should reside in here
-// app/token_contracts.js
-import { getAddress } from 'viem';
-
-// Import ABIs from abi directory
-import ascendantAuctionABI from '../abi/ascendantAuction.json' with { type: 'json' };
-import blazeAuctionABI from '../abi/blazeAuction.json' with { type: 'json' };
-import flareAuctionABI from '../abi/flareAuction.json' with { type: 'json' };;
-import flareMintingABI from '../abi/flareMinting.json' with { type: 'json' };;
-import fluxAuctionABI from '../abi/fluxAuction.json' with { type: 'json' };;
-import goatXAuctionABI from '../abi/goatXAuction.json' with { type: 'json' };;
-import matrixAuctionABI from '../abi/matrixAuction.json' with { type: 'json' };;
-import phoenixAuctionABI from '../abi/phoenixAuction.json' with { type: 'json' };;
-import shogunAuctionABI from '../abi/shogunAuction.json' with { type: 'json' };;
-import voltAuctionABI from '../abi/voltAuction.json' with { type: 'json' };;
-import vyperBoostAuctionABI from '../abi/vyperBoostAuction.json' with { type: 'json' };;
-import vyperClassicAuctionABI from '../abi/vyperClassicAuction.json' with { type: 'json' };;
-
-// Define raw contracts with validated addresses
-const rawContracts = {
-  // Ascendant
-  ASCENDANT: {
-    name: 'Ascendant Token',
-    address: getAddress('0x0943D06A5Ff3B25ddC51642717680c105AD63c01'),
-    chainId: 1,
-    type: 'token',
-  },
-  ASCENDANT_AUCTION: {
-    name: 'Ascendant Auction',
-    address: getAddress('0x592daEb53eB1cef8aa96305588310E997ec58c0c'),
-    chainId: 1,
-    type: 'auction',
-    abi: ascendantAuctionABI,
-  },
-  ASCENDANT_BUY_AND_BURN: {
-    name: 'Ascendant Buy and Burn',
-    address: getAddress('0x27D21C4Fa62F063B5f005c5BD87cffEa62e348D1'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  ASCENDANT_DRAGONX: {
-    name: 'ASCENDANT/DRAGONX Pool',
-    address: getAddress('0xe8cC60F526bec8C663C6eEc5A65eFAe9d89Ee6aD'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-  ASCENDANT_NFT_MARKETPLACE: {
-    name: 'Ascendant NFT Marketplace',
-    address: getAddress('0x2a7156295E85991A3861e2FAB09Eef6AcAC94717'),
-    chainId: 1,
-    type: 'marketplace',
-  },
-  ASCENDANT_NFT_MINTING: {
-    name: 'Ascendant NFT Minting',
-    address: getAddress('0x9dA95C32C5869c84Ba2C020B5e87329eC0aDC97f'),
-    chainId: 1,
-    type: 'minting',
-  },
-  ASCENDANT_PRIDE: {
-    name: 'Ascendant Pride',
-    address: getAddress('0x1B7C257ee2D1f30E1be2F90968258F13eD961c82'),
-    chainId: 1,
-    type: 'special',
-  },
-
-  // Blaze
-  BLAZE: {
-    name: 'Blaze Token',
-    address: getAddress('0xfcd7cceE4071aA4ecFAC1683b7CC0aFeCAF42A36'),
-    chainId: 1,
-    type: 'token',
-  },
-  BLAZE_AUCTION: {
-    name: 'Blaze Auction',
-    address: getAddress('0x200ed69de20Fe522d08dF5d7CE3d69aba4e02e74'),
-    chainId: 1,
-    type: 'auction',
-    abi: blazeAuctionABI,
-  },
-  BLAZE_BONFIRE: {
-    name: 'Blaze Bonfire',
-    address: getAddress('0x72AB9dcAc1BE635e83D0E458D2aA1FbF439B44f7'),
-    chainId: 1,
-    type: 'bonfire',
-  },
-  BLAZE_BUY_AND_BURN: {
-    name: 'Blaze Buy and Burn',
-    address: getAddress('0x27D80441831252950C528343a4F5CcC6b1E0EA95'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  BLAZE_STAKING: {
-    name: 'Blaze Staking',
-    address: getAddress('0xBc0043bc5b0c394D9d05d49768f9548F8CF9587b'),
-    chainId: 1,
-    type: 'staking',
-  },
-  BLAZE_TITANX: {
-    name: 'BLAZE/TITANX Pool',
-    address: getAddress('0x4D3A10d4792Dd12ececc5F3034C8e264B28485d1'),
-    chainId: 1,
-    type: 'uniswapV2Pool',
-  },
-
-  // Bonfire
-  BONFIRE: {
-    name: 'Bonfire Token',
-    address: getAddress('0x7d51174B02b6242D7b4510Cd988d24bC39d026c3'),
-    chainId: 1,
-    type: 'token',
-  },
-  BONFIRE_BUY_AND_BURN: {
-    name: 'Bonfire Buy and Burn',
-    address: getAddress('0xe871fEB86093809F1c9555a83B292419BB23F699'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  BONFIRE_X28: {
-    name: 'BONFIRE/X28 Pool',
-    address: getAddress('0x2DF1230D9Bd024A9d4EdB53336165Eb27AaBc7Fd'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // DragonX
-  DRAGONX: {
-    name: 'DragonX Token',
-    address: getAddress('0x96a5399D07896f757Bd4c6eF56461F58DB951862'),
-    chainId: 1,
-    type: 'token',
-  },
-  DRAGONX_BURN_PROXY: {
-    name: 'DragonX Burn Proxy',
-    address: getAddress('0x1d59429571d8Fde785F45bf593E94F2Da6072Edb'),
-    chainId: 1,
-    type: 'proxy',
-  },
-  DRAGONX_BUY_AND_BURN: {
-    name: 'DragonX Buy and Burn',
-    address: getAddress('0x1A4330EAf13869D15014abcA69516FC6AB36E54D'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  DRAGONX_BUY_TITANS: {
-    name: 'DragonX Buy Titans',
-    address: getAddress('0x1A4330EAf13869D15014abcA69516FC6AB36E54D'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  DRAGONX_HYBRID: {
-    name: 'DragonX Hybrid',
-    address: getAddress('0x619321771d67d9D8e69A3503683FcBa0678D2eF3'),
-    chainId: 1,
-    type: 'hybrid',
-  },
-  DRAGONX_TITANX: {
-    name: 'DRAGONX/TITANX Pool',
-    address: getAddress('0x25215d9ba4403b3DA77ce50606b54577a71b7895'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // E280
-  E280_BASE: {
-    name: 'E280 Token (Base)',
-    address: getAddress('0x058E7b30200d001130232e8fBfDF900590E0bAA9'),
-    chainId: 8453,
-    type: 'token',
-  },
-  E280_ETH: {
-    name: 'E280 Token (Ethereum)',
-    address: getAddress('0x058E7b30200d001130232e8fBfDF900590E0bAA9'),
-    chainId: 1,
-    type: 'token',
-  },
-  E280_BUY_AND_BURN: {
-    name: 'E280 Buy and Burn',
-    address: getAddress('0x6E83D86841C70CCA0f16bf653A22899d06935Ee2'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  E280_LP_DEPOSITOR: {
-    name: 'E280 LP Depositor',
-    address: getAddress('0xB302fbF6c9836557371a79012b540303Cc758BB3'),
-    chainId: 1,
-    type: 'depositor',
-  },
-  E280_REWARD_DEPOSITOR: {
-    name: 'E280 Reward Depositor',
-    address: getAddress('0xD8f842150511e8F501050E8a4c6878104312d82C'),
-    chainId: 1,
-    type: 'depositor',
-  },
-  E280_TAX_DEPOSITOR: {
-    name: 'E280 Tax Depositor',
-    address: getAddress('0x55F643B0B7b8d8B824c2b33eC392023AbefF0a52'),
-    chainId: 1,
-    type: 'depositor',
-  },
-  E280_TAX_DISTRIBUTOR: {
-    name: 'E280 Tax Distributor',
-    address: getAddress('0x1b25cc7461a9EE4a4c8f9dA82c828D8a39ea73e4'),
-    chainId: 1,
-    type: 'distributor',
-  },
-  STAX_ELEMENT280: {
-    name: 'STAX/ELEMENT280 Pool',
-    address: getAddress('0x190BD81780e46124245d39774776be939bB8595B'),
-    chainId: 1,
-    type: 'uniswapV2Pool',
-  },
-
-  // Eden
-  EDEN: {
-    name: 'Eden Token',
-    address: getAddress('0x31b2c59d760058cfe57e59472E7542f776d987FB'),
-    chainId: 1,
-    type: 'token',
-  },
-  EDEN_BLOOM_POOL: {
-    name: 'Eden Bloom Pool',
-    address: getAddress('0xe5Da018596D0e60d704b09d0E43734266e280e05'),
-    chainId: 1,
-    type: 'pool',
-  },
-  EDEN_BUY_AND_BURN: {
-    name: 'Eden Buy and Burn',
-    address: getAddress('0x1681EB21026104Fa63121fD517e065cEc21A4b4C'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  EDEN_MINING: {
-    name: 'Eden Mining',
-    address: getAddress('0x890B015ECA83a6CA03b436a748969976502B7c0c'),
-    chainId: 1,
-    type: 'mining',
-  },
-  EDEN_STAKING: {
-    name: 'Eden Staking',
-    address: getAddress('0x32C611b0a96789BaA3d6bF9F0867b7E1b9d049Be'),
-    chainId: 1,
-    type: 'staking',
-  },
-
-  // Element
-  ELEMENT: {
-    name: 'Element Token',
-    address: getAddress('0xe9A53C43a0B58706e67341C4055de861e29Ee943'),
-    chainId: 1,
-    type: 'token',
-  },
-  ELEMENT_BUY_AND_BURN: {
-    name: 'Element Buy and Burn',
-    address: getAddress('0x3F2b113d180ecb1457e450b9EfcAC3df1Dd29AD3'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  ELEMENT_BUY_AND_BURN_V2: {
-    name: 'Element Buy and Burn V2',
-    address: getAddress('0x88BB363b333a6291Cf7CF5931eFe7a1E2D978325'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  ELEMENT_HOLDER_VAULT: {
-    name: 'Element Holder Vault',
-    address: getAddress('0x44c4ADAc7d88f85d3D33A7f856Ebc54E60C31E97'),
-    chainId: 1,
-    type: 'vault',
-  },
-  ELEMENT_NFT: {
-    name: 'Element NFT',
-    address: getAddress('0x7F090d101936008a26Bf1F0a22a5f92fC0Cf46c9'),
-    chainId: 1,
-    type: 'nft',
-  },
-
-  // Element369
-  ELEMENT369_FLUX_HUB: {
-    name: 'Element369 Flux Hub',
-    address: getAddress('0x6067487ee98B6A830cc3E5E7F57Dc194044D1F1D'),
-    chainId: 1,
-    type: 'hub',
-  },
-  ELEMENT369_HOLDER_VAULT: {
-    name: 'Element369 Holder Vault',
-    address: getAddress('0x4e3DBD6333e649AF13C823DAAcDd14f8507ECBc5'),
-    chainId: 1,
-    type: 'vault',
-  },
-  ELEMENT369_NFT: {
-    name: 'Element369 NFT',
-    address: getAddress('0x024D64E2F65747d8bB02dFB852702D588A062575'),
-    chainId: 1,
-    type: 'nft',
-  },
-
-  // Flare
-  FLARE: {
-    name: 'Flare Token',
-    address: getAddress('0x34a4FE5397bf2768189EDe14FE4adAD374B993B8'),
-    chainId: 1,
-    type: 'token',
-  },
-  FLARE_AUCTION: {
-    name: 'Flare Auction',
-    address: getAddress('0x58ad6EF28bFB092635454d02303aBBd4D87b503c'),
-    chainId: 1,
-    type: 'auction',
-    abi: flareAuctionABI,
-  },
-  FLARE_AUCTION_BUY_AND_BURN: {
-    name: 'Flare Auction Buy and Burn',
-    address: getAddress('0x17d8258eC7fA1EfC9CA4c6C15f3417bF30564048'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  FLARE_AUCTION_TREASURY: {
-    name: 'Flare Auction Treasury',
-    address: getAddress('0x744D402674006f2711a3D6E4a80cc749C7915545'),
-    chainId: 1,
-    type: 'treasury',
-  },
-  FLARE_BUY_AND_BURN: {
-    name: 'Flare Buy and Burn',
-    address: getAddress('0x6A12392C7dc5ddAA7d59007B329BFED35af092E6'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  FLARE_MINTING: {
-    name: 'Flare Minting',
-    address: getAddress('0x9983eF6Af4DE8fE58C45f6DC54Cf5Ad349431A82'),
-    chainId: 1,
-    type: 'minting',
-    abi: flareMintingABI,
-  },
-  FLARE_X28: {
-    name: 'FLARE/X28 Pool',
-    address: getAddress('0x05b7Cc21A11354778Cf0D7faf159f1a99724ccFd'),
-    chainId: 1,
-    type: 'uniswapV2Pool',
-  },
-
-  // Flux
-  FLUX: {
-    name: 'Flux Token',
-    address: getAddress('0xBFDE5ac4f5Adb419A931a5bF64B0f3BB5a623d06'),
-    chainId: 1,
-    type: 'token',
-  },
-  FLUX_777: {
-    name: 'Flux 777',
-    address: getAddress('0x52ca28e311f200d1CD47C06996063e14eC2d6aB1'),
-    chainId: 1,
-    type: 'special',
-  },
-  FLUX_AUCTION: {
-    name: 'Flux Auction',
-    address: getAddress('0x36e5a8105f000029d4B3B99d0C3D0e24aaA52adF'),
-    chainId: 1,
-    type: 'auction',
-    abi: fluxAuctionABI,
-  },
-  FLUX_BUY_AND_BURN: {
-    name: 'Flux Buy and Burn',
-    address: getAddress('0xaE14148F726E7C3AA5C0c992D044bE113b32292C'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  FLUX_STAKING: {
-    name: 'Flux Staking',
-    address: getAddress('0xd605a87187563C94c577a6E57e4a36eC8433B9aE'),
-    chainId: 1,
-    type: 'staking',
-  },
-  FLUX_TITANX: {
-    name: 'FLUX/TITANX Pool',
-    address: getAddress('0x2278012E61c0fB38DaE1579bD41a87A59A5954c2'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // GoatX
-  GOATX: {
-    name: 'GoatX Token',
-    address: getAddress('0x4Eca7761a516F8300711cbF920C0b85555261993'),
-    chainId: 1,
-    type: 'token',
-  },
-  GOATX_AUCTION: {
-    name: 'GoatX Auction',
-    address: getAddress('0x059511B0BED706276Fa98877bd00ee0dD7303D32'),
-    chainId: 1,
-    type: 'auction',
-    abi: goatXAuctionABI,
-  },
-  GOATX_BUY_AND_BURN: {
-    name: 'GoatX Buy and Burn',
-    address: getAddress('0xE6Cf4Cb42A6c37729c4546b4B9E83b97a05cE950'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  GOATX_MINING: {
-    name: 'GoatX Mining',
-    address: getAddress('0x4E83d6911bc1E191Bd207920737149B8FC060c8D'),
-    chainId: 1,
-    type: 'mining',
-  },
-
-  // Helios
-  HELIOS: {
-    name: 'Helios Token',
-    address: getAddress('0x2614f29C39dE46468A921Fd0b41fdd99A01f2EDf'),
-    chainId: 1,
-    type: 'token',
-  },
-  HELIOS_BUY_AND_BURN: {
-    name: 'Helios Buy and Burn',
-    address: getAddress('0x9bff9f810d19cdb4bf7701c9d5ad101e91cda08d'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  HELIOS_TITANX: {
-    name: 'HELIOS/TITANX Pool',
-    address: getAddress('0x2C83C54C5612BfD62a78124D4A0eA001278a689c'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // Hyper
-  HYPER: {
-    name: 'Hyper Token',
-    address: getAddress('0xE2cfD7a01ec63875cd9Da6C7c1B7025166c2fA2F'),
-    chainId: 1,
-    type: 'token',
-  },
-  HYPER_BUY_AND_BURN: {
-    name: 'Hyper Buy and Burn',
-    address: getAddress('0x15Bec83b642217814dDAeB6F8A74ba7E0D6D157E'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  HYPER_TITANX: {
-    name: 'HYPER/TITANX Pool',
-    address: getAddress('0x14d725edB1299fF560d96f42462f0234B65B00AF'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // Hydra
-  HYDRA: {
-    name: 'Hydra Token',
-    address: getAddress('0xCC7ed2ab6c3396DdBc4316D2d7C1b59ff9d2091F'),
-    chainId: 1,
-    type: 'token',
-  },
-  HYDRA_BUY_AND_BURN: {
-    name: 'Hydra Buy and Burn',
-    address: getAddress('0xfEF10De0823F58DF4f5F24856aB4274EdeDa6A5c'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  HYDRA_DRAGONX: {
-    name: 'HYDRA/DRAGONX Pool',
-    address: getAddress('0xF8F0Ef9f6A12336A1e035adDDbD634F3B0962F54'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // Matrix
-  MATRIX: {
-    name: 'Matrix Token',
-    address: getAddress('0xF2Fc894381792Ded27a7f08D9F0F246363cBe1ea'),
-    chainId: 1,
-    type: 'token',
-  },
-  MATRIX_AUCTION: {
-    name: 'Matrix Auction',
-    address: getAddress('0x9f29E5b2d67C4a7315c5D6AbD448C45f9dD51CAF'),
-    chainId: 1,
-    type: 'auction',
-    abi: matrixAuctionABI,
-  },
-  MATRIX_BUY_AND_BURN: {
-    name: 'Matrix Buy and Burn',
-    address: getAddress('0x50371D550e1eaB5aeC08d2D79B77B14b79dCC57E'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  MATRIX_HYPER: {
-    name: 'MATRIX/HYPER Pool',
-    address: getAddress('0x9dA4aCd7d87e7396901d92671173296bf9845c53'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // ORX
-  ORX: {
-    name: 'ORX Token',
-    address: getAddress('0xd536e7a9543cf9867a580b45cec7f748a1fe11ec'),
-    chainId: 1,
-    type: 'token',
-  },
-  ORX_MINTER: {
-    name: 'ORX Minter',
-    address: getAddress('0x4C93D6380D22C44850Bdfa569Df5dD96e278622B'),
-    chainId: 1,
-    type: 'minter',
-  },
-  ORX_MULTISIG: {
-    name: 'ORX Multisig',
-    address: getAddress('0x54FDAcea0af4026306A665E9dAB635Ef5fF2963f'),
-    chainId: 1,
-    type: 'multisig',
-  },
-  ORX_STAKING: {
-    name: 'ORX Staking',
-    address: getAddress('0xE293DFD4720308c048B63AfE885F5971E135Eb1e'),
-    chainId: 1,
-    type: 'staking',
-  },
-  ORX_TITANX: {
-    name: 'ORX/TITANX Pool',
-    address: getAddress('0x2A216495584E406C39582d3ee583aEDA937beba6'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-  USDX: {
-    name: 'USDx Stable',
-    address: getAddress('0xDDF73eAcB2218377FC38679aD14dfce51B651Dd1'),
-    chainId: 1,
-    type: 'stablecoin',
-  },
-
-  // Phoenix
-  PHOENIX: {
-    name: 'Phoenix Token',
-    address: getAddress('0xfe3F988a90dEa3eE537BB43eC1aCa7337A15D002'),
-    chainId: 1,
-    type: 'token',
-  },
-  PHOENIX_AUCTION: {
-    name: 'Phoenix Auction',
-    address: getAddress('0xF41b5c99b8B6b88cF1Bd0320cB57e562EaF17DE1'),
-    chainId: 1,
-    type: 'auction',
-    abi: phoenixAuctionABI,
-  },
-  PHOENIX_BLAZE_STAKING_VAULT: {
-    name: 'Phoenix Blaze Staking Vault',
-    address: getAddress('0xBbe51Ee30422cb9a92D93363d2921A330813b598'),
-    chainId: 1,
-    type: 'stakingVault',
-  },
-  PHOENIX_BUY_AND_BURN: {
-    name: 'Phoenix Buy and Burn',
-    address: getAddress('0x97eBd4f9FfCFE0cBC8F63A4e0B296FbB54f0a185'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  PHOENIX_FLUX_STAKING_VAULT: {
-    name: 'Phoenix Flux Staking Vault',
-    address: getAddress('0x3F1BFcd2a04a829ff4106217F8EB8eFa1C31e89b'),
-    chainId: 1,
-    type: 'stakingVault',
-  },
-  PHOENIX_MINTING: {
-    name: 'Phoenix Minting',
-    address: getAddress('0xAaE97688F2c28c3E391dFddC7B26276D8445B199'),
-    chainId: 1,
-    type: 'minting',
-  },
-  PHOENIX_TITANX_STAKING_VAULT: {
-    name: 'Phoenix TitanX Staking Vault',
-    address: getAddress('0x6B59b8E9635909B7f0FF2C577BB15c936f32619A'),
-    chainId: 1,
-    type: 'stakingVault',
-  },
-
-  // Shogun
-  SHOGUN: {
-    name: 'Shogun Token',
-    address: getAddress('0xfD4cB1294dF23920e683e046963117cAe6C807D9'),
-    chainId: 1,
-    type: 'token',
-  },
-  SHOGUN_AUCTION: {
-    name: 'Shogun Auction',
-    address: getAddress('0x79bd712f876c364Aa5e775A1eD40dE1fDfdB2a50'),
-    chainId: 1,
-    type: 'auction',
-    abi: shogunAuctionABI,
-  },
-  SHOGUN_BUY_AND_BURN: {
-    name: 'Shogun Buy and Burn',
-    address: getAddress('0xF53D4f2E79d66605aE7c2CAdc0A40A1e7CbE973A'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  SHOGUN_TITANX: {
-    name: 'SHOGUN/TITANX Pool',
-    address: getAddress('0x79bd712f876c364Aa5e775A1eD40dE1fDfdB2a50'),
-    chainId: 1,
-    type: 'uniswapV2Pool',
-  },
-
-  // Stax
-  STAX: {
-    name: 'Stax Token',
-    address: getAddress('0x4bd0F1886010253a18BBb401a788d8972c155b9d'),
-    chainId: 1,
-    type: 'token',
-  },
-  STAX_BANK: {
-    name: 'Stax Bank',
-    address: getAddress('0x1b15e269D07986F0b8751872C16D9F47e1582402'),
-    chainId: 1,
-    type: 'bank',
-  },
-  STAX_BLAZE: {
-    name: 'Stax Blaze',
-    address: getAddress('0x03a48BaadAe6A0474aDc6F39111428BaDbfb54D1'),
-    chainId: 1,
-    type: 'staking',
-  },
-  STAX_BUY_AND_BURN: {
-    name: 'Stax Buy and Burn',
-    address: getAddress('0x1698a3e248FF7F0f1f91FE82Eedaa3F1212D1F7F'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  STAX_EDEN: {
-    name: 'Stax Eden',
-    address: getAddress('0x5d91C1180f063c66DC0a08CE136AeC92B97f8F87'),
-    chainId: 1,
-    type: 'staking',
-  },
-  STAX_FLUX: {
-    name: 'Stax Flux',
-    address: getAddress('0xC3379750B254977f195BA60D096BBcCfe6b81ce8'),
-    chainId: 1,
-    type: 'staking',
-  },
-  STAX_HELIOS: {
-    name: 'Stax Helios',
-    address: getAddress('0xCd5fd72664f5A4dB62E44e9c778E9dAeB01F2bB2'),
-    chainId: 1,
-    type: 'staking',
-  },
-  STAX_HELIOS_V2: {
-    name: 'Stax Helios V2',
-    address: getAddress('0x3A50Cc9740DE6143c8d53Df44ece96Eeb07318E8'),
-    chainId: 1,
-    type: 'staking',
-  },
-  STAX_HOLDER_VAULT: {
-    name: 'Stax Holder Vault',
-    address: getAddress('0x5D27813C32dD705404d1A78c9444dAb523331717'),
-    chainId: 1,
-    type: 'vault',
-  },
-  STAX_HYPER: {
-    name: 'Stax Hyper',
-    address: getAddress('0xa23f149f10f415c56b1629Fe07bf94278c808271'),
-    chainId: 1,
-    type: 'staking',
-  },
-  STAX_NFT: {
-    name: 'Stax NFT',
-    address: getAddress('0x74270Ca3a274B4dbf26be319A55188690CACE6E1'),
-    chainId: 1,
-    type: 'nft',
-  },
-  STAX_ORX: {
-    name: 'Stax ORX',
-    address: getAddress('0xF1b7081Cab015ADB3c1B8D3A8732763dBc87B744'),
-    chainId: 1,
-    type: 'staking',
-  },
-  STAX_TITANX: {
-    name: 'Stax TitanX',
-    address: getAddress('0x802974Ea9362b46a6eeAb4431E030D17dF6613E8'),
-    chainId: 1,
-    type: 'staking',
-  },
-
-  // TitanX
-  TITANX: {
-    name: 'TitanX Token',
-    address: getAddress('0xF19308F923582A6f7c465e5CE7a9Dc1BEC6665B1'),
-    chainId: 1,
-    type: 'token',
-  },
-  TITANX_BUY_AND_BURN_V1: {
-    name: 'TitanX Buy and Burn V1',
-    address: getAddress('0x1393ad734EA3c52865b4B541cf049dafd25c23a5'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  TITANX_BUY_AND_BURN_V2: {
-    name: 'TitanX Buy and Burn V2',
-    address: getAddress('0x410e10C33a49279f78CB99c8d816F18D5e7D5404'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  TITANX_TREASURY: {
-    name: 'TitanX Treasury',
-    address: getAddress('0xA2d21205Aa7273BadDFC8E9551e05E23bB49ce46'),
-    chainId: 1,
-    type: 'treasury',
-  },
-  TITANX_WETH: {
-    name: 'TITANX/WETH Pool',
-    address: getAddress('0xc45A81BC23A64eA556ab4CdF08A86B61cdcEEA8b'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // USDC
-  USDC: {
-    name: 'USDC Token',
-    address: getAddress('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'),
-    chainId: 1,
-    type: 'stablecoin',
-  },
-
-  // Volt
-  VOLT: {
-    name: 'Volt Token',
-    address: getAddress('0x66b5228CfD34d9f4d9F03188d67816286C7c0b74'),
-    chainId: 1,
-    type: 'token',
-  },
-  VOLT_AUCTION: {
-    name: 'Volt Auction',
-    address: getAddress('0xb3f2bE29BA969588E07bF7512e07008D6fdeB17B'),
-    chainId: 1,
-    type: 'auction',
-    abi: voltAuctionABI,
-  },
-  VOLT_BUY_AND_BURN: {
-    name: 'Volt Buy and Burn',
-    address: getAddress('0x2801592e5Cdd85aC4e462DB2abC80951705cf601'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  VOLT_TITANX: {
-    name: 'VOLT/TITANX Pool',
-    address: getAddress('0x3F1A36B6C946E406f4295A89fF06a5c7d62F2fe2'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-  VOLT_TREASURY: {
-    name: 'Volt Treasury',
-    address: getAddress('0xb638BFB7BC3B8398bee48569CFDAA6B3Bb004224'),
-    chainId: 1,
-    type: 'treasury',
-  },
-
-  // Vyper
-  VYPER: {
-    name: 'Vyper Token',
-    address: getAddress('0xd7fa4cFC22eA07DfCeD53033fbE59d8b62B8Ee9E'),
-    chainId: 1,
-    type: 'token',
-  },
-  VYPER_BOOST_AUCTION: {
-    name: 'Vyper Boost Auction',
-    address: getAddress('0x4D994F53FE2d8BdBbF64dC2e53C58Df00b84e713'),
-    chainId: 1,
-    type: 'auction',
-    abi: vyperBoostAuctionABI,
-  },
-  VYPER_BOOST_TREASURY: {
-    name: 'Vyper Boost Treasury',
-    address: getAddress('0x637dfBB5db0cf7B4062cb577E24cfB43c67d72BA'),
-    chainId: 1,
-    type: 'treasury',
-  },
-  VYPER_CLASSIC_AUCTION: {
-    name: 'Vyper Classic Auction',
-    address: getAddress('0xC1da113c983b26aa2c3f4fFD5f10b47457FC3397'),
-    chainId: 1,
-    type: 'auction',
-    abi: vyperClassicAuctionABI,
-  },
-  VYPER_CLASSIC_TREASURY: {
-    name: 'Vyper Classic Treasury',
-    address: getAddress('0xeb103eb39375077c5Afaa04150B4D334df69128A'),
-    chainId: 1,
-    type: 'treasury',
-  },
-  VYPER_DRAGONX: {
-    name: 'VYPER/DRAGONX Pool',
-    address: getAddress('0x214CAD3f7FbBe66919968Fa3a1b16E84cFcd457F'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // WETH
-  WETH: {
-    name: 'Wrapped Ether',
-    address: getAddress('0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'),
-    chainId: 1,
-    type: 'token',
-  },
-
-  // WETH/USDC Pool
-  WETH_USDC: {
-    name: 'WETH/USDC Pool',
-    address: getAddress('0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-
-  // X28
-  X28: {
-    name: 'X28 Omnichain Token',
-    address: getAddress('0x5c47902c8C80779CB99235E42C354E53F38C3B0d'),
-    chainId: 1,
-    type: 'token',
-  },
-  X28_BUY_AND_BURN: {
-    name: 'X28 Buy and Burn',
-    address: getAddress('0xa3144E7FCceD79Ce6ff6E14AE9d8DF229417A7a2'),
-    chainId: 1,
-    type: 'buyAndBurn',
-  },
-  X28_TITANX: {
-    name: 'X28/TITANX Pool',
-    address: getAddress('0x99f60479da6A49D55eBA34893958cdAACc710eE9'),
-    chainId: 1,
-    type: 'uniswapV3Pool',
-  },
-};
-
-export const tokenContracts = rawContracts;
-
-export const flareTokenABI = [
-  {
-    type: 'function',
-    name: 'x28FlarePool',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-  },
-];
-
-export const uniswapPoolABI = [
-  {
-    type: 'function',
-    name: 'slot0',
-    inputs: [],
-    outputs: [
-      { name: 'sqrtPriceX96', type: 'uint160' },
-      { name: 'tick', type: 'int24' },
-      { name: 'observationIndex', type: 'uint16' },
-      { name: 'observationCardinality', type: 'uint16' },
-      { name: 'observationCardinalityNext', type: 'uint16' },
-      { name: 'feeProtocol', type: 'uint8' },
-      { name: 'unlocked', type: 'bool' },
-    ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'token0',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'token1',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-  },
-];
-
-export const uniswapV2PoolABI = [
-  {
-    type: 'function',
-    name: 'getReserves',
-    inputs: [],
-    outputs: [
-      { name: '_reserve0', type: 'uint112' },
-      { name: '_reserve1', type: 'uint112' },
-      { name: '_blockTimestampLast', type: 'uint32' },
-    ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'token0',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'token1',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-  },
-];
 ----- ./abi/ascendantNFT.json -----
 
 [{"inputs":[{"internalType":"address","name":"_dragonX","type":"address"},{"internalType":"address","name":"_ascendant","type":"address"},{"internalType":"address","name":"_ascendantPride","type":"address"},{"internalType":"uint32","name":"_startTimestamp","type":"uint32"},{"internalType":"string[10][8]","name":"_tokenURIs","type":"string[10][8]"}],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[],"name":"Address0","type":"error"},{"inputs":[],"name":"Amount0","type":"error"},{"inputs":[],"name":"AscendantMinting__AmountForNewMintNotReached","type":"error"},{"inputs":[],"name":"AscendantMinting__ExpiredNFT","type":"error"},{"inputs":[],"name":"AscendantMinting__FusionTokenIdsCannotBeTheSame","type":"error"},{"inputs":[],"name":"AscendantMinting__InitialLockPeriod","type":"error"},{"inputs":[],"name":"AscendantMinting__InvalidDuration","type":"error"},{"inputs":[],"name":"AscendantMinting__InvalidLegendaryTierImageIndex","type":"error"},{"inputs":[],"name":"AscendantMinting__InvalidNFTOwner","type":"error"},{"inputs":[],"name":"AscendantMinting__InvalidNftCount","type":"error"},{"inputs":[{"internalType":"uint256","name":"_tokenId","type":"uint256"}],"name":"AscendantMinting__InvalidTokenID","type":"error"},{"inputs":[],"name":"AscendantMinting__LockPeriodNotOver","type":"error"},{"inputs":[],"name":"AscendantMinting__MaxBatchNftThresholdReached","type":"error"},{"inputs":[],"name":"AscendantMinting__MaxTierReached","type":"error"},{"inputs":[],"name":"AscendantMinting__NoSharesToClaim","type":"error"},{"inputs":[],"name":"AscendantMinting__OnlyMintingAndBurning","type":"error"},{"inputs":[],"name":"AscendantMinting__TierAmountMismatch","type":"error"},{"inputs":[],"name":"AscendantMinting__TierOfNFTsMustBeTheSame","type":"error"},{"inputs":[{"internalType":"address","name":"sender","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"address","name":"owner","type":"address"}],"name":"ERC721IncorrectOwner","type":"error"},{"inputs":[{"internalType":"address","name":"operator","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"ERC721InsufficientApproval","type":"error"},{"inputs":[{"internalType":"address","name":"approver","type":"address"}],"name":"ERC721InvalidApprover","type":"error"},{"inputs":[{"internalType":"address","name":"operator","type":"address"}],"name":"ERC721InvalidOperator","type":"error"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"ERC721InvalidOwner","type":"error"},{"inputs":[{"internalType":"address","name":"receiver","type":"address"}],"name":"ERC721InvalidReceiver","type":"error"},{"inputs":[{"internalType":"address","name":"sender","type":"address"}],"name":"ERC721InvalidSender","type":"error"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"ERC721NonexistentToken","type":"error"},{"inputs":[],"name":"Expired","type":"error"},{"inputs":[{"internalType":"uint256","name":"a","type":"uint256"},{"internalType":"uint256","name":"b","type":"uint256"}],"name":"GreaterThan","type":"error"},{"inputs":[],"name":"OnlyEOA","type":"error"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"OwnableInvalidOwner","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"OwnableUnauthorizedAccount","type":"error"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"approved","type":"address"},{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"operator","type":"address"},{"indexed":false,"internalType":"bool","name":"approved","type":"bool"}],"name":"ApprovalForAll","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"tokenId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"nftAttribute","type":"uint256"},{"indexed":false,"internalType":"uint64","name":"nftTier","type":"uint64"}],"name":"AscendantMinting__NFTAttributeGenerated","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"_fromTokenId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"_toTokenId","type":"uint256"}],"name":"BatchMetadataUpdate","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"shares","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"ascendantAmountReceived","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"_tokenId","type":"uint256"},{"indexed":false,"internalType":"address","name":"recepient","type":"address"}],"name":"Burnt","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"id","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"rewards","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"newRewardDebt","type":"uint256"},{"indexed":false,"internalType":"address","name":"ownerOfMint","type":"address"}],"name":"Claimed","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"enum AscendantNFTMinting.POOLS","name":"pool","type":"uint8"},{"indexed":true,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"Distributed","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"shares","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"_tokenId","type":"uint256"},{"indexed":false,"internalType":"address","name":"recepient","type":"address"}],"name":"FusionBurnt","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"_tokenId","type":"uint256"}],"name":"MetadataUpdate","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"minter","type":"address"},{"indexed":true,"internalType":"uint256","name":"ascendant","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"id","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"_shares","type":"uint256"}],"name":"Minted","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"firstTokenId","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"secondTokenId","type":"uint256"},{"indexed":true,"internalType":"uint256","name":"newTokenId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"shares","type":"uint256"},{"indexed":false,"internalType":"uint8","name":"oldTier","type":"uint8"},{"indexed":false,"internalType":"uint8","name":"newTier","type":"uint8"}],"name":"NFTFusion","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"Transfer","type":"event"},{"inputs":[{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"approve","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"ascendantPride","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"_ids","type":"uint256[]"},{"internalType":"address","name":"_receiver","type":"address"}],"name":"batchBurn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"_ids","type":"uint256[]"},{"internalType":"address","name":"_receiver","type":"address"}],"name":"batchClaim","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"_ids","type":"uint256[]"}],"name":"batchClaimableAmount","outputs":[{"internalType":"uint256","name":"toClaim","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint8","name":"_numOfNfts","type":"uint8"},{"internalType":"uint8","name":"_ascendantTier","type":"uint8"}],"name":"batchMint","outputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"},{"internalType":"uint256","name":"batchMintTotalShares","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_tokenId","type":"uint256"},{"internalType":"address","name":"_receiver","type":"address"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_tokenId","type":"uint256"},{"internalType":"address","name":"_receiver","type":"address"}],"name":"claim","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_amount","type":"uint256"}],"name":"distribute","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_firstTokenId","type":"uint256"},{"internalType":"uint256","name":"_secondTokenId","type":"uint256"}],"name":"fusion","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getApproved","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint8","name":"_tier","type":"uint8"}],"name":"getAscendantDataBasedOnTier","outputs":[{"internalType":"uint256","name":"tierValue","type":"uint256"},{"internalType":"uint64","name":"multiplier","type":"uint64"}],"stateMutability":"pure","type":"function"},{"inputs":[{"internalType":"uint256","name":"_tokenId","type":"uint256"}],"name":"getNFTAttribute","outputs":[{"components":[{"internalType":"uint256","name":"rarityNumber","type":"uint256"},{"internalType":"uint8","name":"tier","type":"uint8"},{"internalType":"enum AscendantNFTMinting.Rarity","name":"rarity","type":"uint8"}],"internalType":"struct AscendantNFTMinting.NftAttributes","name":"","type":"tuple"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"address","name":"operator","type":"address"}],"name":"isApprovedForAll","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"_tokenId","type":"uint256"},{"internalType":"address","name":"_spender","type":"address"}],"name":"isApprovedOrOwner","outputs":[],"stateMutability":"view","type":"function"},{"inputs":[],"name":"lastDistributedDay","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint8","name":"_tier","type":"uint8"}],"name":"mint","outputs":[{"internalType":"uint256","name":"_tokenId","type":"uint256"},{"internalType":"uint256","name":"shares","type":"uint256"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"name","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"nftAttributes","outputs":[{"internalType":"uint256","name":"rarityNumber","type":"uint256"},{"internalType":"uint8","name":"tier","type":"uint8"},{"internalType":"enum AscendantNFTMinting.Rarity","name":"rarity","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"ownerOf","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"renounceOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"rewardPerShare","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"safeTransferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"bytes","name":"data","type":"bytes"}],"name":"safeTransferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"operator","type":"address"},{"internalType":"bool","name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint8","name":"_tier","type":"uint8"},{"internalType":"uint256","name":"_index","type":"uint256"},{"internalType":"string","name":"_newUri","type":"string"}],"name":"setSingleTokenURI","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"string[10][8]","name":"_newTokenURIs","type":"string[10][8]"}],"name":"setTokenURIs","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"startTimestamp","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"bytes4","name":"interfaceId","type":"bytes4"}],"name":"supportsInterface","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"symbol","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"enum AscendantNFTMinting.POOLS","name":"","type":"uint8"}],"name":"toDistribute","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"tokenId","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"_tokenId","type":"uint256"}],"name":"tokenURI","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"uint256","name":"","type":"uint256"}],"name":"tokenURIs","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"totalShares","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"transferFrom","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"updateRewardsIfNecessary","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"id","type":"uint256"}],"name":"userRecords","outputs":[{"internalType":"uint256","name":"shares","type":"uint256"},{"internalType":"uint256","name":"lockedAscendant","type":"uint256"},{"internalType":"uint256","name":"rewardDebt","type":"uint256"},{"internalType":"uint32","name":"startTime","type":"uint32"},{"internalType":"uint32","name":"endTime","type":"uint32"}],"stateMutability":"view","type":"function"}]
@@ -1435,11 +1445,18 @@ export const uniswapV2PoolABI = [
 ----- ./abi/element369Vault.json -----
 
 [{"inputs":[{"internalType":"address","name":"_owner","type":"address"},{"internalType":"address","name":"_E369_NFT","type":"address"},{"internalType":"address","name":"_devWallet","type":"address"},{"internalType":"uint256","name":"_minCyclePool","type":"uint256"}],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[{"internalType":"address","name":"target","type":"address"}],"name":"AddressEmptyCode","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"AddressInsufficientBalance","type":"error"},{"inputs":[],"name":"CycleCooldown","type":"error"},{"inputs":[],"name":"FailedInnerCall","type":"error"},{"inputs":[],"name":"NoAllocation","type":"error"},{"inputs":[],"name":"NoCyclesAvailable","type":"error"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"OwnableInvalidOwner","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"OwnableUnauthorizedAccount","type":"error"},{"inputs":[],"name":"Prohibited","type":"error"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"SafeERC20FailedOperation","type":"error"},{"inputs":[],"name":"TokenExists","type":"error"},{"inputs":[],"name":"Unauthorized","type":"error"},{"inputs":[],"name":"ZeroAddress","type":"error"},{"inputs":[],"name":"ZeroInput","type":"error"},{"anonymous":false,"inputs":[],"name":"CycleUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferStarted","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"inputs":[],"name":"E369_NFT","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"FluxHub","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint32","name":"cycle777Id","type":"uint32"}],"name":"_getEndCycleForCycle777","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"pure","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"_getNextCyclePool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint32","name":"cycle777Id","type":"uint32"}],"name":"_getStartCycleForCycle777","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"pure","type":"function"},{"inputs":[],"name":"acceptOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"name":"claim777Backing","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"name":"claim777Rewards","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"name":"claimBacking","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"name":"claimRewards","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"address","name":"token","type":"address"}],"name":"cycle777AmountClaimed","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"address","name":"token","type":"address"}],"name":"cycle777BackingClaimed","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"id","type":"uint256"}],"name":"cycles","outputs":[{"internalType":"bool","name":"initialized","type":"bool"},{"internalType":"uint256","name":"infernoPerMulitplier","type":"uint256"},{"internalType":"uint256","name":"fluxPerMultiplier","type":"uint256"},{"internalType":"uint256","name":"e280PerMultiplier","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"id","type":"uint256"}],"name":"cycles777","outputs":[{"internalType":"uint32","name":"startCycleId","type":"uint32"},{"internalType":"uint32","name":"endCycleId","type":"uint32"},{"internalType":"uint256","name":"multiplierPool","type":"uint256"},{"internalType":"uint256","name":"infernoPool","type":"uint256"},{"internalType":"uint256","name":"e280Pool","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"devWallet","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"},{"internalType":"address","name":"account","type":"address"},{"internalType":"bool","name":"isBacking","type":"bool"}],"name":"get777Rewards","outputs":[{"internalType":"bool[]","name":"availability","type":"bool[]"},{"internalType":"bool[]","name":"burned","type":"bool[]"},{"internalType":"uint256","name":"infernoPool","type":"uint256"},{"internalType":"uint256","name":"e280Pool","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getCurrentCycle777","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getCurrentE369Cycle","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getNextCyclePools","outputs":[{"internalType":"uint256","name":"infernoPool","type":"uint256"},{"internalType":"uint256","name":"fluxPool","type":"uint256"},{"internalType":"uint256","name":"e280Pool","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"},{"internalType":"address","name":"account","type":"address"},{"internalType":"bool","name":"isBacking","type":"bool"}],"name":"getRewards","outputs":[{"internalType":"bool[]","name":"availability","type":"bool[]"},{"internalType":"bool[]","name":"burned","type":"bool[]"},{"internalType":"uint256","name":"infernoPool","type":"uint256"},{"internalType":"uint256","name":"fluxPool","type":"uint256"},{"internalType":"uint256","name":"e280Pool","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"lastUpdatedCycle","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"minCyclePool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"nftLastBacking","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"nftLastClaim","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"pendingOwner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"infernoAmount","type":"uint256"},{"internalType":"uint256","name":"e280Amount","type":"uint256"}],"name":"register777CycleTokens","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"renounceOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"fluxHub","type":"address"}],"name":"setFluxHub","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"limit","type":"uint256"}],"name":"setMinCyclePool","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"totalTokenPaid","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"totalTokenPool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"updateCycle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint32","name":"cycleId","type":"uint32"},{"internalType":"uint256","name":"totalMultipliers","type":"uint256"}],"name":"updateStoredMultipliers","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint32","name":"cycleId","type":"uint32"},{"internalType":"uint256","name":"totalMultipliers","type":"uint256"},{"internalType":"uint256","name":"multiplierDeduction","type":"uint256"}],"name":"updateStoredMultipliersOnBurn","outputs":[],"stateMutability":"nonpayable","type":"function"}]
+----- ./abi/staxVault.json -----
+
+[{"inputs":[{"internalType":"address","name":"_owner","type":"address"},{"internalType":"address","name":"_stax","type":"address"},{"internalType":"address","name":"_staxBuyBurn","type":"address"},{"internalType":"address","name":"_devWallet","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[{"internalType":"address","name":"target","type":"address"}],"name":"AddressEmptyCode","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"AddressInsufficientBalance","type":"error"},{"inputs":[],"name":"Cooldown","type":"error"},{"inputs":[],"name":"FailedInnerCall","type":"error"},{"inputs":[],"name":"InsufficientBalance","type":"error"},{"inputs":[],"name":"MathOverflowedMulDiv","type":"error"},{"inputs":[],"name":"NoCyclesAvailable","type":"error"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"OwnableInvalidOwner","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"OwnableUnauthorizedAccount","type":"error"},{"inputs":[],"name":"Prohibited","type":"error"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"SafeERC20FailedOperation","type":"error"},{"inputs":[],"name":"T","type":"error"},{"inputs":[],"name":"TWAP","type":"error"},{"inputs":[],"name":"TokenExists","type":"error"},{"inputs":[],"name":"Unauthorized","type":"error"},{"inputs":[],"name":"ZeroAddress","type":"error"},{"inputs":[],"name":"ZeroInput","type":"error"},{"anonymous":false,"inputs":[],"name":"CycleUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferStarted","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"inputs":[],"name":"STAX","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"STAX_BANK","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"STAX_BUY_BURN","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"STAX_DEV","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"STAX_NFT","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"acceptOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"name":"batchClaimRewards","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"claimRewards","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"diamondHandPool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"cycleId","type":"uint256"}],"name":"getCycleDistribution","outputs":[{"internalType":"uint256","name":"bankShare","type":"uint256"},{"internalType":"uint256","name":"buyBurnShare","type":"uint256"},{"internalType":"uint256","name":"genesisShare","type":"uint256"},{"internalType":"uint256","name":"nftHolderShare","type":"uint256"},{"internalType":"uint256","name":"diamondPoolShare","type":"uint256"}],"stateMutability":"pure","type":"function"},{"inputs":[],"name":"getNextCycleTime","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"},{"internalType":"address","name":"account","type":"address"}],"name":"getRewards","outputs":[{"internalType":"bool[]","name":"availability","type":"bool[]"},{"internalType":"uint256","name":"totalPayout","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getTitanXPool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getX28MintStatus","outputs":[{"internalType":"bool","name":"isNativeMint","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getX28Pool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"handleStartPresale","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"incentiveFeeBPS","outputs":[{"internalType":"uint16","name":"","type":"uint16"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"lastClaimed","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"lastCycleMultipliers","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"lastCycleTs","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"maxSwapValue","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"minCyclePool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"pendingOwner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"renounceOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"secondsAgo","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint16","name":"bps","type":"uint16"}],"name":"setIncentiveFee","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"limit","type":"uint256"}],"name":"setMaxSwapValue","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"limit","type":"uint256"}],"name":"setMinCyclePool","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_staxNft","type":"address"},{"internalType":"address","name":"_staxBank","type":"address"}],"name":"setProtocolAddresses","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint32","name":"limit","type":"uint32"}],"name":"setSecondsAgo","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint32","name":"limit","type":"uint32"}],"name":"setTwapDeviation","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint32","name":"limit","type":"uint32"}],"name":"setX28PriceDeviation","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"cycleId","type":"uint256"}],"name":"tokensPerMultiplier","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"user","type":"address"}],"name":"totalClaimed","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"totalRewadsPaid","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"totalRewardPool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"twapDeviation","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"minAmountOut","type":"uint256"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"updateCycle","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"x28Deviation","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"}]
+----- ./abi/staxNFT.json -----
+
+[{"inputs":[{"internalType":"address","name":"_owner","type":"address"},{"internalType":"string","name":"_contractURI","type":"string"},{"internalType":"string","name":"__baseURI","type":"string"},{"internalType":"address","name":"_stax","type":"address"}],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[{"internalType":"address","name":"target","type":"address"}],"name":"AddressEmptyCode","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"AddressInsufficientBalance","type":"error"},{"inputs":[],"name":"ApprovalCallerNotOwnerNorApproved","type":"error"},{"inputs":[],"name":"ApprovalQueryForNonexistentToken","type":"error"},{"inputs":[],"name":"BalanceQueryForZeroAddress","type":"error"},{"inputs":[],"name":"Cooldown","type":"error"},{"inputs":[],"name":"DataQueryForNonexistentToken","type":"error"},{"inputs":[],"name":"FailedInnerCall","type":"error"},{"inputs":[],"name":"IncorrectTier","type":"error"},{"inputs":[],"name":"MintERC2309QuantityExceedsLimit","type":"error"},{"inputs":[],"name":"MintToZeroAddress","type":"error"},{"inputs":[],"name":"MintZeroQuantity","type":"error"},{"inputs":[],"name":"NotCompatibleWithSpotMints","type":"error"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"OwnableInvalidOwner","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"OwnableUnauthorizedAccount","type":"error"},{"inputs":[],"name":"OwnerQueryForNonexistentToken","type":"error"},{"inputs":[],"name":"OwnershipNotInitializedForExtraData","type":"error"},{"inputs":[],"name":"Prohibited","type":"error"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"SafeERC20FailedOperation","type":"error"},{"inputs":[],"name":"SaleInactive","type":"error"},{"inputs":[],"name":"SequentialMintExceedsLimit","type":"error"},{"inputs":[],"name":"SequentialUpToTooSmall","type":"error"},{"inputs":[],"name":"SpotMintTokenIdTooSmall","type":"error"},{"inputs":[],"name":"TWAP","type":"error"},{"inputs":[],"name":"TokenAlreadyExists","type":"error"},{"inputs":[],"name":"TransferCallerNotOwnerNorApproved","type":"error"},{"inputs":[],"name":"TransferFromIncorrectOwner","type":"error"},{"inputs":[],"name":"TransferToNonERC721ReceiverImplementer","type":"error"},{"inputs":[],"name":"TransferToZeroAddress","type":"error"},{"inputs":[],"name":"URIQueryForNonexistentToken","type":"error"},{"inputs":[],"name":"Unauthorized","type":"error"},{"inputs":[],"name":"ZeroAddress","type":"error"},{"inputs":[],"name":"ZeroInput","type":"error"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"approved","type":"address"},{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"operator","type":"address"},{"indexed":false,"internalType":"bool","name":"approved","type":"bool"}],"name":"ApprovalForAll","type":"event"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"uint256","name":"_fromTokenId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"_toTokenId","type":"uint256"}],"name":"BatchMetadataUpdate","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"fromTokenId","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"toTokenId","type":"uint256"},{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"}],"name":"ConsecutiveTransfer","type":"event"},{"anonymous":false,"inputs":[],"name":"ContractURIUpdated","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferStarted","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"previousOwner","type":"address"},{"indexed":true,"internalType":"address","name":"newOwner","type":"address"}],"name":"OwnershipTransferred","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":true,"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"Transfer","type":"event"},{"inputs":[],"name":"STAX","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"STAX_BANK","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"STAX_VAULT","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"acceptOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"approve","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"baseURI","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"name":"batchBurn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"},{"internalType":"address","name":"account","type":"address"}],"name":"batchGetPackedTokenData","outputs":[{"internalType":"uint256[]","name":"data","type":"uint256[]"},{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"name":"batchGetTokenData","outputs":[{"internalType":"uint8[]","name":"tiers","type":"uint8[]"},{"internalType":"uint16[]","name":"multipliers","type":"uint16[]"},{"internalType":"uint32[]","name":"mintCycles","type":"uint32[]"},{"internalType":"uint32[]","name":"burnCycles","type":"uint32[]"},{"internalType":"address[]","name":"burnAddresses","type":"address[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"burn","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"contractURI","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"currentCycle","outputs":[{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"directTransfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getApproved","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getBurnAddress","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getBurnCycle","outputs":[{"internalType":"uint64","name":"","type":"uint64"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getMintCycle","outputs":[{"internalType":"uint64","name":"","type":"uint64"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getMultiplier","outputs":[{"internalType":"uint64","name":"","type":"uint64"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"getNftTier","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"address","name":"account","type":"address"}],"name":"getPackedTokenData","outputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"uint32","name":"","type":"uint32"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"start","type":"uint256"},{"internalType":"uint256","name":"end","type":"uint256"}],"name":"getTotalNftsPerTiers","outputs":[{"internalType":"uint256[]","name":"total","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"address","name":"operator","type":"address"}],"name":"isApprovedForAll","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"isSaleActive","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint8[]","name":"tieredNfts","type":"uint8[]"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"mintWithEth","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"uint8[]","name":"tieredNfts","type":"uint8[]"}],"name":"mintWithTitanX","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"multiplierPool","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"name","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"ownerOf","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"pendingOwner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"presaleEnd","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"renounceOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"safeTransferFrom","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"bytes","name":"_data","type":"bytes"}],"name":"safeTransferFrom","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"address","name":"operator","type":"address"},{"internalType":"bool","name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"string","name":"_uri","type":"string"}],"name":"setBaseURI","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"string","name":"_uri","type":"string"}],"name":"setContractURI","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"setDirectTransfer","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"_staxVault","type":"address"},{"internalType":"address","name":"_staxBank","type":"address"}],"name":"setProtocolAddresses","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"_presaleEnd","type":"uint256"}],"name":"startMint","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes4","name":"interfaceId","type":"bytes4"}],"name":"supportsInterface","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"symbol","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"},{"internalType":"uint256","name":"start","type":"uint256"},{"internalType":"uint256","name":"end","type":"uint256"}],"name":"tokenIdsOf","outputs":[{"internalType":"uint256[]","name":"tokenIds","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"tokenURI","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"totalBurned","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"totalSupply","outputs":[{"internalType":"uint256","name":"result","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"tokenId","type":"uint256"}],"name":"transferFrom","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[{"internalType":"address","name":"newOwner","type":"address"}],"name":"transferOwnership","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"updateCycle","outputs":[{"internalType":"uint32","name":"cycle","type":"uint32"},{"internalType":"uint256","name":"totalMultipliers","type":"uint256"}],"stateMutability":"nonpayable","type":"function"}]
 
 ================= Includes the following files under ./contracts =================
-./contracts/abi.js
-./contracts/config.js
-./contracts/contracts.js
+app/contracts/abi_nft.js
+app/contracts/abi_nft_vault.js
+app/contracts/contracts_auct_mint.js
+app/contracts/contracts_nft.js
 
 
 ================= Includes the following files under ./abi =================
@@ -1448,3 +1465,5 @@ export const uniswapV2PoolABI = [
 ./abi/element280Vault.json
 ./abi/element369.json
 ./abi/element369Vault.json
+./abi/staxVault.json
+./abi/staxNFT.json

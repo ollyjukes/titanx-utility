@@ -1,226 +1,153 @@
-// components/HolderTable.js
-import { memo } from 'react';
-import { motion } from 'framer-motion';
-import { contractTiers } from '@/app/nft-contracts';
+// app/components/HolderTable.js
+'use client';
+import { useState } from 'react';
+import Link from 'next/link';
 
-const rowVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } },
-};
+export default function HolderTable({ holders, contract, loading }) {
+  const [sortConfig, setSortConfig] = useState({ key: 'rank', direction: 'asc' });
+  const [expandedRows, setExpandedRows] = useState({});
 
-function HolderTable({ holders, contract, loading, totalShares, isModal = false }) {
-  const safeHolders = Array.isArray(holders) ? holders.filter(h => h && h.wallet) : [];
-  const isAscendant = contract === 'ascendantNFT';
-  const isElement369 = contract === 'element369';
-  const isStax = contract === 'staxNFT';
-
-  if (!safeHolders.length) {
-    if (loading) {
-      return (
-        <div className="table-container">
-          <table className={`table ${isModal ? 'modal-table' : ''}`}>
-            <thead>
-              <tr className="table-head">
-                <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-                <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
-                <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
-                {isElement369 ? (
-                  <>
-                    <th className="table-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
-                    <th className="table-cell w-[80px] md:w-[120px]">Flux Rewards</th>
-                    <th className="table-cell w-[80px] md:w-[120px]">E280 Rewards</th>
-                  </>
-                ) : (
-                  <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
-                )}
-                {isAscendant ? (
-                  <>
-                    <th className="table-cell w-[80px] md:w-[120px]">% Share of Shares</th>
-                    <th className="table-cell w-[80px] md:w-[120px]">Shares</th>
-                    <th className="table-cell w-[80px] md:w-[120px]">DAY8 Rewards</th>
-                    <th className="table-cell w-[80px] md:w-[120px]">DAY28 Rewards</th>
-                    <th className="table-cell w-[80px] md:w-[120px]">DAY90 Rewards</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
-                    <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
-                    {Object.keys(contractTiers[contract] || {})
-                      .sort((a, b) => b - a)
-                      .map(tier => (
-                        <th key={tier} className="table-cell w-[80px] md:w-[120px]">
-                          {contractTiers[contract][tier].name}
-                        </th>
-                      ))}
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody className="table-body">
-              {Array(5).fill().map((_, i) => (
-                <motion.tr
-                  key={i}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: i * 0.1, duration: 0.5 }}
-                  className="table-pulse"
-                >
-                  <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                  <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                  <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                  {isElement369 ? (
-                    <>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                    </>
-                  ) : (
-                    <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                  )}
-                  {isAscendant ? (
-                    <>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      <td className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      {Object.keys(contractTiers[contract] || {}).map(tier => (
-                        <td key={tier} className="table-cell border-b border-gray-700/30"><div className="table-pulse-placeholder"></div></td>
-                      ))}
-                    </>
-                  )}
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
     }
-    return <div className="text-center text-gray-400 py-4 w-full">No holders found.</div>;
+    setSortConfig({ key, direction });
+  };
+
+  const sortedHolders = [...holders].sort((a, b) => {
+    if (sortConfig.key === 'wallet') {
+      return sortConfig.direction === 'asc'
+        ? a.wallet.localeCompare(b.wallet)
+        : b.wallet.localeCompare(a.wallet);
+    }
+    const aValue = a[sortConfig.key] || 0;
+    const bValue = b[sortConfig.key] || 0;
+    return sortConfig.direction === 'asc' ? aValue - bValue : bValue - aValue;
+  });
+
+  const toggleRow = (wallet) => {
+    setExpandedRows(prev => ({
+      ...prev,
+      [wallet]: !prev[wallet],
+    }));
+  };
+
+  const renderTransactionList = (nfts, type) => (
+    <ul className="list-disc pl-6">
+      {nfts.length === 0 ? (
+        <li>No {type} NFTs</li>
+      ) : (
+        nfts.map((nft, index) => (
+          <li key={index}>
+            Token ID: {nft.tokenId} (
+            <Link
+              href={`https://etherscan.io/tx/${nft.transactionHash}`}
+              target="_blank"
+              className="text-blue-400 hover:underline"
+            >
+              View Tx
+            </Link>
+            ) - {new Date(nft.timestamp).toLocaleString()}
+          </li>
+        ))
+      )}
+    </ul>
+  );
+
+  if (loading) {
+    return <p className="text-gray-400">Loading holders...</p>;
   }
 
-  const tiers = contractTiers[contract];
-  if (!tiers) {
-    return <div className="text-center text-red-500 py-4 w-full">Error: Contract tiers not found for {contract}.</div>;
+  if (!holders || holders.length === 0) {
+    return <p className="text-gray-400">No holders found for this contract.</p>;
   }
 
   return (
-    <div className="table-container">
-      <table className={`table ${isModal ? 'modal-table' : ''}`}>
+    <div className="w-full overflow-x-auto">
+      <table className="min-w-full bg-gray-800 rounded-lg shadow">
         <thead>
-          <tr className="table-head">
-            <th className="table-cell w-[60px] md:w-[80px] rounded-tl-lg">Rank</th>
-            <th className="table-cell w-[120px] md:w-[200px]">Wallet</th>
-            <th className="table-cell w-[80px] md:w-[120px]">Total NFTs</th>
-            {isElement369 ? (
-              <>
-                <th className="table-cell w-[80px] md:w-[120px]">Inferno Rewards</th>
-                <th className="table-cell w-[80px] md:w-[120px]">Flux Rewards</th>
-                <th className="table-cell w-[80px] md:w-[120px]">E280 Rewards</th>
-              </>
-            ) : (
-              <th className="table-cell w-[80px] md:w-[120px]">Claimable Rewards</th>
-            )}
-            {isAscendant ? (
-              <>
-                <th className="table-cell w-[80px] md:w-[120px]">% Share of Shares</th>
-                <th className="table-cell w-[80px] md:w-[120px]">Shares</th>
-                <th className="table-cell w-[80px] md:w-[120px]">DAY8 Rewards</th>
-                <th className="table-cell w-[80px] md:w-[120px]">DAY28 Rewards</th>
-                <th className="table-cell w-[80px] md:w-[120px]">DAY90 Rewards</th>
-              </>
-            ) : (
-              <>
-                <th className="table-cell w-[80px] md:w-[120px]">Reward %</th>
-                <th className="table-cell w-[80px] md:w-[120px]">Total Multiplier</th>
-                {Object.keys(tiers)
-                  .sort((a, b) => b - a)
-                  .map(tier => (
-                    <th key={tier} className="table-cell w-[80px] md:w-[120px]">
-                      {tiers[tier].name}
-                    </th>
-                  ))}
-              </>
-            )}
+          <tr className="text-left text-gray-300">
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('rank')}>
+              Rank {sortConfig.key === 'rank' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('wallet')}>
+              Wallet {sortConfig.key === 'wallet' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('total')}>
+              Total NFTs {sortConfig.key === 'total' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('multiplierSum')}>
+              Multiplier {sortConfig.key === 'multiplierSum' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('percentage')}>
+              % of Pool {sortConfig.key === 'percentage' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('buyCount')}>
+              Buys {sortConfig.key === 'buyCount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('sellCount')}>
+              Sells {sortConfig.key === 'sellCount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4 cursor-pointer" onClick={() => requestSort('burnCount')}>
+              Burns {sortConfig.key === 'burnCount' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+            </th>
+            <th className="p-4">Details</th>
           </tr>
         </thead>
-        <tbody className="table-body">
-          {safeHolders.map((holder, index) => (
-            <motion.tr
-              key={holder.wallet}
-              variants={rowVariants}
-              initial="hidden"
-              animate="visible"
-              whileHover={{ scale: 1.02 }}
-              transition={{ delay: index * 0.05 }}
-              className={`table-row ${index % 2 === 0 ? 'table-row-even' : 'table-row-odd'}`}
-            >
-              <td className="table-cell border-b border-gray-700/30">{holder.rank}</td>
-              <td className="table-cell border-b border-gray-700/30">
-                <a
-                  href={`https://etherscan.io/address/${holder.wallet}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="table-link"
-                >
-                  {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
-                </a>
-              </td>
-              <td className="table-cell border-b border-gray-700/30">{holder.total}</td>
-              {isElement369 ? (
-                <>
-                  <td className="table-cell border-b border-gray-700/30">
-                    {Math.floor(holder.infernoRewards).toLocaleString()}
-                  </td>
-                  <td className="table-cell border-b border-gray-700/30">
-                    {Math.floor(holder.fluxRewards).toLocaleString()}
-                  </td>
-                  <td className="table-cell border-b border-gray-700/30">
-                    {Math.floor(holder.e280Rewards).toLocaleString()}
-                  </td>
-                </>
-              ) : (
-                <td className="table-cell border-b border-gray-700/30">
-                  {(isStax || isAscendant
-                    ? Math.floor(holder.claimableRewards)
-                    : holder.claimableRewards.toFixed(2)
-                  ).toLocaleString()}
+        <tbody>
+          {sortedHolders.map((holder) => (
+            <React.Fragment key={holder.wallet}>
+              <tr className="border-t border-gray-700 hover:bg-gray-700">
+                <td className="p-4">{holder.rank}</td>
+                <td className="p-4">
+                  <Link
+                    href={`https://etherscan.io/address/${holder.wallet}`}
+                    target="_blank"
+                    className="text-blue-400 hover:underline"
+                  >
+                    {holder.wallet.slice(0, 6)}...{holder.wallet.slice(-4)}
+                  </Link>
                 </td>
-              )}
-              {isAscendant ? (
-                <>
-                  <td className="table-cell border-b border-gray-700/30">
-                    {totalShares ? ((holder.shares / totalShares) * 100).toFixed(2) : '0.00'}%
+                <td className="p-4">{holder.total}</td>
+                <td className="p-4">{holder.displayMultiplierSum || (holder.multiplierSum / 10)}</td>
+                <td className="p-4">{holder.percentage.toFixed(2)}%</td>
+                <td className="p-4">{holder.buyCount}</td>
+                <td className="p-4">{holder.sellCount}</td>
+                <td className="p-4">{holder.burnCount}</td>
+                <td className="p-4">
+                  <button
+                    onClick={() => toggleRow(holder.wallet)}
+                    className="text-blue-400 hover:underline"
+                  >
+                    {expandedRows[holder.wallet] ? 'Hide' : 'Show'}
+                  </button>
+                </td>
+              </tr>
+              {expandedRows[holder.wallet] && (
+                <tr>
+                  <td colSpan="9" className="p-4 bg-gray-900">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <h4 className="font-semibold">Bought NFTs</h4>
+                        {renderTransactionList(holder.boughtNfts, 'bought')}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">Sold NFTs</h4>
+                        {renderTransactionList(holder.soldNfts, 'sold')}
+                      </div>
+                      <div>
+                        <h4 className="font-semibold">Burned NFTs</h4>
+                        {renderTransactionList(holder.burnedNfts, 'burned')}
+                      </div>
+                    </div>
                   </td>
-                  <td className="table-cell border-b border-gray-700/30">{Math.floor(holder.shares).toLocaleString()}</td>
-                  <td className="table-cell border-b border-gray-700/30">{Math.floor(holder.pendingDay8).toLocaleString()}</td>
-                  <td className="table-cell border-b border-gray-700/30">{Math.floor(holder.pendingDay28).toLocaleString()}</td>
-                  <td className="table-cell border-b border-gray-700/30">{Math.floor(holder.pendingDay90).toLocaleString()}</td>
-                </>
-              ) : (
-                <>
-                  <td className="table-cell border-b border-gray-700/30">{holder.percentage.toFixed(2)}%</td>
-                  <td className="table-cell border-b border-gray-700/30">{holder.multiplierSum.toFixed(2)}</td>
-                  {Object.keys(tiers)
-                    .sort((a, b) => b - a)
-                    .map(tier => (
-                      <td key={tier} className="table-cell border-b border-gray-700/30">
-                        {holder.tiers?.[tier] || 0}
-                      </td>
-                    ))}
-                </>
+                </tr>
               )}
-            </motion.tr>
+            </React.Fragment>
           ))}
         </tbody>
       </table>
     </div>
   );
 }
-
-export default memo(HolderTable);

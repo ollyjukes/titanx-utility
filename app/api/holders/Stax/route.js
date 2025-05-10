@@ -1,187 +1,86 @@
-// app/api/holders/Stax/route.js
+// app/api/holders/stax/route.js
 import { NextResponse } from 'next/server';
-import { contractDetails, nftContracts } from '../../../nft-contracts';
-import { client, alchemy, cache, CACHE_TTL, log, batchMulticall, staxNFTAbi, staxVaultAbi } from '../../utils';
+import { getAllHolders, getHolderData } from '@/app/api/holders/shared';
+import { logger } from '@/app/lib/logger';
+import config from '@/app/contracts_nft';
+import { getContractAbi } from '@/app/contracts_nft';
+import { HoldersResponseSchema } from '@/app/lib/schemas';
 
-const contractAddress = nftContracts.staxNFT.address;
-const vaultAddress = nftContracts.staxNFT.vaultAddress;
-const tiersConfig = nftContracts.staxNFT.tiers;
+const contractKey = 'stax';
+const contractConfig = config.nftContracts[contractKey];
+
+async function preWarmCache() {
+  logger.info('stax', 'Starting pre-warm cache', 'ETH', contractKey);
+  try {
+    if (!contractConfig?.contractAddress) throw new Error('Stax contract address not found');
+    await getAllHolders(
+      contractKey,
+      contractConfig.contractAddress,
+      contractConfig.vaultAddress,
+      getContractAbi(contractKey, 'vault'),
+      config.contractTiers[contractKey].tierOrder.reduce((acc, t) => ({
+        ...acc,
+        [t.tierId]: { multiplier: contractConfig.tiers[t.tierId].multiplier },
+      }), {}),
+      0,
+      1000
+    );
+    logger.info('stax', 'Pre-warm cache completed', 'ETH', contractKey);
+  } catch (err) {
+    logger.error('stax', `Pre-warm cache failed: ${err.message}`, { stack: err.stack }, 'ETH', contractKey);
+  }
+}
+
+preWarmCache().catch(err => logger.error('stax', `Pre-warm cache init failed: ${err.message}`, { stack: err.stack }, 'ETH', contractKey));
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const page = parseInt(searchParams.get('page') || '0');
-  const pageSize = parseInt(searchParams.get('pageSize') || '1000');
   const wallet = searchParams.get('wallet');
+  const page = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
+  const pageSize = Math.max(1, Math.min(1000, parseInt(searchParams.get('pageSize') || '1000', 10)));
 
-  log(`[Stax] Request: page=${page}, pageSize=${pageSize}, wallet=${wallet}`);
+  if (!contractConfig?.contractAddress) {
+    logger.error('stax', 'Contract address not found', {}, 'ETH', contractKey);
+    return NextResponse.json({ error: 'Stax contract address not found' }, { status: 400 });
+  }
 
   try {
-    if (!contractAddress || !vaultAddress) {
-      throw new Error('Stax contract or vault address missing');
+    if (wallet) {
+      const holderData = await getHolderData(
+        contractKey,
+        contractConfig.contractAddress,
+        wallet,
+        config.contractTiers[contractKey].tierOrder.reduce((acc, t) => ({
+          ...acc,
+          [t.tierId]: { multiplier: contractConfig.tiers[t.tierId].multiplier },
+        }), {}),
+        contractConfig.vaultAddress,
+        getContractAbi(contractKey, 'vault')
+      );
+      const response = { holders: holderData ? [holderData] : [], totalPages: 1, totalTokens: holderData?.total || 0, totalBurned: 0, summary: {}, contractKey };
+      HoldersResponseSchema.parse(response);
+      logger.info('stax', `GET wallet=${wallet} succeeded: ${holderData ? 1 : 0} holders`, 'ETH', contractKey);
+      return NextResponse.json(response);
     }
 
-    const cacheKey = `stax_holders_${page}_${pageSize}_${wallet || 'all'}`;
-    if (cache[cacheKey] && Date.now() - cache[cacheKey].timestamp < CACHE_TTL) {
-      log(`[Stax] Cache hit: ${cacheKey}`);
-      return NextResponse.json(cache[cacheKey].data);
-    }
-    log(`[Stax] Cache miss: ${cacheKey}`);
-
-    // Fetch owners
-    const ownersResponse = await alchemy.nft.getOwnersForContract(contractAddress, {
-      block: 'latest',
-      withTokenBalances: true,
-    });
-    log(`[Stax] Owners fetched: ${ownersResponse.owners.length}`);
-
-    const burnAddresses = [
-      '0x0000000000000000000000000000000000000000',
-      '0x000000000000000000000000000000000000dead',
-    ];
-    const filteredOwners = ownersResponse.owners.filter(
-      owner => !burnAddresses.includes(owner.ownerAddress.toLowerCase()) && owner.tokenBalances.length > 0
-    );
-    log(`[Stax] Live owners: ${filteredOwners.length}`);
-
-    // Build token-to-owner map
-    const tokenOwnerMap = new Map();
-    const ownerTokens = new Map();
-    let totalTokens = 0;
-    filteredOwners.forEach(owner => {
-      const wallet = owner.ownerAddress.toLowerCase();
-      const tokenIds = owner.tokenBalances.map(tb => BigInt(tb.tokenId));
-      tokenIds.forEach(tokenId => {
-        tokenOwnerMap.set(tokenId, wallet);
-        totalTokens++;
-      });
-      ownerTokens.set(wallet, tokenIds);
-    });
-    log(`[Stax] Total tokens: ${totalTokens}`);
-
-    // Paginate
-    const allTokenIds = Array.from(tokenOwnerMap.keys());
-    const start = page * pageSize;
-    const end = Math.min(start + pageSize, allTokenIds.length);
-    const paginatedTokenIds = allTokenIds.slice(start, end);
-    log(`[Stax] Paginated tokens: ${paginatedTokenIds.length}`);
-
-    // Fetch tiers
-    const tierCalls = paginatedTokenIds.map(tokenId => ({
-      address: contractAddress,
-      abi: staxNFTAbi,
-      functionName: 'getNftTier',
-      args: [tokenId],
-    }));
-    const tierResults = await batchMulticall(tierCalls);
-    log(`[Stax] Tiers fetched for ${tierResults.length} tokens`);
-
-    // Build holders
-    const maxTier = Math.max(...Object.keys(tiersConfig).map(Number));
-    const holdersMap = new Map();
-
-    tierResults.forEach((result, i) => {
-      if (result?.status === 'success') {
-        const tokenId = paginatedTokenIds[i];
-        const wallet = tokenOwnerMap.get(tokenId);
-        const tier = Number(result.result);
-
-        if (tier >= 1 && tier <= maxTier && wallet) {
-          if (!holdersMap.has(wallet)) {
-            holdersMap.set(wallet, {
-              wallet,
-              total: 0,
-              multiplierSum: 0,
-              tiers: Array(maxTier + 1).fill(0),
-              claimableRewards: 0,
-            });
-          }
-          const holder = holdersMap.get(wallet);
-          holder.total += 1;
-          holder.multiplierSum += tiersConfig[tier]?.multiplier || 0;
-          holder.tiers[tier] += 1;
-        } else {
-          log(`[Stax] Invalid tier ${tier} for token ${tokenId}`);
-        }
-      } else {
-        log(`[Stax] Tier fetch failed for token ${paginatedTokenIds[i]}: ${result?.error || 'Unknown'}`);
-      }
-    });
-
-    // Fetch rewards
-    const holders = Array.from(holdersMap.values());
-    const rewardCalls = holders.map(holder => {
-      const tokenIds = ownerTokens.get(holder.wallet) || [];
-      return {
-        address: vaultAddress,
-        abi: staxVaultAbi,
-        functionName: 'getRewards',
-        args: [tokenIds, holder.wallet],
-      };
-    });
-
-    const totalRewardPoolCall = {
-      address: vaultAddress,
-      abi: staxVaultAbi,
-      functionName: 'totalRewardPool',
-      args: [],
-    };
-
-    log(`[Stax] Fetching rewards for ${holders.length} holders`);
-    const [rewardResults, totalRewardPoolResult] = await Promise.all([
-      rewardCalls.length ? batchMulticall(rewardCalls) : [],
-      batchMulticall([totalRewardPoolCall]),
-    ]);
-
-    const totalRewardPool = totalRewardPoolResult[0]?.status === 'success'
-      ? Number(totalRewardPoolResult[0].result) / 1e18
-      : 0;
-
-    holders.forEach((holder, i) => {
-      if (rewardResults[i]?.status === 'success' && rewardResults[i].result) {
-        const [, totalPayout] = rewardResults[i].result;
-        holder.claimableRewards = Number(totalPayout) / 1e18;
-        log(
-          `[Stax] Rewards for ${holder.wallet.slice(0, 6)}...: ` +
-          `Claimable=${holder.claimableRewards.toFixed(4)}, ` +
-          `Tokens=${ownerTokens.get(holder.wallet).length}`
-        );
-        if (holder.claimableRewards === 0) {
-          log(`[Stax] Zero rewards for ${holder.wallet}: Tokens=${ownerTokens.get(holder.wallet).join(',')}`);
-        }
-      } else {
-        holder.claimableRewards = 0;
-        log(`[Stax] Reward fetch failed for ${holder.wallet.slice(0, 6)}...: ${rewardResults[i]?.error || 'Unknown'}`);
-      }
-      holder.percentage = totalRewardPool ? (holder.claimableRewards / totalRewardPool) * 100 : 0;
-      holder.rank = 0;
-    });
-
-    // Calculate ranks
-    holders.sort((a, b) => b.multiplierSum - a.multiplierSum || b.total - a.total);
-    holders.forEach((holder, index) => {
-      holder.rank = index + 1;
-    });
-
-    const response = {
-      holders,
-      totalTokens,
+    const result = await getAllHolders(
+      contractKey,
+      contractConfig.contractAddress,
+      contractConfig.vaultAddress,
+      getContractAbi(contractKey, 'vault'),
+      config.contractTiers[contractKey].tierOrder.reduce((acc, t) => ({
+        ...acc,
+        [t.tierId]: { multiplier: contractConfig.tiers[t.tierId].multiplier },
+      }), {}),
       page,
-      pageSize,
-      totalPages: Math.ceil(totalTokens / pageSize),
-    };
-    cache[cacheKey] = { data: response, timestamp: Date.now() };
-    log(`[Stax] Success: ${holders.length} holders`);
+      pageSize
+    );
 
-    return NextResponse.json(response);
+    HoldersResponseSchema.parse(result);
+    logger.info('stax', `GET succeeded: ${result.holders.length} holders`, 'ETH', contractKey);
+    return NextResponse.json(result);
   } catch (error) {
-    log(`[Stax] Error: ${error.message}`);
-    console.error('[Stax] Error stack:', error.stack);
-    let status = 500;
-    let message = 'Failed to fetch Stax data';
-    if (error.message.includes('Rate limit')) {
-      status = 429;
-      message = 'Alchemy rate limit exceeded';
-    }
-    return NextResponse.json({ error: message, details: error.message }, { status });
+    logger.error('stax', `GET failed: ${error.message}`, { stack: err.stack }, 'ETH', contractKey);
+    return NextResponse.json({ error: `Server error: ${error.message}` }, { status: 500 });
   }
 }

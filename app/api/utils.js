@@ -3,18 +3,6 @@ import { createPublicClient, http, parseAbi } from 'viem';
 import { mainnet } from 'viem/chains';
 import { Alchemy, Network } from 'alchemy-sdk';
 
-// Shared cache for routes that import it
-export const cache = {};
-
-// Import all ABI JSON files using @ notation
-import staxNFTAbi from '@/abi/staxNFT.json';
-import element369Abi from '@/abi/element369.json';
-import element369VaultAbi from '@/abi/element369Vault.json';
-import staxVaultAbi from '@/abi/staxVault.json';
-import ascendantNFTAbi from '@/abi/ascendantNFT.json';
-import element280Abi from '@/abi/element280.json';
-import element280VaultAbi from '@/abi/element280Vault.json';
-
 export const alchemy = new Alchemy({
   apiKey: process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || (() => { throw new Error('Alchemy API key missing'); })(),
   network: Network.ETH_MAINNET,
@@ -45,37 +33,6 @@ export const ascendantAbi = parseAbi([
   'error NonExistentToken(uint256 tokenId)',
 ]);
 
-// Export all ABIs
-export {
-  staxNFTAbi,
-  element369Abi,
-  element369VaultAbi,
-  staxVaultAbi,
-  ascendantNFTAbi,
-  element280Abi,
-  element280VaultAbi,
-};
-
-export const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
 export function log(message) {
   console.log(`[PROD_DEBUG] ${message}`);
-}
-
-export async function batchMulticall(calls, batchSize = 50) {
-  log(`batchMulticall: Processing ${calls.length} calls in batches of ${batchSize}`);
-  const results = [];
-  for (let i = 0; i < calls.length; i += batchSize) {
-    const batch = calls.slice(i, i + batchSize);
-    try {
-      const batchResults = await client.multicall({ contracts: batch });
-      results.push(...batchResults);
-      log(`batchMulticall: Batch ${i}-${i + batchSize - 1} completed with ${batchResults.length} results`);
-    } catch (error) {
-      console.error(`[PROD_ERROR] batchMulticall failed for batch ${i}-${i + batchSize - 1}: ${error.message}`);
-      results.push(...batch.map(() => ({ status: 'failure', result: null })));
-    }
-  }
-  log(`batchMulticall: Completed with ${results.length} results`);
-  return results;
 }
